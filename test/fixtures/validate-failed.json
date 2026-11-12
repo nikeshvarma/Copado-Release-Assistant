@@ -1,0 +1,48 @@
+{
+  "status": 1,
+  "name": "FailedValidationError",
+  "message": "Failed to validate the deployment (0Af8d00000AbCdEF).",
+  "exitCode": 1,
+  "data": {
+    "checkOnly": true,
+    "id": "0Af8d00000AbCdEF",
+    "numberComponentErrors": 4,
+    "status": "Failed",
+    "success": false,
+    "details": {
+      "componentFailures": [
+        { "changed": false, "componentType": "PermissionSet", "created": false, "deleted": false,
+          "fileName": "unpackaged/permissionsets/ACME_PermissionSet_14.permissionset",
+          "fullName": "ACME_PermissionSet_14", "lineNumber": "412", "columnNumber": "13",
+          "problem": "In field: field - no CustomField named ACME_Object_02__c.ACME_Field_101__c found",
+          "problemType": "Error", "success": false },
+        { "componentType": "PermissionSet",
+          "fileName": "unpackaged/permissionsets/ACME_PermissionSet_14.permissionset",
+          "fullName": "ACME_PermissionSet_14", "lineNumber": "88",
+          "problem": "In field: apexClass - no ApexClass named ACME_EInvoiceService found",
+          "problemType": "Error", "success": false },
+        { "componentType": "CustomField",
+          "fileName": "unpackaged/objects/Invoice.object",
+          "fullName": "Invoice.TotalAmount",
+          "problem": "Cannot modify managed object: entity=CustomFieldDefinition",
+          "problemType": "Error", "success": false },
+        { "componentType": "PermissionSet",
+          "fileName": "unpackaged/permissionsets/ACME_PermissionSet_14.permissionset",
+          "fullName": "ACME_PermissionSet_14",
+          "problem": "Permission ViewSetup depends on permission(s): ViewRoles",
+          "problemType": "Error", "success": false }
+      ],
+      "runTestResult": {
+        "numFailures": 1, "numTestsRun": 6,
+        "failures": [
+          { "name": "ACME_Service01Test", "methodName": "testInsert",
+            "message": "System.AssertException: Assertion Failed: Expected: 2, Actual: 1",
+            "stackTrace": "Class.ACME_Service01Test.testInsert: line 41, column 1" }
+        ],
+        "codeCoverageWarnings": [
+          { "name": "ACME_Service02", "message": "Test coverage of selected Apex Class is 61%, at least 75% test coverage is required" }
+        ]
+      }
+    }
+  }
+}

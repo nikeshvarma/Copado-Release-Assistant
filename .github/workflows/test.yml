@@ -1,0 +1,41 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 20]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: git config --global user.email "ci@example.com" && git config --global user.name "CI"
+      - run: npm test
+
+  vscode:
+    # the extension inside a real VS Code
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save @vscode/test-electron@^2.4.1
+      - name: integration tests (Linux needs a virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:vscode
+      - name: integration tests
+        if: runner.os != 'Linux'
+        run: npm run test:vscode

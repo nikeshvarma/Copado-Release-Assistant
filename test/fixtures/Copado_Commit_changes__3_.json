@@ -1,0 +1,266 @@
+[
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_083__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_084__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_085__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_086__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_087__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_088__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_089__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_090__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_091__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_092__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_093__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_094__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_095__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_096__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_097__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_098__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_099__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_100__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_101__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_102__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_103__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_104__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_105__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_106__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_107__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_108__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_109__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_110__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_111__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomObject",
+        "n": "ACME_Object_02__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_112__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_02__c.ACME_Field_113__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "RetrieveOnly"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_14",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    }
+]

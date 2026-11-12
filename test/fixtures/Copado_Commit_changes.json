@@ -1,0 +1,202 @@
+[
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_03",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_04",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_05",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_06",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_07",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_08",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_09",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_10",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_11",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_12",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_13",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_Integration_PS_01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_Integration_PS_02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "FlexiPage",
+        "n": "ACME_FlexiPage_01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "FlexiPage",
+        "n": "ACME_FlexiPage_02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Layout",
+        "n": "QuoteLineItem-ACME Layout 01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Product2.ACME_Field_001__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "QuoteLineItem.ACME_Field_001__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Product2.ACME_Field_002__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "RecordType",
+        "n": "Product2.ACME_RecordType_01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "RecordType",
+        "n": "Product2.ACME_RecordType_02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "ContextDefinition",
+        "n": "ACME_ContextDefinition_01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "ContextDefinition",
+        "n": "ACME_ContextDefinition_02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    }
+]

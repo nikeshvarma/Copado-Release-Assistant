@@ -1,0 +1,978 @@
+[
+    {
+        "t": "CustomField",
+        "n": "Invoice.InvoiceNumber",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalAmountWithTax",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalAdjustmentAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalTaxAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.Status",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.InvoiceDate",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.DueDate",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.Description",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.Balance",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalChargeTaxAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalChargeAmountWithTax",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalAdjustmentTaxAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.TotalAdjustmentAmountWithTax",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.NetCreditsApplied",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.NetPaymentsApplied",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.DaysInvoiceOverdue",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.DaysInvoiceOpen",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.PostedDate",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.IsInvoiceLocked",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.WriteOffStatus",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.WriteOffTotalChargeAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.WriteOffTotalTaxAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.LastEmailDispatchStatus",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.CreditInvoiceTaxDocNumber",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.DebitInvoiceTaxDocNumber",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_003__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_004__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_005__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_006__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_007__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_008__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_009__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_010__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_011__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_012__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_013__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_014__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_015__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_016__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_017__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_018__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_019__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_020__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_021__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_022__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_023__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_024__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_025__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_026__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_027__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_028__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_029__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_030__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_031__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_032__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_033__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "Invoice.ACME_Field_034__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.AdjustmentAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.AdjustmentAmountWithTax",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.AdjustmentTaxAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.Balance",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.BillingAddressId",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.BillingScheduleGroupId",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.BillingScheduleId",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ChargeAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ChargeAmountWithTax",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ChargeConvertedNegAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ChargeTaxAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ConvertedNegAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.Description",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.InvoiceId",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.InvoiceLineEndDate",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.InvoiceLineStartDate",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.LineAmount",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.Name",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.NetCreditsApplied",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.NetPaymentsApplied",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_035__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_036__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_004__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_037__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_038__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_039__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_040__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_041__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_042__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_043__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_044__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_014__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_045__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_046__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_047__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_048__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_049__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_050__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_051__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_052__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_053__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_054__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_055__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_056__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_057__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_058__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_028__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_059__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_060__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ACME_Field_061__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.Product2Id",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.Quantity",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ReferenceEntityItemType",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ReferenceEntityItemTypeCode",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.ReferenceEntityItemId",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLine.RelatedLineId",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_14",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_15",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "FlexiPage",
+        "n": "ACME_FlexiPage_03",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "FlexiPage",
+        "n": "ACME_FlexiPage_04",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Layout",
+        "n": "Invoice-ACME Layout 02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Layout",
+        "n": "InvoiceLine-ACME Layout 03",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Profile",
+        "n": "%5BN%5D ACME Profile 01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_01.OrderNumber",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    }
+]

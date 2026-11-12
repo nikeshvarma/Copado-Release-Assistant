@@ -1,0 +1,6 @@
+.github/**
+test/**
+.gitignore
+.vscodeignore
+CONTRIBUTING.md
+**/*.map

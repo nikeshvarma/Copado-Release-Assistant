@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Unsorted</label>
+    <hasActivationRequired>false</hasActivationRequired>
+    <fieldPermissions>
+        <editable>false</editable>
+        <field>Account.Account_Field__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>false</editable>
+        <field>Account.APP_Field__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>false</editable>
+        <field>Account.APP_Field__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <description>Fixture for the integration tests</description>
+    <classAccesses>
+        <apexClass>Some_Class</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+</PermissionSet>

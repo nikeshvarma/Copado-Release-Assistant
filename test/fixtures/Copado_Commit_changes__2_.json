@@ -1,0 +1,402 @@
+[
+    {
+        "t": "ApexClass",
+        "n": "ACME_Service01Test",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_015__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_062__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_063__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_064__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_065__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_066__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_067__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_068__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_069__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_070__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_071__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_072__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_073__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "CreditMemoLineTax.ACME_Field_074__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "FlexiPage",
+        "n": "ACME_FlexiPage_05",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Layout",
+        "n": "InvoiceLineTax-ACME Layout 04",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Layout",
+        "n": "CreditMemoLine-Credit Memo Line Layout",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_16",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_14",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_15",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "PermissionSet",
+        "n": "ACME_PermissionSet_06",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "ApexClass",
+        "n": "ACME_Service02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "ApexClass",
+        "n": "ACME_Service02Test",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "ApexClass",
+        "n": "ACME_Service01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomObject",
+        "n": "ACME_Object_01__mdt",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_01__mdt.ACME_Field_075__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_01__mdt.ACME_Field_076__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_01__mdt.ACME_Field_077__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_01__mdt.ACME_Field_078__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_01__mdt.ACME_Field_079__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "ACME_Object_01__mdt.ACME_Field_080__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "Layout",
+        "n": "ACME_Object_01__mdt-ACME Layout 05",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_01",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_02",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_03",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_04",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_05",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_06",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_07",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_08",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_09",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_10",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_11",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_12",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_13",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomMetadata",
+        "n": "ACME_Mapping_02.Record_14",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLineTax.ACME_Field_015__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLineTax.ACME_Field_081__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    },
+    {
+        "t": "CustomField",
+        "n": "InvoiceLineTax.ACME_Field_082__c",
+        "m": "",
+        "j": "",
+        "c": "SFDX",
+        "a": "Add"
+    }
+]

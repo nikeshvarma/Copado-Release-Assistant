@@ -1,0 +1,13 @@
+[
+  {"t":"QuickAction","n":"Account.ACME_New_Opportunity_Correction","m":"","j":"","c":"SFDX","a":"Add"},
+  {"t":"FlexiPage","n":"ACME_Account_Record_Page","m":"","j":"{\"selectiveCommitFileId\":\"068000000000001AAA\",\"selectiveCommitHash\":\"RmxleGlQYWdlOkFDTUVfQWNjb3VudF9SZWNvcmRfUGFnZQ==\"}","c":"SFDX","a":"SelectiveCommit"},
+  {"t":"Layout","n":"Account-ACME Account Layout","m":"","j":"{\"selectiveCommitFileId\":\"068000000000002AAA\",\"selectiveCommitHash\":\"TGF5b3V0OkFjY291bnQtQUNNRSBBY2NvdW50IExheW91dA==\"}","c":"SFDX","a":"SelectiveCommit"},
+  {"t":"CustomPermission","n":"ACME_Opportunity_Correction","m":"","j":"","c":"SFDX","a":"Add"},
+  {"t":"RecordType","n":"Opportunity.ACME_Correction","m":"","j":"","c":"SFDX","a":"Add"},
+  {"t":"CustomField","n":"Opportunity.AccountId","m":"","j":"","c":"SFDX","a":"RetrieveOnly"},
+  {"t":"CustomField","n":"Opportunity.Amount","m":"","j":"","c":"SFDX","a":"RetrieveOnly"},
+  {"t":"CustomField","n":"Opportunity.ACME_Sub_Stage__c","m":"","j":"","c":"SFDX","a":"RetrieveOnly"},
+  {"t":"CustomObject","n":"Opportunity","m":"","j":"","c":"SFDX","a":"RetrieveOnly"},
+  {"t":"PermissionSet","n":"ACME_Data_Migration_PS","m":"","j":"","c":"SFDX","a":"Add"},
+  {"t":"PermissionSet","n":"ACME_Correction_PS","m":"","j":"","c":"SFDX","a":"Add"}
+]
