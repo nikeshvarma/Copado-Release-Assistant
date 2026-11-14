@@ -30,7 +30,9 @@ if (!tracked || !tracked.length) {
   });
   tracked = walk('').filter(f => !/(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$|\.vsix$/.test(f));
 }
-const files = tracked.filter(f => !ignore.some(r => r.test(f)) && fs.existsSync(path.join(root, f))).sort();
+// never what the project has removed, nor a README picture the README does not show - whatever a clone still holds
+const ship = require('./ship').keep(root);
+const files = tracked.filter(f => !ignore.some(r => r.test(f)) && ship(f) && fs.existsSync(path.join(root, f))).sort();
 
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const manifest = `<?xml version="1.0" encoding="utf-8"?>

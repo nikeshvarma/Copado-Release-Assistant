@@ -1,0 +1,30 @@
+# Files this project has removed. Unzipping a new source over a clone never deletes them, so they may still be
+# there: the package leaves them out, and `npm run tidy` deletes them - commit that.
+media/readme/banner.png
+media/readme/branch-conflicts.png
+media/readme/checks-as-you-type.png
+media/readme/copado-actions.png
+media/readme/deploy-check.png
+media/readme/generate-package.png
+media/readme/home.png
+media/readme/how-it-works.png
+media/readme/live-log.png
+media/readme/live-output.png
+media/readme/merge-base.png
+media/readme/merge-editor-duplicate.png
+media/readme/merge-editor-feature.png
+media/readme/merge-editor-hidden.png
+media/readme/merge.png
+media/readme/preflight.png
+media/readme/project-layout.png
+media/readme/promotion-flow.png
+media/readme/section-order.png
+media/readme/settings-overview.png
+media/readme/settings.png
+media/readme/validate-pickers.png
+media/readme/validation-steps.png
+quickMerge.js
+scripts/readme-images.js
+src/drift.js
+src/liveMarks.js
+treeView.js

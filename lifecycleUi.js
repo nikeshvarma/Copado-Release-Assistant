@@ -51,6 +51,8 @@ async function act(name, p) {
     switch (name) {
       case 'story.open': await openStory(String(x.ref || '').trim()); break;
       case 'story.validate': if (life.story.journey) await h.validateFromBranch(life.story.journey.story.name); break;
+      case 'story.package': if (life.story.journey && h.prepareStory) await h.prepareStory(life.story.journey.story.name); break;
+      case 'story.report': if (life.story.journey && h.inspectStory) await h.inspectStory(life.story.journey.story.name); break;
       default: return;
     }
   } finally {

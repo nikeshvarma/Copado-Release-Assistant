@@ -1,6 +1,7 @@
 'use strict';
 
 const vscode = require('vscode');
+const manual = require('./manualUi');
 const path = require('path');
 const fs = require('fs');
 const manifest = require('./src/manifest');
@@ -70,17 +71,19 @@ function activate(context, d) {
   cmd('cmr.validate.openFailure', cmdOpenFailure);
   cmd('cmr.validate.copyErrors', cmdCopyErrors);
   cmd('cmr.policy.create', cmdCreatePolicy);
-  cmd('cmr.copado.inspect', cmdInspectStory);
-  cmd('cmr.copado.prepare', cmdPrepareStory);
+  cmd('cmr.copado.inspect', () => cmdInspectStory());
+  cmd('cmr.copado.prepare', () => cmdPrepareStory());
   cmd('cmr.repo.connect', cmdConnectRepo);
   cmd('cmr.repo.forget', cmdForgetRepo);
   cmd('cmr.repo.validateStory', () => validateFromBranch());
   const helpers = { output, deps, rc, cmd, requireTrust, projectRoot, apiVersion, copadoApi, cmdValidate, runBranchCheck, orgForEnvironment, orgList, sfcli, needCopado,
-    credentialsFor, validatePromotionBranch, validateFromBranch, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
+    credentialsFor, validatePromotionBranch, validateFromBranch, prepareStory: cmdPrepareStory, inspectStory: cmdInspectStory, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
   exported.helpers = helpers;
   require('./promotionUi').activate(context, helpers);
   require('./lifecycleUi').activate(context, helpers);
-  require('./releasePage').activate(context, require('./promotionUi'), require('./lifecycleUi'), cmd);
+  const page = require('./releasePage');
+  manual.activate(context, { startSession: (...a) => deps.startSession(...a), generatePackage, storageDir: sub => deps.storageDir(sub), showPage: nav => page.show(nav) }, cmd);
+  page.activate(context, require('./promotionUi'), require('./lifecycleUi'), cmd, manual);
   cmd('cmr.validate.clear', () => {
     state.validation = null;
     deployDiagnostics.clear();
@@ -307,7 +310,8 @@ async function cmdCreatePolicy() {
  * Phase 0: a read-only report of what the Copado org holds for one user story,
  * written to .copado/inspect/ and opened. Nothing in Copado is changed.
  */
-async function cmdInspectStory() {
+/** The report of what Copado holds about a story - for the story on the page, or one asked for. */
+async function cmdInspectStory(storyInput) {
   requireTrust('Inspecting Copado runs the Salesforce CLI');
   const c = rc();
   if (!c.copadoOrg) {
@@ -315,7 +319,7 @@ async function cmdInspectStory() {
     if (p) vscode.commands.executeCommand('workbench.action.openSettings', 'cmr.copado.org');
     return;
   }
-  const input = await vscode.window.showInputBox({
+  const input = typeof storyInput === 'string' && storyInput ? storyInput : await vscode.window.showInputBox({
     title: 'Inspect a user story in Copado (read-only)',
     prompt: 'User story number or record id',
     placeHolder: 'US-0012345',
@@ -369,11 +373,12 @@ function needCopado(c) {
  * becomes the package (with the usual pre-flight checks), and it is validated
  * from its feature branch against the next environment in the pipeline.
  */
-async function cmdPrepareStory() {
+/** The story's package.xml from its commit - for the story on the page, or one asked for. */
+async function cmdPrepareStory(storyInput) {
   requireTrust('Preparing a story runs the Salesforce CLI');
   const c = rc();
   if (!needCopado(c)) return;
-  const input = await vscode.window.showInputBox({ title: 'Prepare a user story from Copado', prompt: 'User story number or record id', placeHolder: 'US-0012345',
+  const input = typeof storyInput === 'string' && storyInput ? storyInput : await vscode.window.showInputBox({ title: 'Prepare a user story from Copado', prompt: 'User story number or record id', placeHolder: 'US-0012345',
     ignoreFocusOut: true, validateInput: v => inspectLib.parseStoryRef(v) ? null : 'A story number such as US-0012345 or 12345, or a record id' });
   if (!input) return;
   const root = projectRoot();

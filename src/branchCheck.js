@@ -15,6 +15,9 @@ const { limiter } = require('./copadoClient');
 const FOLDER_TYPES = { LightningComponentBundle: 'lwc', AuraDefinitionBundle: 'aura', CustomObject: 'objects' };
 const CODE = /\.(cls|trigger|page|component)$/;
 
+/** A name or a file name, decoded: "%5BA%5D R%26D Admin" and "[A] R&D Admin" are the same component. */
+function decoded(s) { try { return decodeURIComponent(String(s)); } catch (e) { return String(s); } }
+
 /** The files a component may consist of, relative to a package directory root such as force-app/main/default. */
 function candidates(type, name) {
   const out = [];
@@ -40,6 +43,9 @@ async function buildWorkspace(host, branch, deploy, dir, opts) {
   try { dirs = packageDirsOf(projText); } catch (e) { /* default */ }
   const roots = dirs.flatMap(d => [d.replace(/\/+$/, '') + '/main/default', d.replace(/\/+$/, '')]);
   const written = [], missing = [];
+  // a folder listed once per branch: the fallback below looks in it for every component of that type
+  const listed = new Map();
+  const listing = folder => { if (!listed.has(folder)) listed.set(folder, host.listFiles(branch, folder).catch(() => [])); return listed.get(folder); };
   const put = (rel, buf) => { const f = path.join(dir, ...rel.split('/')); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); written.push(rel); };
   const jobs = [];
   for (const [type, names] of deploy) {
@@ -66,12 +72,28 @@ async function buildWorkspace(host, branch, deploy, dir, opts) {
           for (const rel of rels) { const b = await host.readFile(branch, r + '/' + rel); if (b) found.push([r + '/' + rel, b]); }
           if (found.length) { found.forEach(([fp, b]) => put(fp, b)); return; }
         }
+        // not under the names worked out: the file in the folder whose decoded name is the component's -
+        // whatever Salesforce encoded in it ("%5BA%5D R%26D Admin.profile-meta.xml" for "[A] R&D Admin")
+        const first = rels[0], folder = path.posix.dirname(first), suffix = path.posix.basename(first).slice(String(name).length);
+        const want = decoded(name);
+        for (const r of roots) {
+          const hits = (await listing(r + '/' + folder)).filter(fp => {
+            const base = path.posix.basename(fp);
+            return path.posix.dirname(fp) === r + '/' + folder && base.endsWith(suffix) && decoded(base.slice(0, base.length - suffix.length)) === want;
+          });
+          if (hits.length) {
+            for (const fp of hits) { const b = await host.readFile(branch, fp); if (b) put(fp, b); }
+            // code has its -meta.xml beside it
+            for (const fp of hits.filter(h => CODE.test(h))) { const b = await host.readFile(branch, fp + '-meta.xml'); if (b) put(fp + '-meta.xml', b); }
+            return;
+          }
+        }
         missing.push(type + ' ' + name);
       }));
     }
   }
   await Promise.all(jobs);
-  return { written: written.sort(), missing: missing.sort(), dirs };
+  return { written: [...new Set(written)].sort(), missing: [...new Set(missing)].sort(), dirs };
 }
 
 module.exports = { buildWorkspace, candidates };

@@ -18,6 +18,9 @@ for (const must of ['[Content_Types].xml', 'extension.vsixmanifest', 'extension/
   if (!names.has(must)) problems.push('missing: ' + must);
 }
 for (const n of names) if (/^extension\/(test|\.github|scripts|dist)\//.test(n) || /\.(map|vsix)$/.test(n)) problems.push('should not ship: ' + n);
+// nothing the project has removed, and no README picture the README does not show - whatever the clone held
+const ship = require('./ship').keep(path.resolve(__dirname, '..'));
+for (const n of names) if (n.startsWith('extension/') && !ship(n.slice('extension/'.length))) problems.push('left over, should not ship: ' + n);
 const m = entries.find(e => e.name === 'extension.vsixmanifest').data.toString('utf8');
 if (!m.includes('Version="' + pkg.version + '"') || !m.includes('Publisher="' + pkg.publisher + '"')) problems.push('the manifest does not match package.json');
 const shipped = JSON.parse(entries.find(e => e.name === 'extension/package.json').data.toString('utf8'));

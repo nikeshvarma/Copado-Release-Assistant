@@ -294,7 +294,8 @@ function child(n, folder, suffix) {
 function sourcePaths(type, name) {
   const f = SOURCE_PATHS[type];
   if (!f) return [];
-  const enc = String(name).replace(/[\[\]()%#?*:"<>|]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  // the characters Salesforce writes encoded in file names: "[A] R&D Admin" is "%5BA%5D R%26D Admin.profile-meta.xml"
+  const enc = String(name).replace(/[\[\]()%#?*:"<>|&'+]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
   return [...new Set([f(name), f(enc)].filter(Boolean))];
 }
 

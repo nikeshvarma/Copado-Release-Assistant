@@ -394,7 +394,16 @@ const OBJECT_CHILDREN = { fields: 'CustomField', recordTypes: 'RecordType', list
   compactLayouts: 'CompactLayout', fieldSets: 'FieldSet', businessProcesses: 'BusinessProcess' };
 
 /** A source path -> { type, name }, or null for a folder it does not know. */
+/** A component name as Copado and package.xml give it: decoded - "%5BA%5D R%26D Admin" is "[A] R&D Admin". */
+function decodeName(n) { try { return decodeURIComponent(String(n)); } catch (e) { return String(n); } }
+
+/** The component a file is, by its path - its name decoded, as Copado names it. */
 function componentOf(rel) {
+  const c = componentAt(rel);
+  return c ? { type: c.type, name: decodeName(c.name) } : null;
+}
+
+function componentAt(rel) {
   const parts = String(rel).split('/');
   const strip = f => f.replace(/\.[A-Za-z]+-meta\.xml$/, '').replace(/\.(cls|trigger|page|component)$/, '');
   for (let i = 0; i < parts.length - 1; i++) {
@@ -493,4 +502,4 @@ function logEvent(st, kind, text, detail) {
   st.events = (st.events || []).concat([{ at: new Date().toISOString(), kind, text, detail: detail || '' }]).slice(-300);
 }
 
-module.exports = { applyChoices, repairChoices, logEvent, store, settleCodeBlocks, autoResolve, sync, gates, wellFormed, uploadedHealth, startRevision, cancelRevision, readyFiles, uploadAll, lastBatch, undoBatch, componentOf, READY };
+module.exports = { decodeName, applyChoices, repairChoices, logEvent, store, settleCodeBlocks, autoResolve, sync, gates, wellFormed, uploadedHealth, startRevision, cancelRevision, readyFiles, uploadAll, lastBatch, undoBatch, componentOf, READY };

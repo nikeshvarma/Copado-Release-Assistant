@@ -7,7 +7,7 @@
 const fs = require('fs'), path = require('path');
 const root = path.resolve(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
-const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'quickMerge.js', 'treeView.js', 'media/page.js', 'media/merge.js']
+const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'manualUi.js', 'media/page.js', 'media/merge.js']
   .concat(fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith('.js')).map(f => 'src/' + f)).filter(f => fs.existsSync(path.join(root, f)));
 const all = files.map(f => [f, read(f)]);
 all.push(['(planted)', 'function plantedNeverUsed() {}\n']);

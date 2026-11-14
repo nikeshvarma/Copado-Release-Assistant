@@ -206,6 +206,8 @@ const TYPES = {
       'flexiPageRegions/itemInstances': { key: ['componentInstance/identifier', 'fieldInstance/identifier'], sortable: false },
       componentInstances: { noDedupe: true },
       componentInstanceProperties: { key: ['name'], sortable: false },
+      // an action or a field in a list is its value: matched by it, so a shortened visibility rule is an edit, not a move
+      valueListItems: { key: ['value'], sortable: false },
       quickActionInstances: { noDedupe: true },
       platformActionListItems: { key: ['actionName'], sortable: false }
     }

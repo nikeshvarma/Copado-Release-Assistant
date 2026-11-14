@@ -1,5 +1,58 @@
 # Changelog
 
+## 3.9.4
+
+- **CI passes in a clone that still holds what the project removed.** Unzipping a new source over a clone never deletes files, so old README pictures and code files stayed - and failed the README test. Now none of them ships: the package leaves out every file in `scripts/removed.txt` and every README picture the README does not show, and the package check makes sure. `npm run tidy` deletes them from the clone, to commit. No change to what the extension does.
+
+## 3.9.3
+
+- **CI on Windows**: the tests inside VS Code reach the Manual tab through what the extension hands them when it activates, instead of loading its file by a path - on Windows a path can differ from VS Code's only in the drive letter's case, which gave the tests a second, unconnected copy. No change to what the extension does.
+
+## 3.9.2
+
+- The Release Assistant page uses the full width: VS Code gives every webview's body side padding, which left a strip on each side of the page; it is taken off, as the merge editor already did.
+
+## 3.9.1
+
+- Fixed: in a FlexiPage, an action or a field in a list (`valueListItems`) is matched by its value. A shortened visibility rule showed as the action *moved* and *changed* into another one, with the original *removed*; now it is that rule's edit - the criterion taken out. A field replaced by another is one out and one in, not a move and an edit. Merging matches them the same way.
+- The page's bar starts with its tabs: the tab's own title names it.
+
+## 3.9.0
+
+- **One Promotions tab** for what Home and Promotions were: one box opens a promotion or a story, your recent promotions, the tools. The page's tabs are **Promotions**, **Stories** and **Manual**.
+- **Manual is always there**, with or without Copado access - the Manual Tools setting is gone. Manual merge in the tools opens it (it could open Promotions instead).
+- **Components**, redesigned: filters with counts and a name filter; one line per component in columns - its action as a tag, its story, where it stands with an icon; type groups that fold, each with what needs doing in it; a conflict opens its file.
+- **The merge editor**: hidden lines show as *61 hidden lines*, with expand arrows in the line-number column - no button; a click anywhere on the row shows them. Row buttons are an icon and a word in the row's colour (*Restore*, *Undo*, *Remove copy*, *Use feature*). A duplicate of lines you added shares their row - *Added by you · Duplicate of line 269* - with both actions side by side. The toolbar: ↑ *2 of 7* ↓, **View**, **Save & Close**, and **⋯** at the far right.
+
+## 3.8.3
+
+- **Unsaved changes are never lost.** A merge whose tab is closed, or that another merge replaces, keeps your unsaved changes as a draft and says so; opening that file's merge again offers them back. Discarding or saving clears it.
+- **The merge editor**: the hidden-lines bar is a quiet band - an unfold icon, *61 unchanged lines*, **Show** - opened with a click anywhere on it. Every button is a drawn icon of one size and weight, on the rows and in the toolbar. One **Save and close** button: Ctrl+S saves and keeps the editor open. A manual merge has **Copy result**, and *Save as file…* in the **⋯** menu.
+- Fixed: a comment just before an element now belongs to it - **Restore** puts both back - and a comment added or taken out between elements shows as a change instead of putting the panes out of line. An emptied file says it is empty. A button whose lines you have just changed does nothing, and says so.
+
+## 3.8.2
+
+- **The release pipeline is gone from Home**, and with it what read it from Copado: Home is one box to open a promotion or a story, your recent work and the tools. Nothing is read from Copado until you open something. The README opens with the merge editor.
+
+## 3.8.1
+
+- **A new README**: what the extension does, feature by feature, each with a real picture of its screen - all the same size, theme and frame - then getting started, safety, the settings teams change most, development and the licence. The old diagrams, screenshots and the list of VS Code's own keys are gone. No change to what the extension does.
+
+## 3.8.0
+
+- **Home** on the Release Assistant page: the release pipeline - the stages in order, the stories in each environment, what is moving between them and where it is stuck - read from Copado, nothing changed; a pipeline to choose; one box to open a promotion or a story; what needs you; recent work; tools. Opening a promotion from anywhere shows it.
+- **The merge editor**: each change's row is one word in its colour, with icon buttons whose names are their tooltips. **Duplicates are marked in the editor** - the row says which line a copy repeats, ⚠ in the margin, an underline, no pop-up - and removed with one click; identical duplicates are removed once when the merge is prepared, also when it starts from a branch's file (duplicates that differ are a choice, and are marked). **While the XML is not valid**, the place it breaks is underlined and what you type keeps a dotted margin. Hidden lines are one bar, as in VS Code, opened with a click. The toolbar is ↑ ↓ **View** (Start from, Hide identical lines, Target in literal order) **⋯** (keyboard shortcuts, merge report, swap, Discard - which asks first) and the save buttons; messages are in a status bar; **F8** goes to the next problem.
+- **Manual** on the page - for work without Copado access: two versions pasted, dropped or chosen, each with what it is, merged in the merge editor with **Copy result** and **Save as file…**; a package from a Copado commit file. Shown while no Copado org is set (`cmr.page.manualTools`); right-click an XML file → **Merge in Release Assistant…** opens it with that file.
+- **A story's page** has **Validate from the branch**, **package.xml** and **Story report**.
+- **Removed**, as redundant now: VS Code's diff view for merging and the side bar's Merge section (the merge editor does all of it), quick merge (the Manual tab), *Use as Target* / *Merge This File Into Target* / *Resolve Metadata Conflict (two files)* / *Compare Two Files*, and Prepare, Inspect and Validate from the feature branch as separate commands - 55 commands down to 26.
+- The README shows the release, CI, licence, VS Code and Salesforce CLI badges; the repository has a security policy and issue and pull-request templates. **Needs VS Code 1.85 or later.**
+
+## 3.7.0
+
+- **Components** on a promotion's page: what its stories committed - from Copado's promotion change list, else each story's commit - grouped by type, with the action, the stories, and where each stands: a conflict (to resolve, resolved, in Copado - a click opens its file), from the branch or not on the branch after a pre-check, or in the commit. Filter by conflicts or by not on the branch; read once, read-only.
+- Fixed: a component whose name has special characters could be reported missing in a pre-check though it was on the branch - a profile such as "[A] R&D System Administrator", whose file is "%5BA%5D R%26D System Administrator.profile-meta.xml": `&`, `'` and `+` were not encoded when its file name was worked out. Now they are, and a component not found under the names worked out is found by its decoded name in its folder, whatever Salesforce encoded.
+- Fixed: such a component's resolution did not match the commit's component, so one not resolved yet could be taken from the branch in a pre-check instead of being left out, and a Copado deployment error on it was not linked to the resolution. Names from file paths are decoded now, as Copado names them.
+
 ## 3.6.0
 
 - **Hide identical** in the merge editor: runs of lines that are the same on both sides fold away, keeping three lines around every change, move and conflict. A row "⋯ 223 identical lines" with **Show** stands in for each run, in both panes alike, so they stay level; going to a line inside one - Ctrl+G, a find match, a click - opens it. The choice is kept for the next merge (`cmr.merge.hideIdentical`).
