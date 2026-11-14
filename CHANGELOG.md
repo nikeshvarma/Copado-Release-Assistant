@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.3
+
+- **The VS Code tests run on macOS.** VS Code gets a short user-data folder of its own: it opens a socket there, and macOS allows a socket path of at most 103 characters - the test runner's default folder, inside the checkout, made it longer on CI. A failed run now tidies up its temporary folders before it exits. No change to what the extension does.
+
 ## 3.5.2
 
 - **CI on every system.** The VS Code tests find VS Code's program on macOS whatever a VS Code build names it - VS Code 1.146 no longer has the `Contents/MacOS/Electron` that the test runner looks for, so the macOS job could not start it. The tests' temporary folders are removed patiently on Windows, where Windows Defender or the search indexer can hold a file just written - a test whose checks passed no longer fails on its clean-up. No change to what the extension does.
