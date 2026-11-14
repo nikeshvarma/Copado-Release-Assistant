@@ -2,16 +2,24 @@
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
   "description": "Copado release work for Salesforce metadata: resolve promotion conflicts, validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
-  "version": "3.6.0",
+  "version": "3.9.2",
   "publisher": "nikeshvarma",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nikeshvarma/Copado-Release-Assistant.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nikeshvarma/Copado-Release-Assistant/issues"
+  },
+  "homepage": "https://github.com/nikeshvarma/Copado-Release-Assistant#readme",
   "icon": "media/logo.png",
   "galleryBanner": {
     "color": "#10243E",
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "SCM Providers",
@@ -44,84 +52,6 @@
         "icon": "$(home)"
       },
       {
-        "command": "cmr.resolve",
-        "title": "Resolve Metadata Conflict (two files)",
-        "category": "Copado",
-        "icon": "$(git-merge)"
-      },
-      {
-        "command": "cmr.useAsTarget",
-        "title": "Use as Target (keeps everything)",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.mergeIntoTarget",
-        "title": "Merge This File Into Target",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.compare",
-        "title": "Compare Two Files (ignore ordering)",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.applyMerge",
-        "title": "Apply Merge to Target",
-        "category": "Copado",
-        "icon": "$(check)"
-      },
-      {
-        "command": "cmr.cancelMerge",
-        "title": "Discard Merge",
-        "category": "Copado",
-        "icon": "$(close)"
-      },
-      {
-        "command": "cmr.showTargetVsMerged",
-        "title": "Show Target vs Merged",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.showIncomingVsMerged",
-        "title": "Show Incoming vs Merged",
-        "category": "Copado",
-        "icon": "$(arrow-swap)"
-      },
-      {
-        "command": "cmr.showTargetVsIncoming",
-        "title": "Show Target vs Incoming",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.listConflicts",
-        "title": "List Conflicts",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.nextConflict",
-        "title": "Next Conflict",
-        "category": "Copado",
-        "icon": "$(arrow-down)"
-      },
-      {
-        "command": "cmr.prevConflict",
-        "title": "Previous Conflict",
-        "category": "Copado",
-        "icon": "$(arrow-up)"
-      },
-      {
-        "command": "cmr.useAllTarget",
-        "title": "Use Target Value for All Conflicts",
-        "category": "Copado",
-        "icon": "$(arrow-left)"
-      },
-      {
-        "command": "cmr.useAllIncoming",
-        "title": "Use Incoming Value for All Conflicts",
-        "category": "Copado",
-        "icon": "$(arrow-right)"
-      },
-      {
         "command": "cmr.checkDuplicates",
         "title": "Find Duplicate Entries",
         "category": "Copado"
@@ -140,70 +70,6 @@
         "command": "cmr.showOrder",
         "title": "Show Section Order for This Type",
         "category": "Copado"
-      },
-      {
-        "command": "cmr.copyReport",
-        "title": "Copy Merge Report as Markdown",
-        "category": "Copado",
-        "icon": "$(markdown)"
-      },
-      {
-        "command": "cmr.swapDirection",
-        "title": "Swap Direction (make the other file the target)",
-        "category": "Copado",
-        "icon": "$(arrow-swap)"
-      },
-      {
-        "command": "cmr.revealConflict",
-        "title": "Go to Conflict",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.revealLine",
-        "title": "Go to Line",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.showReport",
-        "title": "Show Full Report",
-        "category": "Copado",
-        "icon": "$(output)"
-      },
-      {
-        "command": "cmr.refreshPanel",
-        "title": "Refresh Merge Panel",
-        "category": "Copado",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "cmr.sectionUseTarget",
-        "title": "Use Target Values for This Section",
-        "category": "Copado",
-        "icon": "$(arrow-left)"
-      },
-      {
-        "command": "cmr.sectionUseIncoming",
-        "title": "Use Incoming Values for This Section",
-        "category": "Copado",
-        "icon": "$(arrow-right)"
-      },
-      {
-        "command": "cmr.useTargetValue",
-        "title": "Use Target Value",
-        "category": "Copado",
-        "icon": "$(arrow-left)"
-      },
-      {
-        "command": "cmr.useIncomingValue",
-        "title": "Use Incoming Value",
-        "category": "Copado",
-        "icon": "$(arrow-right)"
-      },
-      {
-        "command": "cmr.dropEntry",
-        "title": "Drop From Result",
-        "category": "Copado",
-        "icon": "$(trash)"
       },
       {
         "command": "cmr.writeWorkspaceSettings",
@@ -281,22 +147,6 @@
         "icon": "$(gear)"
       },
       {
-        "command": "cmr.quickMerge.run",
-        "title": "Merge Conflict Files",
-        "category": "Copado",
-        "icon": "$(git-merge)"
-      },
-      {
-        "command": "cmr.quickMerge.toggleAuto",
-        "title": "Turn Auto-Merge After Paste On/Off",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.quickMerge.toggleButton",
-        "title": "Show/Hide the Merge Conflict Files Button",
-        "category": "Copado"
-      },
-      {
         "command": "cmr.policy.create",
         "title": "Create Team Policy File (copado-policy.json)",
         "category": "Copado"
@@ -337,77 +187,22 @@
         "icon": "$(git-branch)"
       },
       {
-        "command": "cmr.mergeTakeTarget",
-        "title": "Undo This Change",
-        "category": "Copado",
-        "icon": "$(discard)"
-      },
-      {
-        "command": "cmr.mergeReveal",
-        "title": "Go to the Change",
+        "command": "cmr.manual.mergeWith",
+        "title": "Merge in Release Assistant…",
         "category": "Copado"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "cmr.useAsTarget",
-          "when": "resourceExtname == .xml",
-          "group": "3_compare@10"
-        },
-        {
-          "command": "cmr.mergeIntoTarget",
-          "when": "resourceExtname == .xml",
-          "group": "3_compare@12"
-        },
-        {
-          "command": "cmr.compare",
-          "when": "resourceExtname == .xml",
-          "group": "3_compare@13"
-        },
-        {
           "command": "cmr.package.fromCommit",
           "when": "resourceExtname == .json",
           "group": "7_copado@1"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "cmr.quickMerge.run",
-          "when": "cmr.quickMergeFile",
-          "group": "navigation@0"
         },
         {
-          "command": "cmr.applyMerge",
-          "when": "cmr.activeMerge && resourceFilename =~ /^MERGED__/",
-          "group": "navigation@1"
-        },
-        {
-          "command": "cmr.nextConflict",
-          "when": "cmr.activeMerge && resourceFilename =~ /^MERGED__/",
-          "group": "navigation@2"
-        },
-        {
-          "command": "cmr.prevConflict",
-          "when": "cmr.activeMerge && resourceFilename =~ /^MERGED__/",
-          "group": "navigation@3"
-        },
-        {
-          "command": "cmr.showIncomingVsMerged",
-          "when": "cmr.activeMerge && resourceFilename =~ /^MERGED__/",
-          "group": "navigation@4"
-        },
-        {
-          "command": "cmr.cancelMerge",
-          "when": "cmr.activeMerge && resourceFilename =~ /^MERGED__/",
-          "group": "navigation@5"
-        }
-      ],
-      "editor/title/context": [
-        {
-          "command": "cmr.resolve",
+          "command": "cmr.manual.mergeWith",
           "when": "resourceExtname == .xml",
-          "group": "3_compare@10"
+          "group": "cmr@1"
         }
       ],
       "editor/context": [
@@ -424,58 +219,6 @@
       ],
       "commandPalette": [
         {
-          "command": "cmr.useAsTarget",
-          "when": "false"
-        },
-        {
-          "command": "cmr.mergeIntoTarget",
-          "when": "false"
-        },
-        {
-          "command": "cmr.compare",
-          "when": "false"
-        },
-        {
-          "command": "cmr.applyMerge",
-          "when": "false"
-        },
-        {
-          "command": "cmr.cancelMerge",
-          "when": "false"
-        },
-        {
-          "command": "cmr.showTargetVsMerged",
-          "when": "false"
-        },
-        {
-          "command": "cmr.showIncomingVsMerged",
-          "when": "false"
-        },
-        {
-          "command": "cmr.showTargetVsIncoming",
-          "when": "false"
-        },
-        {
-          "command": "cmr.listConflicts",
-          "when": "false"
-        },
-        {
-          "command": "cmr.nextConflict",
-          "when": "false"
-        },
-        {
-          "command": "cmr.prevConflict",
-          "when": "false"
-        },
-        {
-          "command": "cmr.useAllTarget",
-          "when": "false"
-        },
-        {
-          "command": "cmr.useAllIncoming",
-          "when": "false"
-        },
-        {
           "command": "cmr.checkDuplicates",
           "when": "false"
         },
@@ -489,50 +232,6 @@
         },
         {
           "command": "cmr.showOrder",
-          "when": "false"
-        },
-        {
-          "command": "cmr.copyReport",
-          "when": "false"
-        },
-        {
-          "command": "cmr.swapDirection",
-          "when": "false"
-        },
-        {
-          "command": "cmr.revealConflict",
-          "when": "false"
-        },
-        {
-          "command": "cmr.revealLine",
-          "when": "false"
-        },
-        {
-          "command": "cmr.showReport",
-          "when": "false"
-        },
-        {
-          "command": "cmr.refreshPanel",
-          "when": "false"
-        },
-        {
-          "command": "cmr.sectionUseTarget",
-          "when": "false"
-        },
-        {
-          "command": "cmr.sectionUseIncoming",
-          "when": "false"
-        },
-        {
-          "command": "cmr.useTargetValue",
-          "when": "false"
-        },
-        {
-          "command": "cmr.useIncomingValue",
-          "when": "false"
-        },
-        {
-          "command": "cmr.dropEntry",
           "when": "false"
         },
         {
@@ -576,62 +275,23 @@
           "when": "false"
         },
         {
-          "command": "cmr.quickMerge.run",
+          "command": "cmr.copado.prepare",
           "when": "false"
         },
         {
-          "command": "cmr.quickMerge.toggleAuto",
+          "command": "cmr.copado.inspect",
           "when": "false"
         },
         {
-          "command": "cmr.quickMerge.toggleButton",
+          "command": "cmr.repo.validateStory",
           "when": "false"
         },
         {
-          "command": "cmr.mergeTakeTarget",
-          "when": "false"
-        },
-        {
-          "command": "cmr.mergeReveal",
+          "command": "cmr.manual.mergeWith",
           "when": "false"
         }
       ],
       "view/title": [
-        {
-          "command": "cmr.applyMerge",
-          "when": "view == cmrMergePanel && cmr.activeMerge",
-          "group": "navigation@1"
-        },
-        {
-          "command": "cmr.swapDirection",
-          "when": "view == cmrMergePanel && cmr.activeMerge",
-          "group": "navigation@2"
-        },
-        {
-          "command": "cmr.copyReport",
-          "when": "view == cmrMergePanel && cmr.activeMerge",
-          "group": "navigation@3"
-        },
-        {
-          "command": "cmr.refreshPanel",
-          "when": "view == cmrMergePanel && cmr.activeMerge",
-          "group": "navigation@4"
-        },
-        {
-          "command": "cmr.showReport",
-          "when": "view == cmrMergePanel && cmr.activeMerge",
-          "group": "1_more@1"
-        },
-        {
-          "command": "cmr.cancelMerge",
-          "when": "view == cmrMergePanel && cmr.activeMerge",
-          "group": "1_more@2"
-        },
-        {
-          "command": "cmr.resolve",
-          "when": "view == cmrMergePanel && !cmr.activeMerge",
-          "group": "navigation@1"
-        },
         {
           "command": "cmr.git.check",
           "when": "view == cmrBranchView",
@@ -673,16 +333,6 @@
           "group": "1_more@1"
         },
         {
-          "command": "cmr.openSettings",
-          "when": "view == cmrMergePanel",
-          "group": "1_more@9"
-        },
-        {
-          "command": "cmr.page.open",
-          "when": "view == cmrMergePanel",
-          "group": "navigation@0"
-        },
-        {
           "command": "cmr.page.open",
           "when": "view == cmrBranchView",
           "group": "navigation@0"
@@ -694,41 +344,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "cmr.useTargetValue",
-          "when": "view == cmrMergePanel && viewItem == cmrConflictUsingIncoming",
-          "group": "inline@1"
-        },
-        {
-          "command": "cmr.useIncomingValue",
-          "when": "view == cmrMergePanel && viewItem == cmrConflictUsingTarget",
-          "group": "inline@1"
-        },
-        {
-          "command": "cmr.sectionUseTarget",
-          "when": "view == cmrMergePanel && viewItem == cmrConflictSection",
-          "group": "inline@1"
-        },
-        {
-          "command": "cmr.sectionUseIncoming",
-          "when": "view == cmrMergePanel && viewItem == cmrConflictSection",
-          "group": "inline@2"
-        },
-        {
-          "command": "cmr.useAllTarget",
-          "when": "view == cmrMergePanel && viewItem == cmrConflictRoot",
-          "group": "inline@1"
-        },
-        {
-          "command": "cmr.useAllIncoming",
-          "when": "view == cmrMergePanel && viewItem == cmrConflictRoot",
-          "group": "inline@2"
-        },
-        {
-          "command": "cmr.dropEntry",
-          "when": "view == cmrMergePanel && viewItem == cmrDeletion",
-          "group": "inline@1"
-        },
         {
           "command": "cmr.git.resolveFile",
           "when": "view == cmrBranchView && viewItem == cmrBranchMeta",
@@ -743,32 +358,10 @@
           "command": "cmr.validate.applyFix",
           "when": "view == cmrDeployView && viewItem == cmrFix",
           "group": "inline@1"
-        },
-        {
-          "command": "cmr.mergeTakeTarget",
-          "when": "view == cmrMergePanel && viewItem == cmrLiveChange",
-          "group": "inline"
         }
       ]
     },
-    "keybindings": [
-      {
-        "command": "cmr.nextConflict",
-        "key": "alt+down",
-        "when": "cmr.activeMerge && editorTextFocus"
-      },
-      {
-        "command": "cmr.prevConflict",
-        "key": "alt+up",
-        "when": "cmr.activeMerge && editorTextFocus"
-      },
-      {
-        "command": "cmr.applyMerge",
-        "key": "ctrl+alt+enter",
-        "mac": "cmd+alt+enter",
-        "when": "cmr.activeMerge && editorTextFocus"
-      }
-    ],
+    "keybindings": [],
     "configuration": [
       {
         "title": "Project folders",
@@ -820,20 +413,6 @@
             ],
             "description": "Which value a real conflict starts with, before you review it."
           },
-          "cmr.merge.editor": {
-            "type": "string",
-            "enum": [
-              "panel",
-              "vscode"
-            ],
-            "enumDescriptions": [
-              "The extension's own merge editor: the target and your resolution lined up element by element, moves in purple, what you removed struck through, and a button on every change.",
-              "VS Code's diff view, with the marks drawn in it."
-            ],
-            "default": "panel",
-            "description": "Where you review and edit a merge.",
-            "order": 2
-          },
           "cmr.merge.startFrom": {
             "type": "string",
             "enum": [
@@ -880,12 +459,6 @@
             "scope": "resource",
             "order": 5
           },
-          "cmr.merge.maxInlineConflicts": {
-            "type": "number",
-            "default": 50,
-            "description": "Above this many conflicting values, the per-line buttons in the merged file are suppressed and everything is driven from the Copado Merge panel instead. Set to 0 to always use the panel.",
-            "order": 6
-          },
           "cmr.dedupe.keep": {
             "type": "string",
             "enum": [
@@ -897,42 +470,6 @@
             "order": 7
           }
         }
-      },
-      {
-        "title": "Quick merge",
-        "properties": {
-          "cmr.quickMerge.enabled": {
-            "type": "boolean",
-            "default": true,
-            "order": 1,
-            "markdownDescription": "Show a **Merge** button in the status bar whenever both conflict files exist (and in the editor title bar while either is open). One click merges the incoming file into the target."
-          },
-          "cmr.quickMerge.auto": {
-            "type": "boolean",
-            "default": false,
-            "order": 2,
-            "markdownDescription": "Open the merge by itself once **both** conflict files have been pasted and saved with new content. Saving without a change, or applying a merge, does not trigger it."
-          },
-          "cmr.quickMerge.folder": {
-            "type": "string",
-            "default": "conflict/metadata",
-            "order": 3,
-            "markdownDescription": "Folder in the project that holds the two conflict files. Relative to the project root."
-          },
-          "cmr.quickMerge.target": {
-            "type": "string",
-            "default": "resolution.xml",
-            "order": 4,
-            "markdownDescription": "The file that keeps everything (the target). Apply writes the merged result into it."
-          },
-          "cmr.quickMerge.incoming": {
-            "type": "string",
-            "default": "feature.xml",
-            "order": 5,
-            "markdownDescription": "The file merged in. Its values win a real conflict."
-          }
-        },
-        "order": 2
       },
       {
         "title": "Formatting",
@@ -1457,14 +994,7 @@
           "name": "Release Assistant",
           "icon": "media/merge.svg",
           "contextualTitle": "Copado",
-          "when": "!cmr.activeMerge && !cmr.hasPackage && !cmr.hasValidation && !cmr.hasBranchCheck"
-        },
-        {
-          "id": "cmrMergePanel",
-          "name": "Merge",
-          "icon": "media/merge.svg",
-          "contextualTitle": "Copado",
-          "when": "cmr.activeMerge"
+          "when": "!cmr.hasPackage && !cmr.hasValidation && !cmr.hasBranchCheck"
         },
         {
           "id": "cmrDeployView",

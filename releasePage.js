@@ -14,19 +14,24 @@ const crypto = require('crypto');
 let panel = null;
 let ui = null;
 let life = null;
+let manual = null;
 let ctx = null;
 
-function activate(context, promotionUi, lifecycleUi, cmd) {
+function activate(context, promotionUi, lifecycleUi, cmd, manualUi) {
   ui = promotionUi;
   life = lifecycleUi;
+  manual = manualUi || null;
   ctx = context;
+  if (manual) manual.onChange(() => push());
   cmd('cmr.page.open', () => show());
   ui.onChange(() => push());
   if (life) life.onChange(() => push());
 }
 
-function show() {
-  if (panel) { panel.reveal(); return push(); }
+/** The page - on a tab of it, when one is named (Merge in Release Assistant opens Manual). */
+function show(nav) {
+  if (panel) { panel.reveal(); if (nav) panel.webview.postMessage({ type: 'nav', nav }); return push(); }
+  pendingNav = nav || null;
   const media = vscode.Uri.joinPath(ctx.extensionUri, 'media');
   panel = vscode.window.createWebviewPanel('cmrPage', 'Copado Release Assistant', vscode.ViewColumn.One,
     { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media] });
@@ -50,17 +55,19 @@ async function push(extra) {
   try {
     const data = await ui.snapshot();
     if (life) data.life = life.snapshot();
+    if (manual) data.manual = manual.snapshot();
     panel.webview.postMessage(Object.assign({ type: 'state', data }, extra || {}));
   } catch (e) { /* the page will ask again */ }
 }
 
 // the commands the page's buttons run - nothing else is run from it
-const TOOLS = new Set(['cmr.copado.prepare', 'cmr.repo.validateStory', 'cmr.validate.run', 'cmr.git.check', 'cmr.resolve', 'cmr.copado.inspect', 'cmrDeployView.focus', 'workbench.action.openSettings']);
+const TOOLS = new Set(['cmr.validate.run', 'cmr.git.check', 'cmrDeployView.focus', 'workbench.action.openSettings']);
 let running = 0;
+let pendingNav = null;
 
 async function onMessage(m) {
   if (!m) return;
-  if (m.type === 'ready') return push();
+  if (m.type === 'ready') { await push(); if (pendingNav && panel) { panel.webview.postMessage({ type: 'nav', nav: pendingNav }); pendingNav = null; } return; }
   if (m.type === 'tool') {
     if (!TOOLS.has(m.id)) return;
     return Promise.resolve(vscode.commands.executeCommand(m.id)).catch(e => vscode.window.showErrorMessage(e && e.message ? e.message : String(e)));
@@ -74,6 +81,7 @@ async function onMessage(m) {
       await ui.openById((m.payload || {}).id);
       if (panel) panel.webview.postMessage({ type: 'nav', nav: 'Promotions' });
     } else if (m.scope === 'life') await life.act(m.name, m.payload || {});
+    else if (m.scope === 'manual' && manual) await manual.act(m.name, m.payload || {});
     else await ui.act(m.name, m.payload || {});
   } catch (e) {
     vscode.window.showErrorMessage(e && e.message ? e.message : String(e));

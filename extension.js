@@ -13,7 +13,6 @@ const { redact } = require('./src/redact');
 const masked = text => redact(text, vscode.workspace.getConfiguration('cmr').get('output.maskIdentities', false));
 const fsSync = require('fs');
 const rules = require('./src/rules');
-const treeView = require('./treeView');
 
 const NAMESPACE = 'http://soap.sforce.com/2006/04/metadata';
 const META_EXT = new Set([
@@ -28,15 +27,10 @@ const MARKER = /^(<{7}|={7}$|>{7}|\|{7})/;
 let ctx;
 let diagnostics;
 let output;
-let lensEmitter;
-let decorations;
-let tree;
-let treeUi;
 let session = null;        // the merge in progress
 let extensionUri = null;   // where the extension's own files are: the merge editor's page loads from there
 let starting = false;      // a merge is being prepared
 let sessionSeq = 0;
-let pendingTarget = null;  // file marked with "Use as Target"
 const findingsByDoc = new Map();
 
 function activate(context) {
@@ -47,47 +41,7 @@ function activate(context) {
   // tokens are always masked before anything reaches the panel; identities when cmr.output.maskIdentities is on
   { const line = output.appendLine.bind(output), part = output.append.bind(output);
     output.appendLine = t => line(masked(t)); output.append = t => part(masked(t)); }
-  lensEmitter = new vscode.EventEmitter();
-  decorations = {
-    own: vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      backgroundColor: 'rgba(55, 148, 255, 0.12)',
-      borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: new vscode.ThemeColor('editorInfo.foreground'),
-      overviewRulerColor: new vscode.ThemeColor('editorInfo.foreground'),
-      overviewRulerLane: vscode.OverviewRulerLane.Right
-    }),
-    // a note at the end of a line - what was removed or left out there, what the target had - written by
-    // VS Code itself, so it shows in the merge view even where CodeLens rows do not (diff views hide them)
-    note: vscode.window.createTextEditorDecorationType({ rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed }),
-    removed: vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      borderWidth: '1px 0 0 0', borderStyle: 'dashed', borderColor: new vscode.ThemeColor('editorError.foreground'),
-      overviewRulerColor: new vscode.ThemeColor('editorError.foreground'),
-      overviewRulerLane: vscode.OverviewRulerLane.Left
-    }),
-    added: vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      backgroundColor: new vscode.ThemeColor('merge.incomingContentBackground'),
-      overviewRulerColor: new vscode.ThemeColor('gitDecoration.addedResourceForeground'),
-      overviewRulerLane: vscode.OverviewRulerLane.Right
-    }),
-    conflict: vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      backgroundColor: new vscode.ThemeColor('inputValidation.warningBackground'),
-      border: '1px solid',
-      borderColor: new vscode.ThemeColor('editorWarning.foreground'),
-      overviewRulerColor: new vscode.ThemeColor('editorWarning.foreground'),
-      overviewRulerLane: vscode.OverviewRulerLane.Right
-    }),
-    dedup: vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      overviewRulerColor: new vscode.ThemeColor('editorInfo.foreground'),
-      overviewRulerLane: vscode.OverviewRulerLane.Left,
-      gutterIconSize: 'contain'
-    })
-  };
-  context.subscriptions.push(diagnostics, output,
-    decorations.added, decorations.conflict, decorations.dedup);
+  context.subscriptions.push(diagnostics, output);
 
   const debounce = new Map();
   const schedule = (doc, delay) => {
@@ -109,24 +63,14 @@ function activate(context) {
     vscode.window.onDidChangeVisibleTextEditors(editors => editors.forEach(e => scheduleOnEdit(e.document))),
     vscode.workspace.onDidChangeTextDocument(e => {
       scheduleOnEdit(e.document);
-      if (session && e.document.uri.toString() === session.mergedUri.toString()) {
-        shiftMarks(e.contentChanges);
-        schedulePaint();
-        scheduleChecks();
-      }
     }),
     vscode.workspace.onDidSaveTextDocument(doc => {
       refresh(doc);
-      if (session && session.applyOnSave && !applying && doc.uri.toString() === session.mergedUri.toString()) {
-        cmdApplyMerge({ fromSave: true }).catch(e => vscode.window.showErrorMessage('Your resolution was saved in the merge view, but could not be applied: ' + e.message));
-      }
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {
       diagnostics.delete(doc.uri);
       findingsByDoc.delete(doc.uri.toString());
     }),
-    vscode.window.onDidChangeVisibleTextEditors(paint),
-    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('diffEditor.codeLens')) schedulePaint(); }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('cmr')) vscode.window.visibleTextEditors.forEach(ed => scheduleOnEdit(ed.document));
     })
@@ -134,37 +78,10 @@ function activate(context) {
   vscode.window.visibleTextEditors.forEach(ed => scheduleOnEdit(ed.document));
 
   const cmd = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-  cmd('cmr.resolve', cmdResolve);
-  cmd('cmr.useAsTarget', cmdUseAsTarget);
-  cmd('cmr.mergeIntoTarget', cmdMergeIntoTarget);
-  cmd('cmr.compare', cmdCompare);
-  cmd('cmr.applyMerge', () => cmdApplyMerge());
-  cmd('cmr.mergeTakeTarget', ch => cmdMergeTakeTarget(ch));
-  cmd('cmr.mergeReveal', line => cmdMergeReveal(line));
-  cmd('cmr.cancelMerge', cmdCancelMerge);
-  cmd('cmr.showTargetVsMerged', () => showDiff('target'));
-  cmd('cmr.showIncomingVsMerged', () => showDiff('incoming'));
-  cmd('cmr.showTargetVsIncoming', () => showDiff('sides'));
-  cmd('cmr.listConflicts', cmdListConflicts);
-  cmd('cmr.nextConflict', () => jumpConflict(1));
-  cmd('cmr.prevConflict', () => jumpConflict(-1));
-  cmd('cmr.useTargetValue', i => setConflict(i, 'base'));
-  cmd('cmr.useIncomingValue', i => setConflict(i, 'incoming'));
-  cmd('cmr.useAllTarget', () => setAllConflicts('base'));
-  cmd('cmr.useAllIncoming', () => setAllConflicts('incoming'));
   cmd('cmr.checkDuplicates', cmdCheckDuplicates);
   cmd('cmr.removeDuplicates', cmdRemoveDuplicates);
   cmd('cmr.format', cmdFormat);
   cmd('cmr.showOrder', cmdShowOrder);
-  cmd('cmr.revealConflict', arg => revealConflict(conflictIndexOf(arg)));
-  cmd('cmr.revealLine', line => revealLine(line));
-  cmd('cmr.showReport', () => output.show(true));
-  cmd('cmr.copyReport', cmdCopyReport);
-  cmd('cmr.swapDirection', cmdSwapDirection);
-  cmd('cmr.sectionUseTarget', item => setSection(item, 'base'));
-  cmd('cmr.sectionUseIncoming', item => setSection(item, 'incoming'));
-  cmd('cmr.refreshPanel', () => { scheduleChecks(); tree.refresh(); });
-  cmd('cmr.dropEntry', item => dropEntry(item));
   cmd('cmr.writeWorkspaceSettings', cmdWriteWorkspaceSettings);
   cmd('cmr.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:nikeshvarma.copado-release-assistant'));
 
@@ -177,19 +94,9 @@ function activate(context) {
     isMetadata,
     promoMerge
   });
-  require('./quickMerge').activate(context, { output, startSession, resolveProject });
 
-  tree = treeView.createProvider(() => session);
-  treeUi = vscode.window.createTreeView('cmrMergePanel', { treeDataProvider: tree, showCollapseAll: true });
-  treeUi.message = 'No merge in progress. Right-click the file to keep everything from and choose "Use as Target".';
-  context.subscriptions.push(treeUi);
 
   context.subscriptions.push(
-    vscode.languages.registerCodeLensProvider(
-      [{ language: 'xml' }, { pattern: '**/*.xml' }],
-      { onDidChangeCodeLenses: lensEmitter.event, provideCodeLenses: mergeLenses }
-    ),
-    vscode.languages.registerHoverProvider([{ language: 'xml' }, { pattern: '**/*.xml' }], { provideHover: mergeHover }),
     vscode.languages.registerCodeActionsProvider(
       [{ language: 'xml' }, { pattern: '**/*.xml' }],
       new DuplicateActions(),
@@ -223,13 +130,11 @@ function cfg() {
     removeDuplicatesOnFormat: c.get('format.removeDuplicatesOnFormat', false),
     keep: c.get('dedupe.keep', 'first'),
     mergeRemoveDuplicates: c.get('merge.removeDuplicates', true),
-    mergeEditor: c.get('merge.editor', 'panel') === 'vscode' ? 'vscode' : 'panel',
     mergeStartFrom: c.get('merge.startFrom', 'auto'),
     normalizeBeforeDiff: c.get('merge.normalizeBeforeDiff', true),
     mergeApplyFormatting: c.get('merge.applyFormatting', true),
     conflictWinner: c.get('merge.conflictWinner', 'incoming'),
     alwaysKeepTarget: c.get('merge.alwaysKeepTarget', []),
-    maxInlineConflicts: c.get('merge.maxInlineConflicts', 50),
     rulesEnable: c.get('rules.enable', true),
     rulesDisabled: c.get('rules.disabled', []),
     largeFileKb: c.get('diagnostics.largeFileKb', 256)
@@ -388,38 +293,6 @@ function removal(doc, node, title, diagnostic) {
 
 /* ---------- the merge session ---------- */
 
-async function cmdResolve(uri) {
-  let target = uri || activeUri();
-  if (!target) {
-    target = await pickFile(null, 'Step 1 of 2 - pick the file to KEEP EVERYTHING from (your target)');
-    if (!target) return;
-  }
-  const incoming = await pickFile(target, 'Step 2 - pick the file to merge IN (wins a real conflict)');
-  if (!incoming) return;
-
-  await startSession(target, incoming, null);
-}
-
-function cmdUseAsTarget(uri) {
-  pendingTarget = uri || activeUri();
-  if (pendingTarget) {
-    vscode.window.setStatusBarMessage(
-      'Target: ' + path.basename(pendingTarget.fsPath) + ' - nothing will be removed from it', 5000);
-  }
-}
-
-async function cmdMergeIntoTarget(uri) {
-  const incoming = uri || activeUri();
-  if (!pendingTarget) {
-    vscode.window.showWarningMessage('First right-click the file to keep everything from and choose "Use as Target".');
-    return;
-  }
-  if (!incoming || incoming.toString() === pendingTarget.toString()) {
-    vscode.window.showWarningMessage('Pick a different file to merge in.');
-    return;
-  }
-  await startSession(pendingTarget, incoming);
-}
 
 /**
  * Starts a merge. The heavy work - parsing, merging, formatting, checking -
@@ -440,7 +313,7 @@ async function startSession(targetUri, incomingUri, ancestorUri, sessionOptions)
       title: 'Merging ' + path.basename(targetUri.fsPath), cancellable: true
     }, (progress, token) => prepareSession(targetUri, incomingUri, ancestorUri, sessionOptions || {}, progress, token));
   } catch (e) {
-    if (session && !session.ready) await endSession();   // never leave a half-built session behind
+    if (session && !session.ready) await endSession({ noDraft: true });   // never leave a half-built session behind
     throw e;
   } finally {
     starting = false;
@@ -502,8 +375,25 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
   // where cmr.merge.startFrom says: nothing is merged behind your back (src/mergeStart.js)
   const startFrom = so.startFrom != null && String(so.startFrom) !== result.mergedText ? String(so.startFrom) : null;
   const starts = { merged: result.mergedText, feature: result.incomingText, target: result.targetText };
+  // identical duplicates out of each start, once, here - what merging always does to its result, now also for a
+  // start from a branch's file; the merge editor marks what was removed and never removes anything twice
+  const dupRemoved = { merged: (result.report && result.report.duplicates || []).length, feature: 0, target: 0 }, removedDups = new Set();
+  if (c.mergeRemoveDuplicates) {
+    for (const k of ['feature', 'target']) {
+      const d = require('./src/mergeDuplicates').dedupe(starts[k]);
+      starts[k] = d.text; dupRemoved[k] = d.removed.length; d.removed.forEach(f => removedDups.add(f));
+    }
+  }
   const startKind = so.startFrom != null ? 'saved' : require('./src/mergeStart').startFor(result.typeName, c.mergeStartFrom);
-  const initial = startFrom != null ? startFrom : starts[startKind] != null ? starts[startKind] : result.mergedText;
+  let initial = startFrom != null ? startFrom : starts[startKind] != null ? starts[startKind] : result.mergedText;
+  // unsaved changes this merge was closed with: offered back, once
+  const draft = draftOf(so.applyToUri || targetUri);
+  if (draft && draft.text !== initial) {
+    const go = await vscode.window.showInformationMessage('This merge was closed with changes you had not saved (' + new Date(draft.at).toLocaleString() + '). Restore them?',
+      { modal: true }, 'Restore my changes', 'Start fresh');
+    if (go === 'Restore my changes') initial = draft.text;
+  }
+  if (draft) await keepDraft(so.applyToUri || targetUri, null);
   const marks = initial !== result.mergedText ? remapConflicts(result.marks, result.mergedText, initial) : result.marks;
   // the files are written before the session is published, so nothing ever sees a session without them
   const normTargetUri = await write('TARGET__' + base, result.targetText);
@@ -541,31 +431,19 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
     checks: result.checks,
     // your resolution against both branches, worked out as you type (src/liveMarks.js)
     normTargetText: result.targetText, normIncomingText: result.incomingText, live: null, liveText: null, liveOff: false,
-    starts, startKind
+    starts, startKind, dupRemoved, removedDups
   };
   session.conflicts.sort((a, b) => a.line - b.line);
 
   writeReport();
-  tree.refresh();
-  updateBadge();
+  
   progress.report({ message: 'Opening it' });
   const d0 = Date.now();
-  if (c.mergeEditor === 'panel') openMergePanel(initial, so);
-  else {
-    await vscode.commands.executeCommand('setContext', 'cmr.activeMerge', true);
-    await showDiff('target');
-  }
+  openMergePanel(initial, so);
   timing.diff = Date.now() - d0;
   session.ready = true;
-  lensEmitter.fire();
-  offerDiffLenses().catch(() => {});
   output.appendLine(timingLine(base, result, timing, Date.now() - t0));
 
-  if (session.conflicts.length > c.maxInlineConflicts) {
-    vscode.window.showInformationMessage(
-      session.conflicts.length + ' conflicting values - too many for inline buttons. Use the Copado Merge panel in the side bar.',
-      'Open panel').then(pick => { if (pick === 'Open panel') vscode.commands.executeCommand('cmrMergePanel.focus'); });
-  }
   const r = result.report;
   if (!r.added.length && !r.updated.length && !r.conflicts.length && !r.duplicates.length) {
     vscode.window.showInformationMessage('These two files already describe the same metadata. Nothing to merge.');
@@ -712,22 +590,6 @@ async function storageDir(sub) {
   return dir;
 }
 
-async function showDiff(which) {
-  if (!session) { vscode.window.showInformationMessage('No merge in progress.'); return; }
-  const tName = session.labels.target;
-  const iName = session.labels.incoming;
-  // named panes (a promotion's merge): its own words; otherwise which file is which, and MERGED for the result
-  const named = !!session.labels.merged;
-  const merged = session.labels.merged || 'MERGED (editable)';
-  const views = {
-    target: [session.normTargetUri, session.mergedUri, tName + (named ? '' : ' (target)') + ' \u2194 ' + merged],
-    incoming: [session.normIncomingUri, session.mergedUri, iName + (named ? '' : ' (incoming)') + ' \u2194 ' + merged],
-    sides: [session.normTargetUri, session.normIncomingUri, tName + ' \u2194 ' + iName + ' (both normalised)']
-  };
-  const v = views[which] || views.target;
-  await vscode.commands.executeCommand('vscode.diff', v[0], v[1], v[2], { preview: false });
-  paint();
-}
 
 /**
  * Reopened on a resolution you saved: the merge's conflicts found again in it,
@@ -770,7 +632,7 @@ function openMergePanel(startText, so) {
     target: s.normTargetText, incoming: s.normIncomingText || '', text: startText,
     savedText: so.startFrom != null ? String(so.startFrom) : null,
     applyOnly: !s.applyOnSave,
-    starts: s.starts, start: s.startKind,
+    starts: s.starts, start: s.startKind, dupRemoved: s.dupRemoved, removedDups: s.removedDups,
     hideIdentical: vscode.workspace.getConfiguration('cmr').get('merge.hideIdentical', false),
     onPref: p => vscode.workspace.getConfiguration('cmr').update('merge.hideIdentical', !!p.hideIdentical, vscode.ConfigurationTarget.Global),
     conflictsFor,
@@ -782,383 +644,36 @@ function openMergePanel(startText, so) {
       const notes = await saveIntoResolution();
       return { ok: true, warn: notes.length > 0, message: notes.length ? 'Saved as your resolution \u2013 ' + notes.join(', ') : 'Saved as your resolution' };
     },
-    discard: async () => { if (session === s) await cmdCancelMerge(); },
+    // \u22ef: discard asks first; the report and the swap as they always were
+    discard: async () => {
+      if (session !== s) return;
+      const go = await vscode.window.showWarningMessage('Discard this merge?', { modal: true, detail: s.applyOnSave ? 'Your saved resolution is kept as it is.' : 'Nothing is written.' }, 'Discard');
+      if (go === 'Discard') await cmdCancelMerge();
+    },
+    report: async () => { await cmdCopyReport(); return null; },
+    swap: async () => { await cmdSwapDirection(); return null; },
+    // a manual merge's ways out: copied to paste into Copado, or saved as a file
+    copyResult: async text => { await vscode.env.clipboard.writeText(text); return { ok: true, message: 'Copied \u2013 paste it into Copado\u2019s resolution and save it there' }; },
+    saveAs: async text => {
+      const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(s.targetUri, '..', 'resolved-' + path.basename(s.targetUri.fsPath)), filters: { 'Metadata XML': ['xml'] } });
+      if (!to) return null;
+      await vscode.workspace.fs.writeFile(to, Buffer.from(text, 'utf8'));
+      return { ok: true, message: 'Saved as ' + path.basename(to.fsPath) };
+    },
+    manual: !!so.manual,
+    onDirty: d => { if (session === s) s.dirty = !!d; },
     onClose: () => { if (session === s && s.panel) { s.panel = null; endSession(); } }
   });
 }
 
 /** Your resolution as it is now: in the merge panel, or in the merge view. */
 async function mergedText() {
-  if (session.panel) return session.panelText;
-  return (await vscode.workspace.openTextDocument(session.mergedUri)).getText();
+  return session.panelText;
 }
 
-/** Your resolution against both branches, worked out again only when its text changed. */
-function refreshLive(text) {
-  if (!session || session.liveOff || session.normTargetText == null) return session ? session.live : null;
-  if (session.liveText === text) return session.live;
-  const r = require('./src/liveMarks').mark(session.normTargetText, session.normIncomingText || '', text, { type: session.typeName });
-  session.liveText = text;
-  // not valid XML while you type: the last good marks stay, and the summary says why
-  session.liveHeld = !!r.hold;
-  if (r.hold) return session.live;
-  session.live = r;
-  // a big file that differs too much is not compared again on every keystroke
-  if (r.tooMany && text.length > 200000) session.liveOff = true;
-  return r;
-}
-
-/** Where a change's note is written: after the line before a removal (where it was), else on the change's first line. */
-function noteLine(c, lineCount) {
-  if (c.bEnd > c.bStart) return { line: c.bStart, before: false };
-  return c.bStart > 0 ? { line: Math.min(c.bStart - 1, lineCount - 1), before: false } : { line: 0, before: true };
-}
-
-const first = ls => ((ls || []).find(l => l.trim()) || '').trim();
-const clip = (t, n) => t.length > n ? t.slice(0, n - 1) + '\u2026' : t;
-
-/** The notes written into the editor, one per line, joined when several changes share a line. */
-function liveNotes(doc, live) {
-  const by = new Map();
-  const theirs = session.theirs || 'the incoming file';
-  const short = theirs === 'the feature branch' ? 'the feature' : theirs;
-  for (const c of live.list) {
-    const more = n => n > 1 ? ' (+' + (n - 1) + ')' : '';
-    const named = c.label ? clip(c.label, 80) : null;
-    const text = { removed: '\u21b6 removed: ' + (named || clip(first(c.removed), 60) + more(c.removed.filter(l => l.trim()).length)),
-      dropped: '\u21b6 left out from ' + short + ': ' + (named || clip(first(c.removed), 60) + more(c.removed.filter(l => l.trim()).length)),
-      own: '\u270e your edit' + (named ? ': ' + named : ''), 'changed-own': '\u270e your edit \u00b7 ' + (named || 'the target had: ' + clip(first(c.removed), 50)),
-      'changed-feature': 'from ' + short + ' \u00b7 ' + (named || 'the target had: ' + clip(first(c.removed), 50)), feature: null }[c.kind];
-    if (!text) continue;
-    const at = noteLine(c, doc.lineCount);
-    const k = at.line + (at.before ? 'b' : 'a');
-    const red = c.kind === 'removed' || c.kind === 'dropped';
-    if (!by.has(k)) by.set(k, { at, parts: [], red });
-    const e = by.get(k);
-    e.parts.push(text);
-    e.red = e.red || red;
-  }
-  return [...by.values()].map(({ at, parts, red }) => {
-    const end = at.before ? 0 : doc.lineAt(at.line).text.length;
-    const look = { contentText: (at.before ? '' : '    ') + parts.join('   \u00b7   ') + (at.before ? '    ' : ''), fontStyle: 'italic',
-      color: new vscode.ThemeColor(red ? 'editorError.foreground' : 'editorInfo.foreground') };
-    return { range: new vscode.Range(at.line, end, at.line, end), renderOptions: at.before ? { before: look } : { after: look } };
-  });
-}
-
-/** The live changes at a line of the merged file: those it is part of, and those noted on it. */
-function liveAt(line) {
-  const live = session && session.live;
-  if (!live || live.tooMany) return [];
-  // a removal is explained on its note's line and on the line with its red mark
-  return live.list.filter(c => c.bEnd > c.bStart ? line >= c.bStart && line < c.bEnd : noteLine(c, Infinity).line === line || c.bStart === line);
-}
-
-/** Keeps mark line numbers correct when the user edits the merged file by hand. */
-function shiftMarks(changes) {
-  for (const ch of changes) {
-    const removed = ch.range.end.line - ch.range.start.line;
-    const addedLines = (ch.text.match(/\n/g) || []).length;
-    const delta = addedLines - removed;
-    if (!delta) continue;
-    const pivot = ch.range.end.line;
-    for (const m of session.marks) {
-      if (m.startLine > pivot) { m.startLine += delta; m.endLine += delta; }
-    }
-    for (const c of session.conflicts) {
-      if (c.line > pivot) c.line += delta;
-    }
-  }
-}
-
-let paintTimer;
-function schedulePaint() {
-  clearTimeout(paintTimer);
-  paintTimer = setTimeout(() => { const before = session && session.live; paint(); lensEmitter.fire(); if (session && session.live !== before) tree.refresh(); }, 120);
-}
-
-/**
- * Highlights the merged file. Ranges only - the explanation for a highlight is
- * built when you hover it (see mergeHover), not up front for every entry, which
- * matters on files with thousands of changes.
- */
-function paint() {
-  if (!session) return;
-  for (const editor of vscode.window.visibleTextEditors) {
-    if (editor.document.uri.toString() !== session.mergedUri.toString()) continue;
-    const added = [];
-    const conflict = [];
-    const dedup = [];
-    const own = [], removed = [], notes = [];
-    const max = editor.document.lineCount - 1;
-    const live = refreshLive(editor.document.getText());
-    const useLive = live && !live.tooMany;
-    for (const m of session.marks) {
-      if (m.startLine > max) continue;
-      const range = new vscode.Range(m.startLine, 0, Math.min(m.endLine, max), 0);
-      const k = m.mark.kind;
-      if ((k === 'added' || k === 'auto') && !useLive) added.push(range);
-      else if (k === 'dedup' || k === 'deleted') dedup.push(range);
-      else if (k === 'conflict') conflict.push(range);
-    }
-    if (useLive) {
-      for (const c of live.list) {
-        if (c.bEnd > c.bStart) (/feature/.test(c.kind) ? added : own).push(new vscode.Range(Math.min(c.bStart, max), 0, Math.min(c.bEnd - 1, max), 0));
-        if (c.kind === 'removed' || c.kind === 'dropped') removed.push(new vscode.Range(Math.min(c.bStart, max), 0, Math.min(c.bStart, max), 0));
-      }
-      // one place per change: rows when VS Code shows them in diff views, otherwise notes at the line ends
-      if (!vscode.workspace.getConfiguration('diffEditor').get('codeLens', false)) notes.push(...liveNotes(editor.document, live));
-    }
-    editor.setDecorations(decorations.added, added);
-    editor.setDecorations(decorations.conflict, conflict);
-    editor.setDecorations(decorations.dedup, dedup);
-    editor.setDecorations(decorations.own, own);
-    editor.setDecorations(decorations.removed, removed);
-    editor.setDecorations(decorations.note, notes);
-  }
-}
-
-/** The explanation for whatever highlight is under the cursor. */
-function mergeHover(doc, position) {
-  if (!session || doc.uri.toString() !== session.mergedUri.toString()) return null;
-  const line = position.line;
-  const m = session.marks.find(x => line >= x.startLine && line <= x.endLine);
-  const here = liveAt(line);
-  if (here.length && !(m && m.mark.kind === 'conflict')) {
-    const md = new vscode.MarkdownString(here.map(liveHover).join('\n\n---\n\n'));
-    md.isTrusted = true;
-    return new vscode.Hover(md, new vscode.Range(line, 0, line, 0));
-  }
-  if (!m) return null;
-  const k = m.mark.kind;
-  let text;
-  if (k === 'added') text = 'Added from the incoming file: ' + m.mark.added.path + (m.mark.added.label ? ' [' + m.mark.added.label + ']' : '');
-  else if (k === 'dedup') text = dedupHover(m.mark.dupes);
-  else if (k === 'auto') text = 'Taken from the incoming file automatically - only that side had changed it (was "' + m.mark.auto.from + '").';
-  else if (k === 'deleted') text = 'The incoming file deleted this. It is kept, because the target never loses anything - drop it from the merge panel if you want it gone.';
-  else if (k === 'conflict') {
-    const c = session.conflicts.find(x => x.line === m.startLine) || m.mark.conflict;
-    text = new vscode.MarkdownString('**Both files set `' + c.tag + '`**\n\n- target: `' + c.base + '`\n- incoming: `' + c.incoming + '`\n\n' +
-      'Currently using the **' + (c.resolved === 'base' ? 'target' : 'incoming') + '** value.');
-  }
-  return text ? new vscode.Hover(text, new vscode.Range(m.startLine, 0, m.endLine, 0)) : null;
-}
-
-function dedupHover(dupes) {
-  const risky = dupes.filter(d => !d.identical).length;
-  return dupes.length + ' duplicate ' + (dupes.length === 1 ? 'entry' : 'entries') + ' of this were removed' +
-    (risky ? '. ' + risky + ' had the same key but different values - check this one.' : ' (identical copies).');
-}
-
-function mergeLenses(doc) {
-  if (!session || doc.uri.toString() !== session.mergedUri.toString()) return [];
-  const lenses = [];
-  const r = session.report;
-  const unreviewed = session.conflicts.filter(c => !c.reviewed).length;
-  const top = new vscode.Range(0, 0, 0, 0);
-
-  lenses.push(new vscode.CodeLens(top, {
-    title: session.applyOnSave ? '$(check) Save and close' : '$(check) Apply to ' + path.basename(session.applyToUri.fsPath),
-    command: 'cmr.applyMerge'
-  }));
-  const live = refreshLive(doc.getText());
-  const n = live && !live.tooMany ? live.counts : null;
-  lenses.push(new vscode.CodeLens(top, {
-    title: n ? '$(diff) ' + [n.feature ? n.feature + ' from ' + (session.theirs === 'the feature branch' ? 'the feature' : session.theirs || 'incoming') : '', n.removed ? n.removed + ' removed' : '', n.dropped ? n.dropped + ' left out' : '', n.own ? n.own + ' your edit' + (n.own === 1 ? '' : 's') : '',
-      session.conflicts.length ? session.conflicts.length + ' conflict' + (session.conflicts.length === 1 ? '' : 's') + (unreviewed ? ' (' + unreviewed + ' to review)' : '') : ''].filter(Boolean).join(' \u00b7 ') || '$(check) the same as the target'
-      : '$(diff) ' + r.added.length + ' added \u00b7 ' + r.duplicates.length + ' duplicates removed \u00b7 ' + session.conflicts.length + ' conflicts' + (unreviewed ? ' (' + unreviewed + ' unreviewed)' : '') + (live && live.tooMany ? ' \u00b7 too many differences to mark' : ''),
-    command: 'cmrMergePanel.focus'
-  }));
-  if (session.conflicts.length) {
-    lenses.push(new vscode.CodeLens(top, { title: 'Use all target values', command: 'cmr.useAllTarget' }));
-    lenses.push(new vscode.CodeLens(top, { title: 'Use all incoming values', command: 'cmr.useAllIncoming' }));
-  }
-  lenses.push(new vscode.CodeLens(top, { title: '$(arrow-swap) Compare against incoming', command: 'cmr.showIncomingVsMerged' }));
-  lenses.push(new vscode.CodeLens(top, { title: '$(x) Discard', command: 'cmr.cancelMerge' }));
-
-  if (session.conflicts.length > cfg().maxInlineConflicts) {
-    lenses.push(new vscode.CodeLens(top, {
-      title: '$(list-tree) ' + session.conflicts.length + ' conflicts - resolve them in the side panel',
-      command: 'cmrMergePanel.focus'
-    }));
-    return lenses;
-  }
-
-  // one row per change against the target, with its one action - not on a conflict's line, which has its own
-  if (n) {
-    const busy = new Set(session.conflicts.map(c => c.line));
-    if (session.liveHeld) lenses.push(new vscode.CodeLens(top, { title: '$(warning) marks paused \u2013 not valid XML right now', command: '' }));
-    const theirs = session.theirs || 'the incoming file';
-    const words = { removed: ['$(discard) Removed here: ', 'Restore'], dropped: ['$(discard) Left out from ' + theirs + ': ', 'Add it back'], feature: ['From ' + theirs, 'Undo'], own: ['$(edit) Your own edit \u2013 in neither side', 'Undo'],
-      'changed-feature': ['Changed by ' + theirs + ' \u2013 the target had: ', 'Use target'], 'changed-own': ['$(edit) Your own edit \u2013 the target had: ', 'Use target'] };
-    for (const ch of live.list.slice(0, 300)) {
-      const line = Math.min(ch.bStart, doc.lineCount - 1);
-      if (busy.has(line)) continue;
-      const [say, act] = words[ch.kind];
-      const first = (ch.removed[0] || '').trim();
-      const range = new vscode.Range(line, 0, line, 0);
-      const had = first.length > 70 ? first.slice(0, 67) + '\u2026' : first;
-      // with a name for the change: "Removed here: fieldInstance ... (10 lines)", "Changed by the feature branch · uiBehavior: none -> required"
-      const named = { removed: '$(discard) Removed here: ', dropped: '$(discard) Left out from ' + theirs + ': ', feature: 'From ' + theirs + ' \u00b7 ', own: '$(edit) Your own edit \u00b7 ',
-        'changed-feature': 'Changed by ' + theirs + ' \u00b7 ', 'changed-own': '$(edit) Your own edit \u00b7 ' }[ch.kind];
-      const title = ch.label ? named + clip(ch.label, 80)
-        : say + (/the target had: $|here: $|: $/.test(say) ? had + (ch.removed.length > 1 ? ' (+' + (ch.removed.length - 1) + ' more)' : '') : '');
-      lenses.push(new vscode.CodeLens(range, { title, command: '' }));
-      if (ch.undo) lenses.push(new vscode.CodeLens(range, { title: act, command: 'cmr.mergeTakeTarget', arguments: [ch.undo] }));
-    }
-  }
-  session.conflicts.forEach((c, i) => {
-    if (c.multiline || c.line == null || c.line >= doc.lineCount) return;
-    if (doc.lineAt(c.line).text.indexOf('<' + c.tag + '>') === -1) return;
-    const range = new vscode.Range(c.line, 0, c.line, 0);
-    const usingTarget = c.resolved === 'base';
-    lenses.push(new vscode.CodeLens(range, {
-      title: '$(git-merge) conflict ' + (i + 1) + '/' + session.conflicts.length +
-        ' \u00b7 using ' + (usingTarget ? 'target' : 'incoming') + ' "' + shorten(usingTarget ? c.base : c.incoming) + '"',
-      command: 'cmr.listConflicts'
-    }));
-    lenses.push(new vscode.CodeLens(range, {
-      title: usingTarget
-        ? 'switch to incoming "' + shorten(c.incoming) + '"'
-        : 'switch to target "' + shorten(c.base) + '"',
-      command: usingTarget ? 'cmr.useIncomingValue' : 'cmr.useTargetValue',
-      arguments: [i]
-    }));
-  });
-  return lenses;
-}
-
-/**
- * VS Code hides CodeLens rows in comparison views unless "Diff Editor: Code
- * Lens" is on - and the merge view is one. The marks and the hover links work
- * either way; the rows above each change need the setting. Asked once.
- */
-async function offerDiffLenses() {
-  const dc = vscode.workspace.getConfiguration('diffEditor');
-  if (dc.get('codeLens', false) !== false || ctx.globalState.get('cmr.askedDiffLens')) return;
-  await ctx.globalState.update('cmr.askedDiffLens', true);
-  const pick = await vscode.window.showInformationMessage('Show Restore and Undo buttons above each change in the merge view? VS Code hides them in comparison views unless \u201cDiff Editor: Code Lens\u201d is on. The marks, and the actions in the hover and the Merge panel, work either way.',
-    'Turn it on', 'Not now');
-  if (pick === 'Turn it on') await dc.update('codeLens', true, vscode.ConfigurationTarget.Global);
-}
-
-/** A change's action, and the words for it. */
-const ACTION = { removed: 'Restore', dropped: 'Add it back', feature: 'Undo', own: 'Undo', 'changed-feature': 'Use target', 'changed-own': 'Use target' };
-
-/** What a change is, in a hover, with its action as a link. */
-function liveHover(c) {
-  const theirs = session.theirs || 'the incoming file';
-  const block = ls => '\n\n```xml\n' + ls.join('\n') + '\n```';
-  const said = { removed: '**Removed here.** The target has:' + block(c.removed), dropped: '**Left out from ' + theirs + '.** It has:' + block(c.removed),
-    feature: '**From ' + theirs + '.**', own: '**Your own edit** - in neither side.', 'changed-feature': '**Changed by ' + theirs + '.** The target has:' + block(c.removed),
-    'changed-own': '**Your own edit** - in neither side. The target has:' + block(c.removed) }[c.kind];
-  return (c.label ? '`' + c.label.replace(/`/g, '') + '`\n\n' : '') + said + (c.undo ? '\n\n[' + ACTION[c.kind] + '](command:cmr.mergeTakeTarget?' + encodeURIComponent(JSON.stringify([c.undo])) + ')' : '');
-}
-
-/**
- * Restore / Add it back / Undo / Use target: one edit - the change's lines
- * replaced by what goes back - and only if they are still what was marked,
- * so an action can never change the wrong lines after you typed. From a row,
- * a hover link or the Merge panel.
- */
-async function cmdMergeTakeTarget(arg) {
-  const u = arg && (arg.undo || (arg.change && arg.change.undo) || (arg.bStart != null ? arg : null));
-  if (!session || !u) return;
-  const doc = await vscode.workspace.openTextDocument(session.mergedUri);
-  const lines = doc.getText().split(/(?<=\n)/);
-  const now = lines.slice(u.bStart, u.bEnd).map(l => l.replace(/\r?\n$/, ''));
-  if (JSON.stringify(now) !== JSON.stringify(u.expect || [])) { vscode.window.setStatusBarMessage('That change has moved - the marks are updated, try again.', 4000); schedulePaint(); return; }
-  // what goes in keeps the file's line endings, and ends its last line when it is not the end of the file
-  const eol = /\r\n/.test(doc.getText()) ? '\r\n' : '\n';
-  let insert = String(u.insert || '').replace(/\r?\n/g, eol);
-  if (insert && !/\n$/.test(insert) && u.bEnd < lines.length) insert += eol;
-  const start = u.bStart < doc.lineCount ? new vscode.Position(u.bStart, 0) : doc.positionAt(doc.getText().length);
-  const end = u.bEnd < doc.lineCount ? new vscode.Position(u.bEnd, 0) : doc.positionAt(doc.getText().length);
-  const edit = new vscode.WorkspaceEdit();
-  edit.replace(session.mergedUri, new vscode.Range(start, end), insert);
-  await vscode.workspace.applyEdit(edit);
-  schedulePaint();
-}
-
-/** Goes to a line of your resolution. */
-async function cmdMergeReveal(line) {
-  if (session && session.panel) { session.panel.reveal(Number(line) || 0); return; }
-  if (!session) return;
-  const ed = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === session.mergedUri.toString());
-  if (!ed) return;
-  const r = new vscode.Range(line, 0, line, 0);
-  ed.selection = new vscode.Selection(r.start, r.start);
-  ed.revealRange(r, vscode.TextEditorRevealType.InCenter);
-}
-
-function shorten(v) {
-  v = String(v == null ? '' : v);
-  return v.length > 40 ? v.slice(0, 37) + '\u2026' : v;
-}
-
-function conflictIndexOf(arg) {
-  if (typeof arg === 'number') return arg;
-  if (arg && typeof arg.conflictIndex === 'number') return arg.conflictIndex;
-  return -1;
-}
-
-async function setSection(item, side) {
-  if (!session || !item || !item.entries) return;
-  for (const e of item.entries) {
-    if (typeof e.i === 'number') await setConflict(e.i, side);
-  }
-}
-
-async function setConflict(index, side) {
-  if (!session) return;
-  index = conflictIndexOf(index);
-  const c = session.conflicts[index];
-  if (!c) return;
-  const doc = await vscode.workspace.openTextDocument(session.mergedUri);
-  if (c.line >= doc.lineCount || doc.lineAt(c.line).text.indexOf('<' + c.tag + '>') === -1) {
-    vscode.window.showWarningMessage('That line has moved. Edit the value directly.');
-    return;
-  }
-  const line = doc.lineAt(c.line);
-  const indent = line.text.match(/^\s*/)[0];
-  const value = side === 'base' ? c.base : c.incoming;
-  const edit = new vscode.WorkspaceEdit();
-  edit.replace(session.mergedUri, line.range, indent + '<' + c.tag + '>' + escapeXml(value) + '</' + c.tag + '>');
-  await vscode.workspace.applyEdit(edit);
-  c.resolved = side;
-  c.reviewed = true;
-  lensEmitter.fire();
-  paint();
-  tree.refresh();
-  updateBadge();
-  scheduleChecks();
-}
-
-async function setAllConflicts(side) {
-  if (!session) return;
-  for (let i = 0; i < session.conflicts.length; i++) {
-    if (session.conflicts[i].resolved !== side) await setConflict(i, side);
-    else { session.conflicts[i].reviewed = true; }
-  }
-  lensEmitter.fire();
-  tree.refresh();
-  updateBadge();
-}
 
 /* ---------- deploy checks on the merged result ---------- */
 
-let checkTimer;
-function scheduleChecks() {
-  clearTimeout(checkTimer);
-  checkTimer = setTimeout(async () => {
-    if (!session) return;
-    try {
-      const doc = await vscode.workspace.openTextDocument(session.mergedUri);
-      session.checks = checksFor(doc.getText());
-      tree.refresh();
-    } catch (e) { /* document gone */ }
-  }, 600);
-}
 
 function checksFor(text) {
   const c = cfg();
@@ -1173,56 +688,6 @@ function checksFor(text) {
   }));
 }
 
-function updateBadge() {
-  if (!treeUi) return;
-  const unreviewed = session ? session.conflicts.filter(c => !c.reviewed).length : 0;
-  const errors = session ? (session.checks || []).filter(c => c.severity === 'error').length : 0;
-  try {
-    treeUi.badge = (unreviewed + errors)
-      ? { value: unreviewed + errors, tooltip: unreviewed + ' conflicts to review, ' + errors + ' deploy errors' }
-      : undefined;
-  } catch (e) { /* older VS Code */ }
-  treeUi.message = session ? undefined
-    : 'No merge in progress. Right-click the file to keep everything from and choose "Use as Target".';
-  treeUi.title = session
-    ? 'Merge: ' + session.labels.target
-    : 'Copado Merge';
-}
-
-async function revealLine(line) {
-  if (!session || typeof line !== 'number') return;
-  const doc = await vscode.workspace.openTextDocument(session.mergedUri);
-  let editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === session.mergedUri.toString());
-  if (!editor) {
-    await showDiff('target');
-    editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === session.mergedUri.toString());
-  }
-  if (!editor) editor = await vscode.window.showTextDocument(doc);
-  const pos = new vscode.Position(Math.max(0, Math.min(line, doc.lineCount - 1)), 0);
-  editor.selection = new vscode.Selection(pos, pos);
-  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-}
-
-/** Removes an entry from the merged result (used for incoming-side deletions). */
-async function dropEntry(item) {
-  if (!session || !item) return;
-  const mark = (session.marks || []).find(m => m.mark === item.markRef || (item.entryRef && m.mark.deletion === item.entryRef));
-  if (!mark) { vscode.window.showWarningMessage('That entry has already moved or been removed.'); return; }
-  const doc = await vscode.workspace.openTextDocument(session.mergedUri);
-  const last = Math.min(mark.endLine, doc.lineCount - 1);
-  const start = new vscode.Position(Math.max(0, mark.startLine), 0);
-  const end = last + 1 <= doc.lineCount - 1
-    ? new vscode.Position(last + 1, 0)
-    : doc.lineAt(last).range.end;
-  const edit = new vscode.WorkspaceEdit();
-  edit.delete(session.mergedUri, new vscode.Range(start, end));
-  await vscode.workspace.applyEdit(edit);
-  session.marks = session.marks.filter(m => m !== mark);
-  session.report.deletions = session.report.deletions.filter(d => d !== mark.mark.deletion);
-  tree.refresh();
-  paint();
-  scheduleChecks();
-}
 
 /* ---------- workspace settings ---------- */
 
@@ -1392,7 +857,7 @@ async function cmdSwapDirection() {
     { modal: true }, 'Swap and re-merge');
   if (go !== 'Swap and re-merge') return;
   const labels = session.labels;
-  await endSession();
+  await endSession({ noDraft: true });   // you were told your edits are discarded
   await startSession(incoming, target, ancestor, {
     applyToUri: applyTo || undefined,
     onApplied,
@@ -1404,45 +869,6 @@ function escapeXml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-async function cmdListConflicts() {
-  if (!session) { vscode.window.showInformationMessage('No merge in progress.'); return; }
-  if (!session.conflicts.length) {
-    vscode.window.showInformationMessage('No value conflicts. ' + session.report.added.length +
-      ' entries were added and ' + session.report.duplicates.length + ' duplicates removed.');
-    return;
-  }
-  const items = session.conflicts.map((c, i) => ({
-    label: (c.reviewed ? '$(check) ' : '$(circle-outline) ') + c.tag,
-    description: 'target "' + shorten(c.base) + '"  vs  incoming "' + shorten(c.incoming) + '"  \u2192 using ' + (c.resolved === 'base' ? 'target' : 'incoming'),
-    detail: c.path,
-    index: i
-  }));
-  const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Jump to a conflict in the merged file', matchOnDetail: true });
-  if (!pick) return;
-  await revealConflict(pick.index);
-}
-
-async function revealConflict(index) {
-  const c = session.conflicts[index];
-  const doc = await vscode.workspace.openTextDocument(session.mergedUri);
-  let editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === session.mergedUri.toString());
-  if (!editor) {
-    await showDiff('target');
-    editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === session.mergedUri.toString());
-  }
-  if (!editor) editor = await vscode.window.showTextDocument(doc);
-  const pos = new vscode.Position(Math.min(c.line, doc.lineCount - 1), 0);
-  editor.selection = new vscode.Selection(pos, pos);
-  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-  session.cursor = index;
-}
-
-async function jumpConflict(step) {
-  if (!session || !session.conflicts.length) return;
-  const n = session.conflicts.length;
-  const current = typeof session.cursor === 'number' ? session.cursor : (step > 0 ? -1 : 0);
-  await revealConflict(((current + step) % n + n) % n);
-}
 
 function writeReport() {
   const r = session.report;
@@ -1468,13 +894,6 @@ function writeReport() {
   output.appendLine('Review in the diff on screen. Nothing is written to the target until you apply.');
 }
 
-let applying = false;
-async function cmdApplyMerge(opts) {
-  if (!session) { vscode.window.showInformationMessage('No merge in progress.'); return; }
-  if (applying) return;
-  applying = true;
-  try { await (opts && opts.fromSave ? saveIntoResolution() : applyOnce()); } finally { applying = false; }
-}
 
 /**
  * Ctrl+S in a promotion's merge view: what you saved becomes your resolution,
@@ -1484,6 +903,7 @@ async function cmdApplyMerge(opts) {
  */
 async function saveIntoResolution() {
   const text = await mergedText();
+  await keepDraft(session.applyToUri || session.targetUri, null);
   const notes = [];
   const parsed = X.parse(text);
   if (parsed.errors.length) notes.push(parsed.errors.length + ' XML problem' + (parsed.errors.length === 1 ? '' : 's'));
@@ -1526,7 +946,6 @@ async function applyOnce() {
       violations.length + ' deploy check' + (violations.length === 1 ? '' : 's') + ' would fail on this result, e.g. "' +
       violations[0].message + '" Apply anyway?',
       { modal: true }, ...(inPanel ? ['Apply anyway'] : ['Apply anyway', 'Show them']));
-    if (go === 'Show them') { session.checks = checksFor(text); tree.refresh(); await vscode.commands.executeCommand('cmrMergePanel.focus'); return false; }
     if (go !== 'Apply anyway') return false;
   }
 
@@ -1549,7 +968,8 @@ async function applyOnce() {
   const onApplied = session.onApplied;
   const name = path.basename(targetUri.fsPath);
   const message = session.appliedMessage, open = session.openAfterApply;
-  await endSession();
+  await keepDraft(session.applyToUri || session.targetUri, null);
+  await endSession({ noDraft: true });
   if (open) await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(targetUri));
   if (onApplied) { try { onApplied(targetUri); } catch (e) { /* view refresh only */ } }
   vscode.window.showInformationMessage(message || 'Merged into ' + name + '. Commit it back to Copado when you are happy.');
@@ -1558,21 +978,36 @@ async function applyOnce() {
 
 async function cmdCancelMerge() {
   if (!session) return;
-  await endSession();
+  await keepDraft(session.applyToUri || session.targetUri, null);
+  await endSession({ noDraft: true });
   vscode.window.showInformationMessage('Merge discarded. Nothing was written.');
 }
 
-async function endSession() {
+/**
+ * Unsaved changes of a merge that ended without your say - its tab closed, another merge opened - are kept
+ * as a draft for that file, and the next merge of it offers them back. Discarding or saving clears it.
+ */
+const DRAFTS = 'releaseAssistant.mergeDrafts';
+function draftOf(uri) { const all = (ctx && ctx.workspaceState && ctx.workspaceState.get(DRAFTS, {})) || {}; return all[uri.toString()] || null; }
+async function keepDraft(uri, text) {
+  if (!ctx || !ctx.workspaceState || !uri) return;
+  const all = Object.assign({}, ctx.workspaceState.get(DRAFTS, {}));
+  if (text == null) delete all[uri.toString()]; else all[uri.toString()] = { text, at: Date.now() };
+  await ctx.workspaceState.update(DRAFTS, all);
+}
+
+async function endSession(opts) {
+  if (session && session.dirty && session.panelText != null && !(opts && opts.noDraft)) {
+    const uri = session.applyToUri || session.targetUri;
+    await keepDraft(uri, session.panelText);
+    vscode.window.showInformationMessage('Your unsaved changes to ' + path.basename(uri.fsPath) + ' are kept \u2013 open its merge again to restore them.');
+  }
   if (session && session.panel) { const p = session.panel; session.panel = null; p.dispose(); }
   const uris = session
     ? [session.mergedUri, session.normTargetUri, session.normIncomingUri]
       .filter(Boolean).map(u => u.toString())
     : [];
   session = null;
-  pendingTarget = null;
-  lensEmitter.fire();
-  if (tree) tree.refresh();
-  updateBadge();
   await vscode.commands.executeCommand('setContext', 'cmr.activeMerge', false);
   await closeTabs(uris);
 }
@@ -1597,35 +1032,9 @@ async function closeTabs(uris) {
 
 /* ---------- compare without merging ---------- */
 
-async function cmdCompare(uri) {
-  const c = cfg();
-  const left = uri || activeUri();
-  if (!left) return;
-  const right = await pickFile(left, 'Compare ' + path.basename(left.fsPath) + ' with...');
-  if (!right) return;
-
-  const docs = [];
-  for (const u of [left, right]) {
-    const doc = await vscode.workspace.openTextDocument(u);
-    const parsed = X.parse(doc.getText());
-    const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
-    docs.push({
-      uri: u,
-      text: parsed.root && c.normalizeBeforeDiff ? formatter.format(parsed, formatOptions(c, eol)) : doc.getText()
-    });
-  }
-  const a = await writeTemp('A__' + path.basename(left.fsPath), docs[0].text);
-  const b = await writeTemp('B__' + path.basename(right.fsPath), docs[1].text);
-  await vscode.commands.executeCommand('vscode.diff', a, b,
-    path.basename(left.fsPath) + ' \u2194 ' + path.basename(right.fsPath) + ' (normalised)', { preview: false });
-}
 
 /* ---------- housekeeping commands ---------- */
 
-function activeUri() {
-  const e = vscode.window.activeTextEditor;
-  return e ? e.document.uri : null;
-}
 
 function activeMetadataDoc() {
   const editor = vscode.window.activeTextEditor;
@@ -1637,36 +1046,6 @@ function activeMetadataDoc() {
   return editor.document;
 }
 
-async function pickFile(exclude, placeHolder) {
-  const open = vscode.workspace.textDocuments
-    .filter(d => d.uri.scheme === 'file' && /\.xml$/i.test(d.fileName))
-    .map(d => d.uri);
-  const found = await vscode.workspace.findFiles('**/*.xml', '**/{node_modules,.sfdx,.sf,.git}/**', 3000);
-  const seen = new Set();
-  const items = [];
-  const push = (uri, group) => {
-    const key = uri.toString();
-    if (seen.has(key)) return;
-    if (exclude && key === exclude.toString()) return;
-    if (uri.fsPath.indexOf(path.join('globalStorage', '')) !== -1) return;
-    seen.add(key);
-    items.push({ label: path.basename(uri.fsPath), description: vscode.workspace.asRelativePath(uri), uri, group });
-  };
-  for (const u of open) push(u, 'open');
-  for (const u of found) push(u, 'workspace');
-  if (!items.length) {
-    const chosen = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { XML: ['xml'] } });
-    return chosen && chosen.length ? chosen[0] : null;
-  }
-  items.unshift({ label: '$(folder-opened) Browse...', description: 'pick a file outside the workspace', browse: true });
-  const pick = await vscode.window.showQuickPick(items, { placeHolder, matchOnDescription: true });
-  if (!pick) return null;
-  if (pick.browse) {
-    const chosen = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { XML: ['xml'] } });
-    return chosen && chosen.length ? chosen[0] : null;
-  }
-  return pick.uri;
-}
 
 async function cmdCheckDuplicates() {
   const doc = activeMetadataDoc();

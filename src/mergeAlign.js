@@ -86,8 +86,12 @@ function align(targetText, incomingText, mergedText, opts) {
   // an element whose children each start on their own line - the layout of formatted metadata
   const tidy = (s, el, ks) => ks.length && ks.every((k, i) => i === 0 ? lineOf(s, k.start) > lineOf(s, el.start) : lineOf(s, k.start) > lineOf(s, ks[i - 1].start)) &&
     el.closeStart != null && lineOf(s, el.closeStart) > lineOf(s, ks[ks.length - 1].end - 1);
-  // a child's lines run until the next child (or the parent's end tag): gaps and comments go with it
-  const range = (s, el, ks, i) => [lineOf(s, ks[i].start), i + 1 < ks.length ? lineOf(s, ks[i + 1].start) : lineOf(s, el.closeStart)];
+  // a child's lines: from just after the one before it (or the parent's opening tag) to its own last line - the
+  // comments and blank lines before an element belong to it, as a comment describes what follows
+  const openEnd = (s, el) => lineOf(s, (el.openTagEnd != null ? el.openTagEnd : el.start + 1) - 1) + 1;
+  const range = (s, el, ks, i) => [i ? lineOf(s, ks[i - 1].end - 1) + 1 : openEnd(s, el), lineOf(s, ks[i].end - 1) + 1];
+  // the same element, and the same lines around it - a comment added or taken out is a change
+  const sameLines = (a1, b1) => a1.map(l => l.trim()).filter(Boolean).join('\n') === b1.map(l => l.trim()).filter(Boolean).join('\n');
   const slice = (side, r) => lines[side].slice(r[0], r[1]);
   const flat = (s, el) => s.flat(el);
   const orderMatters = (path, tag) => { const spec = registry.specFor(type, path, tag); return !(spec && spec.sortable === true); };
@@ -114,7 +118,7 @@ function align(targetText, incomingText, mergedText, opts) {
     const movedYs = new Set(paired.filter(y => !keep.has(y) && orderMatters(path, y.name)));
 
     // the parent's own opening lines
-    const head = [lineOf(sa, a.start), lineOf(sa, A[0].start)], headB = [lineOf(sb, b.start), lineOf(sb, B[0].start)];
+    const head = [lineOf(sa, a.start), openEnd(sa, a)], headB = [lineOf(sb, b.start), openEnd(sb, b)];
     pieces.push({ kind: slice('a', head).join('') === slice('b', headB).join('') ? 'same' : 'changed-own', left: slice('a', head), b0: headB[0], b1: headB[1], label: b.name });
 
     // what the target has and you do not, and what the feature added and you left out: each after the sibling it followed
@@ -152,7 +156,10 @@ function align(targetText, incomingText, mergedText, opts) {
         pieces.push({ kind, left: [], b0: yr[0], b1: yr[1], label: nameOf(type, path, y) + (n > 1 ? ' (' + n + ' lines)' : ''), undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: '' }] });
       } else {
         const xr = range(sa, a, A, idxA.get(x));
-        if (flat(sa, x) === flat(sb, y)) {
+        if (flat(sa, x) === flat(sb, y) && !sameLines(slice('a', xr), yLines)) {
+          // the same element, with a comment or a blank line added or taken out around it: line by line
+          lineRuns(slice('a', xr), yLines, yr[0], featureSet, pieces, null);
+        } else if (flat(sa, x) === flat(sb, y)) {
           // the target's, unchanged by you - and what the feature branch did with it
           const n = yLines.filter(l => l.trim()).length;
           if (f && !z && !xInF.has(x) && orderMatters(path, y.name)) {
@@ -177,7 +184,8 @@ function align(targetText, incomingText, mergedText, opts) {
     });
 
     // the parent's closing lines
-    const tail = [lineOf(sa, a.closeStart), lineOf(sa, a.end - 1) + 1], tailB = [lineOf(sb, b.closeStart), lineOf(sb, b.end - 1) + 1];
+    // after the last child: what is left before the end tag, and the end tag
+    const tail = [lineOf(sa, A[A.length - 1].end - 1) + 1, lineOf(sa, a.end - 1) + 1], tailB = [lineOf(sb, B[B.length - 1].end - 1) + 1, lineOf(sb, b.end - 1) + 1];
     pieces.push({ kind: slice('a', tail).join('') === slice('b', tailB).join('') ? 'same' : 'changed-own', left: slice('a', tail), b0: tailB[0], b1: tailB[1] });
   }
 

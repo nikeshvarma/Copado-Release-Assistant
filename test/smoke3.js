@@ -1003,7 +1003,7 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual(page.posted.pop(), { type: 'act', name: 'home', payload: {} }, 'Promotions, clicked while a promotion is open, goes back to the start');
     assert.ok(!/class="scrim"/.test(page.html), 'and the dialog is closed');
     page.state({ copadoOrg: 'copado', recent: [{ name: 'P0003', status: 'Merge Conflict', from: 'qa', to: 'uat', total: 0, syncedAt: now }], current: null, validation: null });
-    assert.ok(/Open a Copado promotion/.test(page.text()) && /id="ref"/.test(page.html) && /data-a="openRecent" data-ref="P0003"/.test(page.html), 'the start: open another, or a recent one');
+    assert.ok(/Open a promotion/.test(page.text()) && /id="href"/.test(page.html) && /data-a="openRecent" data-ref="P0003"/.test(page.html), 'the start: open another, or a recent one');
     const n = page.posted.length;
     page.click({ nav: 'Promotions' });
     assert.strictEqual(page.posted.length, n, 'on the start already, Promotions does nothing more');
@@ -1160,7 +1160,7 @@ module.exports = function register(ok, section, h) {
     page.click({ a: 'accept' });
     assert.deepStrictEqual(page.posted.pop(), { type: 'act', name: 'accept', payload: { rel: xml } });
     page.state({ copadoOrg: 'copado', recent: [], current: null, validation: null, autoResolve: false });
-    assert.ok(/nothing is resolved until you accept it/.test(page.text()));
+    assert.ok(/merged for you to review \u2013 nothing in Copado changes until you upload/.test(page.text()));
   });
 
   ok('the pre-check end to end: your resolution is checked, not the branch\u2019s; an unresolved file is left out; the page follows it - the Output panel never opens', async () => {
@@ -1322,14 +1322,14 @@ module.exports = function register(ok, section, h) {
     Module._load = function (req) {
       if (req === 'vscode') return full;
       if (req === './release') return { activate: (c, d) => { deps = d; } };
-      if (req === './quickMerge') return { activate() {} };
       return load.apply(this, arguments);
     };
     // the hook stays while extension.js activates: it loads the release side then, not when it is required
     try {
       delete require.cache[require.resolve('../extension')];
       const ext = require('../extension');
-      await ext.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => d, update: async () => {} }, globalState: { get: (k, d) => kept.has(k) ? kept.get(k) : d, update: async (k, v) => { kept.set(k, v); } },
+      const ws = new Map();
+      await ext.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => ws.has(k) ? ws.get(k) : d, update: async (k, v) => { ws.set(k, v); } }, globalState: { get: (k, d) => kept.has(k) ? kept.get(k) : d, update: async (k, v) => { kept.set(k, v); } },
         extensionUri: vs.Uri.file(root), globalStorageUri: vs.Uri.file(path.join(root, '.g')), storageUri: vs.Uri.file(path.join(root, '.s')), extensionPath: root, secrets: any() });
     } finally { Module._load = load; }
     const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -1350,118 +1350,6 @@ module.exports = function register(ok, section, h) {
     };
   }
 
-  ok('Review in merge: your resolution marked against both branches as you type - what came from the feature, what you removed, your own edits - each with its one action; Ctrl+S saves it and the view stays open', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra mv '));
-    try {
-      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
-      const T = '<?xml version="1.0" encoding="UTF-8"?>\n<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <relatedLists>\n        <fields>OPPORTUNITY.NAME</fields>\n        <fields>QUOTE.TOTALPRICE</fields>\n        <relatedList>Quote.Account__c</relatedList>\n    </relatedLists>\n</Layout>\n';
-      const target = put('target.layout-meta.xml', T);
-      const incoming = put('feature.layout-meta.xml', T.replace('<fields>QUOTE.TOTALPRICE</fields>\n', '<fields>QUOTE.TOTALPRICE</fields>\n        <fields>QUOTE.ISSYNCING</fields>\n        <fields>QUOTE.SUBTOTAL</fields>\n'));
-      const resolved = put('resolved.layout-meta.xml', '');
-      const mv = await realMergeView(root);
-      const { vs } = mv;
-      let applied = 0;
-      const start = extra => mv.deps().startSession(vs.Uri.file(target), vs.Uri.file(incoming), null, Object.assign({ labels: { target: 'Target branch (HEAD)', incoming: 'Feature branch (origin/feature/US-0000103)', merged: 'Your resolution (editable)' },
-        applyToUri: vs.Uri.file(resolved), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', onApplied: () => { applied++; } }, extra || {}));
-      await start();
-      mv.show();
-      const merged = mv.mergedOf();
-      await mv.wait(20);
-      assert.strictEqual(vs.log.info.filter(m => /Show Restore and Undo buttons above each change/.test(m)).length, 1, 'asked once whether to show the rows in comparison views');
-      assert.ok(fs.readFileSync(merged.fsPath, 'utf8').includes('QUOTE.SUBTOTAL'), 'it opens on the suggestion');
-      assert.ok(vs.log.commands.filter(c => c[0] === 'vscode.diff').map(c => c[3]).includes('Target branch (HEAD) \u2194 Your resolution (editable)'));
-      let titles = mv.lenses().map(l => l.command.title);
-      assert.ok(titles.includes('$(diff) 2 from the feature') && titles.includes('From the feature branch \u00b7 fields QUOTE.ISSYNCING') && titles.includes('From the feature branch \u00b7 fields QUOTE.SUBTOTAL') && titles.filter(t => t === 'Undo').length === 2, titles.join(' | '));
-      assert.ok(titles.includes('$(check) Save and close'));
-      // you remove the target's TOTALPRICE and write your own related list: both marked, with what the target had
-      const mine = fs.readFileSync(merged.fsPath, 'utf8').replace('        <fields>QUOTE.TOTALPRICE</fields>\n', '').replace('<relatedList>Quote.Account__c</relatedList>', '<relatedList>Quote.Opportunity__c</relatedList>');
-      await mv.edit(mine);
-      titles = mv.lenses().map(l => l.command.title);
-      assert.ok(titles.includes('$(diff) 2 from the feature \u00b7 1 removed \u00b7 1 your edit'), titles.join(' | '));
-      assert.ok(titles.includes('$(discard) Removed here: fields QUOTE.TOTALPRICE') && titles.includes('Restore'), 'what you removed stays visible, named by what it is: ' + titles.join(' | '));
-      assert.ok(titles.includes('$(edit) Your own edit \u00b7 relatedList: Quote.Account__c \u2192 Quote.Opportunity__c') && titles.includes('Use target'), titles.join(' | '));
-      const painted = mv.painted();
-      assert.deepStrictEqual([painted.added && painted.added.length, painted.removed && painted.removed.length, painted.own && painted.own.length], [2, 1, 1], JSON.stringify(painted));
-      // written at the line ends by VS Code itself - visible in a diff view, unlike the rows
-      const notes = mv.notes().map(n => n[1]);
-      assert.ok(notes.includes('\u21b6 removed: fields QUOTE.TOTALPRICE') && notes.includes('\u270e your edit \u00b7 relatedList: Quote.Account__c \u2192 Quote.Opportunity__c'), notes.join(' | '));
-      assert.ok(/Removed here\.\*\* The target has:[\s\S]*QUOTE\.TOTALPRICE/.test(mv.hover(painted.removed[0]).contents.value), 'the hover shows what was there');
-      const groups = await mv.panel();
-      assert.ok(['Removed by you (1)', 'From the feature branch (2)', 'Your own edits (1)'].every(g => groups.includes(g)), 'the Merge panel lists them by kind: ' + groups.join(' | '));
-      // Restore puts the target's line back where it was
-      const lens = (title, after) => { const ls = mv.lenses(); const i = ls.findIndex(l => l.command.title.startsWith(after)); return ls.slice(i + 1).find(l => l.command.title === title); };
-      const restore = lens('Restore', '$(discard) Removed here');
-      await vs.registered['cmr.mergeTakeTarget'](restore.command.arguments[0]);
-      assert.ok(fs.readFileSync(merged.fsPath, 'utf8').includes('        <fields>OPPORTUNITY.NAME</fields>\n        <fields>QUOTE.TOTALPRICE</fields>\n'), 'restored in its place');
-      // the same row again, now stale: nothing changes
-      await mv.edit(fs.readFileSync(merged.fsPath, 'utf8'));
-      const undo = lens('Undo', 'From the feature branch');
-      await vs.registered['cmr.mergeTakeTarget'](undo.command.arguments[0]);
-      assert.ok(!fs.readFileSync(merged.fsPath, 'utf8').includes('QUOTE.ISSYNCING') && fs.readFileSync(merged.fsPath, 'utf8').includes('QUOTE.SUBTOTAL'), 'Undo takes the feature line out');
-      // what you took back out of the suggestion is marked - left out from the feature, where it would go
-      await mv.edit(fs.readFileSync(merged.fsPath, 'utf8'));
-      const left = mv.notes().find(n => /left out from the feature: fields QUOTE\.ISSYNCING$/.test(n[1]));
-      assert.ok(left, 'the field you took out of the suggestion shows: ' + mv.notes().map(n => n[1]).join(' | '));
-      assert.ok((await mv.panel()).includes('Left out from the feature branch (1)'));
-      // the hover says it and has its action as a link, which works
-      const hv = mv.hover(left[0]).contents;
-      assert.ok(hv.isTrusted && /\*\*Left out from the feature branch\.\*\* It has:[\s\S]*QUOTE\.ISSYNCING[\s\S]*\[Add it back\]\(command:cmr\.mergeTakeTarget\?/.test(hv.value), hv.value);
-      const linkArgs = JSON.parse(decodeURIComponent(/command:cmr\.mergeTakeTarget\?([^)]+)\)/.exec(hv.value.split('Add it back')[1])[1]));
-      await vs.registered['cmr.mergeTakeTarget'](...linkArgs);
-      assert.ok(fs.readFileSync(merged.fsPath, 'utf8').includes('<fields>QUOTE.ISSYNCING</fields>'), 'Add it back, from the hover');
-      // and from the Merge panel's button
-      await mv.edit(fs.readFileSync(merged.fsPath, 'utf8').replace('        <fields>QUOTE.SUBTOTAL</fields>\n', ''));
-      const [item] = await mv.items('Left out from');
-      assert.ok(item && item.contextValue === 'cmrLiveChange' && /SUBTOTAL/.test(item.label), 'the item carries its action');
-      await vs.registered['cmr.mergeTakeTarget'](item);
-      assert.ok(fs.readFileSync(merged.fsPath, 'utf8').includes('<fields>QUOTE.SUBTOTAL</fields>'), 'Add it back, from the panel');
-      await mv.edit(fs.readFileSync(merged.fsPath, 'utf8').replace('        <fields>QUOTE.ISSYNCING</fields>\n', ''));
-      const before = fs.readFileSync(merged.fsPath, 'utf8');
-      await vs.registered['cmr.mergeTakeTarget'](undo.command.arguments[0]);
-      assert.strictEqual(fs.readFileSync(merged.fsPath, 'utf8'), before, 'a stale row does not touch the file');
-      assert.ok(vs.log.status.some(m => /has moved/.test(m)));
-      // Ctrl+S: saved as your resolution, and the merge view stays open
-      const closes = () => vs.log.commands.filter(c => c[0] === 'setContext' && c[1] === 'cmr.activeMerge' && c[2] === false).length;
-      const closed0 = closes();
-      await mv.save(merged);
-      assert.strictEqual(fs.readFileSync(resolved, 'utf8'), fs.readFileSync(merged.fsPath, 'utf8'), 'what you saved is the resolution, exactly');
-      assert.deepStrictEqual([applied, closes() - closed0, mv.mergedOf().fsPath], [1, 0, merged.fsPath], 'applied - and the merge view is still open');
-      assert.ok(vs.log.status.some(m => /Saved as your resolution .* the merge view stays open/.test(m)), vs.log.status.join(' | '));
-      await mv.edit(fs.readFileSync(merged.fsPath, 'utf8').replace('Quote.Opportunity__c', 'Quote.Account__c'));
-      await mv.save(merged);
-      assert.deepStrictEqual([applied, closes() - closed0], [2, 0], 'save again, still open');
-      assert.ok(fs.readFileSync(resolved, 'utf8').includes('Quote.Account__c'));
-      // the rows on: the same changes are no longer also written at the line ends
-      vs.config['diffEditor.codeLens'] = true;
-      await mv.edit(fs.readFileSync(merged.fsPath, 'utf8'));
-      assert.deepStrictEqual(mv.notes(), [], 'one place per change: rows, not notes too');
-      vs.config['diffEditor.codeLens'] = false;
-      // while the XML is broken, the marks hold and the summary says why
-      const good = fs.readFileSync(merged.fsPath, 'utf8');
-      await mv.edit(good.replace('</relatedLists>', ''));
-      assert.ok(mv.lenses().some(l => l.command.title === '$(warning) marks paused \u2013 not valid XML right now'));
-      await mv.edit(good);
-      // Save and close applies and closes
-      await vs.registered['cmr.applyMerge']();
-      assert.strictEqual(closes() - closed0, 1, 'Save and close closes');
-      // reopened on what you saved: marked again from both branches, not blank - and not asked about the rows again
-      await start({ startFrom: fs.readFileSync(resolved, 'utf8') });
-      assert.strictEqual(vs.log.info.filter(m => /Show Restore and Undo buttons/.test(m)).length, 1, 'never asked twice');
-      mv.show();
-      await mv.edit(fs.readFileSync(mv.mergedOf().fsPath, 'utf8'));
-      assert.strictEqual(mv.painted().added && mv.painted().added.length, 1, 'the feature\u2019s field is still marked green');
-      // a plain merge of two files still waits for Apply, and keeps its own names
-      fs.writeFileSync(resolved, 'untouched');
-      await mv.deps().startSession(vs.Uri.file(target), vs.Uri.file(incoming), null, { applyToUri: vs.Uri.file(resolved) });
-      mv.show();
-      await mv.edit(fs.readFileSync(mv.mergedOf().fsPath, 'utf8'));
-      assert.ok(mv.lenses().some(l => /^From the incoming file \u00b7 fields QUOTE\./.test(l.command.title)), 'a plain merge calls the other side the incoming file');
-      fs.writeFileSync(mv.mergedOf().fsPath, T + '<!-- edited -->\n');
-      await mv.save(mv.mergedOf());
-      assert.strictEqual(fs.readFileSync(resolved, 'utf8'), 'untouched', 'Merge two files is not changed');
-      assert.ok(vs.log.commands.filter(c => c[0] === 'vscode.diff').map(c => c[3]).some(t => / \(target\) \u2194 MERGED \(editable\)$/.test(t)));
-    } finally { rmTree(root); }
-  });
 
   ok('reopened on a resolution you saved: the merge\u2019s conflicts are found again in it - the one you settled otherwise is not', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
@@ -1528,7 +1416,7 @@ module.exports = function register(ok, section, h) {
     const p = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const views = p.contributes.views.cmrContainer;
     assert.deepStrictEqual(views.map(v => [v.id, v.when]), [
-      ['cmrStart', '!cmr.activeMerge && !cmr.hasPackage && !cmr.hasValidation && !cmr.hasBranchCheck'], ['cmrMergePanel', 'cmr.activeMerge'],
+      ['cmrStart', '!cmr.hasPackage && !cmr.hasValidation && !cmr.hasBranchCheck'],
       ['cmrDeployView', 'cmr.hasPackage || cmr.hasValidation'], ['cmrBranchView', 'cmr.hasBranchCheck']]);
     const all = JSON.stringify(p.contributes);
     assert.ok(!/cmrPromotionView|cmr\.promotion\.(refresh|review|accept|compare|reset|copy|uploadAll|undoUpload|precheck|validateBranch|openInCopado|close)\b|cmr\.copado\.(resolvePromotion|copyResolution|undoUpload)\b/.test(all), 'the Promotion view and its commands are gone');
@@ -1704,14 +1592,9 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual(kindsOf(XC().compare(rl, null, rl.replace('Quote.Account__c', 'Quote.Opportunity__c'), { type: 'Layout' })), [['changed-own', 3, 'relatedList: Quote.Account__c \u2192 Quote.Opportunity__c']]);
   });
 
-  ok('while your resolution is not valid XML the marks hold; something that is not XML is compared by lines', () => {
+  ok('while your resolution is not valid XML the comparison holds', () => {
     const T = flexi(fieldBlock('none', 'Team__c', 'Team_cField'));
     assert.deepStrictEqual(XC().compare(T, T, T.replace('</fieldInstance>', ''), { type: 'FlexiPage' }), { hold: true, list: [], counts: {} });
-    const M = require('../src/liveMarks');
-    assert.strictEqual(M.mark(T, T, T.replace('</fieldInstance>', ''), { type: 'FlexiPage' }).hold, true);
-    const code = 'public class A {\n  Integer x = 1;\n}\n';
-    const r = M.mark(code, code, code.replace('1', '2'), {});
-    assert.ok(!r.byElement && r.list.length === 1, 'not XML: by lines');
   });
 
   section('3.4.0: the merge editor - our own panel, lined up element by element');
@@ -1834,7 +1717,8 @@ module.exports = function register(ok, section, h) {
       assert.deepStrictEqual(marks.marks.pieces.filter(p => p.kind !== 'same').map(p => [p.kind, p.label]), [['removed', 'fields QUOTE.TOTALPRICE'], ['feature', 'fields QUOTE.SUBTOTAL']]);
       assert.strictEqual(applyOps(mine, marks.marks.pieces.find(p => p.kind === 'removed').undo), init.text, 'Restore');
       await w.send({ type: 'text', seq: 2, text: mine.replace('</relatedLists>', '') });
-      assert.deepStrictEqual(w.last('marks'), { type: 'marks', seq: 2, hold: true }, 'not valid XML: the marks hold');
+      const held = w.last('marks');
+      assert.deepStrictEqual([held.seq, held.hold, held.xmlError && held.xmlError.line > 0, typeof (held.xmlError && held.xmlError.message)], [2, true, true, 'string'], 'not valid XML: the marks hold, and it says where');
       await w.send({ type: 'dirty', dirty: true });
       assert.strictEqual(w.title, '\u25cf Merge \u00b7 target.layout-meta.xml', 'unsaved');
       // Save: your resolution written, the promotion told, the panel still open
@@ -1843,8 +1727,6 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(applied, 1);
       assert.deepStrictEqual([w.last('saved').ok, w.last('saved').message, w.disposed], [true, 'Saved as your resolution', false]);
       // the side bar's reveal reaches the panel
-      await vs.registered['cmr.mergeReveal'](3);
-      assert.deepStrictEqual(w.last('reveal'), { type: 'reveal', line: 3 });
       // Save and close: applied, and the merge ends with its panel
       await w.send({ type: 'save', close: true, text: mine });
       assert.ok(w.disposed, 'closed');
@@ -1854,6 +1736,8 @@ module.exports = function register(ok, section, h) {
       await start();
       const w2 = mv.webviews[1];
       await w2.send({ type: 'ready' });
+      // discarding asks first
+      vs.answers.warn.push({ re: /^Discard this merge\?/, v: 'Discard' });
       await w2.send({ type: 'discard' });
       assert.ok(w2.disposed);
       assert.strictEqual(fs.readFileSync(resolved, 'utf8'), mine, 'discarding writes nothing');
@@ -1889,7 +1773,7 @@ module.exports = function register(ok, section, h) {
   ok('what the feature branch does not have, still in your resolution, is marked where order matters - Remove gives the feature branch\u2019s version', () => {
     const job = engine(HT, HF);
     let r = MA().align(job.targetText, job.incomingText, job.mergedText, { type: 'FlexiPage' });
-    assert.deepStrictEqual(r.pieces.filter(p => p.kind !== 'same').map(p => [p.kind, p.label]), [['kept', 'valueListItems: NewCase (10 lines)'], ['kept', 'valueListItems: LogACall (10 lines)']]);
+    assert.deepStrictEqual(r.pieces.filter(p => p.kind !== 'same').map(p => [p.kind, p.label]), [['kept', 'valueListItems NewCase (10 lines)'], ['kept', 'valueListItems LogACall (10 lines)']]);
     assert.strictEqual(r.counts.kept, 2);
     let t = job.mergedText;
     for (let i = 0; i < 2; i++) { r = MA().align(job.targetText, job.incomingText, t, { type: 'FlexiPage' }); t = applyOps(t, r.pieces.find(p => p.kind === 'kept').undo); }
@@ -2074,7 +1958,7 @@ module.exports = function register(ok, section, h) {
       const w = mv.webviews[mv.webviews.length - 1];
       await w.send({ type: 'ready' });
       assert.strictEqual(w.last('init').hideIdentical, true, 'the setting reaches the editor');
-      assert.ok(/id="hide"/.test(w.panel.webview.html), 'the toolbar button');
+      assert.ok(/id="viewBtn"/.test(w.panel.webview.html) && /id="viewMenu"/.test(w.panel.webview.html), 'in the toolbar\u2019s View menu');
       await w.send({ type: 'pref', hideIdentical: false });
       assert.strictEqual(vs.config['cmr.merge.hideIdentical'], false, 'kept for the next merge');
       w.panel.dispose();
@@ -2084,12 +1968,401 @@ module.exports = function register(ok, section, h) {
     } finally { rmTree(root); }
   });
 
+  section('3.7.0: names with special characters; what the stories committed');
+
+  ok('a component whose name has special characters is found on the branch by its encoded file name - "[A] R&D Admin" is "%5BA%5D R%26D Admin" - whatever is encoded in it', async () => {
+    const { buildWorkspace } = require('../src/branchCheck');
+    const files = {
+      'sfdx-project.json': '{"packageDirectories":[{"path":"force-app","default":true}]}',
+      'force-app/main/default/profiles/%5BA%5D R%26D System Administrator.profile-meta.xml': '<Profile/>',
+      'force-app/main/default/profiles/Custom%3A Sales.profile-meta.xml': '<Profile/>',
+      'force-app/main/default/profiles/Admin.profile-meta.xml': '<Profile/>',
+      // something no rule in the list encodes - found by its decoded name anyway
+      'force-app/main/default/profiles/Ops %7E Lead.profile-meta.xml': '<Profile/>',
+      'force-app/main/default/layouts/Account-Sales %28New%29 Layout.layout-meta.xml': '<Layout/>'
+    };
+    let lists = 0;
+    const host = { readFile: async (b, p) => files[p] != null ? Buffer.from(files[p]) : null, listFiles: async (b, f) => { lists++; return Object.keys(files).filter(p => p.startsWith(f + '/')); } };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra bw '));
+    try {
+      const r = await buildWorkspace(host, 'feature/x', new Map([['Profile', ['[A] R&D System Administrator', '%5BA%5D R%26D System Administrator', 'Custom: Sales', 'Admin', 'Ops ~ Lead', 'Not There']], ['Layout', ['Account-Sales (New) Layout']]]), dir);
+      assert.deepStrictEqual(r.missing, ['Profile Not There'], 'only what is not there');
+      assert.deepStrictEqual(r.written.map(f => path.posix.basename(f)), ['Account-Sales %28New%29 Layout.layout-meta.xml', '%5BA%5D R%26D System Administrator.profile-meta.xml', 'Admin.profile-meta.xml', 'Custom%3A Sales.profile-meta.xml', 'Ops %7E Lead.profile-meta.xml'], 'each file once');
+      assert.ok(fs.existsSync(path.join(dir, 'force-app', 'main', 'default', 'profiles', '%5BA%5D R%26D System Administrator.profile-meta.xml')), 'written under its own name');
+      assert.ok(lists <= 4, 'a folder is listed once per branch and package folder, not once per component: ' + lists);
+    } finally { rmTree(dir); }
+    const { sourcePaths } = require('../src/manifest');
+    assert.deepStrictEqual(sourcePaths('Profile', "[A] R&D's + Admin"), ["profiles/[A] R&D's + Admin.profile-meta.xml", 'profiles/%5BA%5D R%26D%27s %2B Admin.profile-meta.xml'], '& \u2019 and + encoded too');
+  });
+
+  ok('a file\u2019s component name is decoded - so a resolution matches the commit\u2019s component, and one not resolved yet is left out, not taken from the branch', () => {
+    const W = require('../src/promotionWork');
+    assert.deepStrictEqual(W.componentOf('force-app/main/default/profiles/%5BA%5D R%26D System Administrator.profile-meta.xml'), { type: 'Profile', name: '[A] R&D System Administrator' });
+    assert.deepStrictEqual(W.componentOf('force-app/main/default/layouts/Account-Sales %28New%29 Layout.layout-meta.xml'), { type: 'Layout', name: 'Account-Sales (New) Layout' });
+    assert.strictEqual(W.decodeName('100% done'), '100% done', 'not encoding: as it is');
+    const M = require('../src/manifest');
+    const pkg = M.build(M.parseCommit(JSON.stringify([{ t: 'Profile', n: '%5BA%5D R%26D System Administrator', a: 'Add' }]), 'c'), {});
+    assert.ok(pkg.deploy.get('Profile').has(W.componentOf('force-app/main/default/profiles/%5BA%5D R%26D System Administrator.profile-meta.xml').name), 'the file and the package name the same component');
+    const rel = fs.readFileSync(path.join(__dirname, '..', 'release.js'), 'utf8');
+    assert.ok(/for \(const rel of o\.exclude \|\| \[\]\) \{\s*const comp = require\('\.\/src\/promotionWork'\)\.componentOf\(rel\)/.test(rel), 'the pre-check leaves out by the decoded name');
+  });
+
+  ok('what the stories committed: each component and where it stands - a conflict, resolved or not; from the branch; not on the branch', () => {
+    const vs = fakeCode(os.tmpdir(), {});
+    const [P] = loadWith(vs, ['../promotionUi']);
+    const PRO = 'force-app/main/default/profiles/%5BA%5D R%26D System Administrator.profile-meta.xml', LAY = 'force-app/main/default/layouts/Account-Sales Layout.layout-meta.xml';
+    const comps = { at: 1, source: 'promotion change list', rows: [
+      { type: 'Profile', name: '[A] R&D System Administrator', action: 'Add', stories: ['US-0012345'] },
+      { type: 'Layout', name: 'Account-Sales Layout', action: 'Add', stories: ['US-0012345'] },
+      { type: 'ApexClass', name: 'OpsService', action: 'Add', stories: [] },
+      { type: 'Profile', name: '[B] Other', action: 'Add', stories: [] }] };
+    const st = { files: { [PRO]: { state: 'resolved' }, [LAY]: { state: 'review' } }, precheck: null };
+    let v = P.componentsView(st, comps);
+    assert.deepStrictEqual(v.rows.map(r => [r.name, r.where, r.rel]), [['[A] R&D System Administrator', 'conflict-resolved', PRO], ['Account-Sales Layout', 'conflict-open', LAY], ['OpsService', 'commit', null], ['[B] Other', 'commit', null]]);
+    assert.deepStrictEqual([v.checked, v.counts], [false, { all: 4, conflicts: 2, missing: 0 }], 'no pre-check yet');
+    st.precheck = { state: 'passed', files: { missing: ['Profile [B] Other'], branches: ['feature/US-0012345'] } };
+    v = P.componentsView(st, comps);
+    assert.deepStrictEqual(v.rows.map(r => r.where), ['conflict-resolved', 'conflict-open', 'branch', 'missing']);
+    assert.deepStrictEqual([v.checked, v.branches, v.counts.missing], [true, ['feature/US-0012345'], 1]);
+    assert.deepStrictEqual(P.componentsView(st, { loading: true }), { loading: true }, 'while it is read');
+  });
+
+  ok('the page\u2019s Components tab: read when first opened; filters with counts, a name filter; one line per component in columns; type groups that fold; a conflict opens its file', () => {
+    const page = runPage();
+    const PRO = 'force-app/main/default/profiles/%5BA%5D R%26D System Administrator.profile-meta.xml';
+    const cur = { promotion: { id: 'P9', name: 'P12345', status: 'Merge Conflict', from: 'dev', to: 'qa' },
+      state: { name: 'P12345', from: 'dev', to: 'qa', syncedAt: new Date().toISOString(), events: [], files: { [PRO]: { state: 'resolved', kind: 'xml', story: 'US-0012345', note: 'yours' } } },
+      plan: { ready: [], held: [], last: false, revised: 0 }, canUndo: false, health: [], flagged: {}, info: null, jobs: null, components: null };
+    const send = c => page.state({ copadoOrg: 'copado', recent: [], current: Object.assign({}, cur, { components: c }), validation: null });
+    send(null);
+    page.click({ tab: 'Components' });
+    assert.ok(page.posted.some(m => m.type === 'act' && m.name === 'components'), 'read when first opened');
+    const asked = page.posted.filter(m => m.name === 'components').length;
+    send({ loading: true });
+    assert.ok(/Reading what the stories committed/.test(page.text()));
+    const rows = checked => [
+      { type: 'Profile', name: '[A] R&D System Administrator', action: 'Add', stories: ['US-0012345'], where: 'conflict-resolved', rel: PRO },
+      { type: 'Profile', name: '[B] Other', action: 'Add', stories: ['US-0012345'], where: checked ? 'missing' : 'commit', rel: null },
+      { type: 'ApexClass', name: 'OpsService', action: 'SelectiveCommit', stories: ['US-0012346'], where: checked ? 'branch' : 'commit', rel: null },
+      { type: 'Layout', name: 'Account-Sales Layout', action: 'Delete', stories: ['US-0012346'], where: 'conflict-open', rel: 'force-app/main/default/layouts/Account-Sales Layout.layout-meta.xml' }];
+    send({ at: Date.now(), source: 'promotion change list', checked: false, branches: [], counts: { all: 4, conflicts: 2, missing: 0 }, rows: rows(false) });
+    let t = page.text();
+    assert.ok(/What the stories committed\s+4 components from promotion change list/.test(t), t.slice(0, 300));
+    assert.ok(/Run Pre-check to see which components are on the stories\u2019 branches\.\s+Run Pre-check/.test(t), 'one line, with its button');
+    assert.ok(/All\s+4\s+To resolve\s+1\s+Resolved\s+1\s+In the commit\s+2/.test(t) && !/On the branch/.test(t), 'filters with counts - the branch ones once a pre-check has run');
+    assert.ok(/Component\s+Action\s+Story\s+Where it stands/.test(t), 'columns');
+    assert.ok(/Profile\s+2\s+1 resolved/.test(t) && /Layout\s+1\s+1 to resolve/.test(t), 'each type, its count and what needs doing in it');
+    assert.ok(/\[A\] R&D System Administrator\s+Add\s+US-0012345\s+Conflict \u00b7 resolved/.test(t) && /OpsService\s+Selective\s+US-0012346\s+In the commit/.test(t) && /Account-Sales Layout\s+Delete\s+US-0012346\s+Conflict \u00b7 to resolve/.test(t), t);
+    assert.ok(/class="cact del">Delete/.test(page.html) && /class="cact sel">Selective/.test(page.html), 'the action as a tag');
+    assert.ok(page.html.includes('class="crow opens" data-sel="' + PRO + '" data-go="Files"'), 'a conflict opens its file');
+    assert.strictEqual(page.posted.filter(m => m.name === 'components').length, asked, 'read once, not on every redraw');
+    send({ at: Date.now(), source: 'promotion change list', checked: true, branches: ['feature/US-0012345'], counts: { all: 4, conflicts: 2, missing: 1 }, rows: rows(true) });
+    t = page.text();
+    assert.ok(/On the branch\s+1\s+Not on the branch\s+1/.test(t) && /1 component was not found on feature\/US-0012345/.test(t), 'after a pre-check');
+    page.click({ a: 'compFilter', v: 'open' });
+    t = page.text();
+    assert.ok(/Account-Sales Layout/.test(t) && !/OpsService/.test(t) && !/R&D System Administrator\s+Add/.test(t), 'filtered: to resolve');
+    page.click({ a: 'compFilter', v: 'all' });
+    page.click({ a: 'compFold', v: 'Profile' });
+    assert.ok(!/\[B\] Other/.test(page.text()) && /class="cgrp folded"/.test(page.html), 'a type folds');
+    page.click({ a: 'components' });
+    assert.ok(page.posted.filter(m => m.name === 'components').length > asked, 'Read again');
+  });
+
+
+  section('3.8.0: the merge editor - duplicates, broken XML');
+
+  ok('duplicates in the merge editor: found as you type with the line they repeat; only identical ones removed when the merge is prepared', () => {
+    const D = require('../src/mergeDuplicates');
+    const it = v => '                        <valueListItems>\n                            <value>' + v + '</value>\n                        </valueListItems>\n';
+    const pg = acts => '<?xml version="1.0" encoding="UTF-8"?>\n<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + acts.map(it).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
+    const t = pg(['Edit', 'Share', 'Edit']);
+    assert.deepStrictEqual(D.inText(t), [{ b0: 14, b1: 17, sameAs: 9, label: 'Edit', identical: true }]);
+    const d = D.dedupe(t);
+    assert.strictEqual(d.text, pg(['Edit', 'Share']), 'the later copy, its whole lines');
+    assert.deepStrictEqual(d.removed, ['<valueListItems><value>Edit</value></valueListItems>']);
+    const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+    const ps = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + fp('A.x__c', 'true') + fp('A.x__c', 'false') + '</PermissionSet>\n';
+    assert.strictEqual(D.inText(ps).length, 1, 'the same field twice, with different values: found');
+    assert.deepStrictEqual([D.dedupe(ps).text, D.dedupe(ps).removed], [ps, []], 'and left - which to keep is your choice');
+    assert.deepStrictEqual(D.inText('<a><b>'), [], 'not valid XML: nothing to say');
+    // the editor's pieces: the duplicates, and where the XML breaks
+    const MP = require('../src/mergePanel');
+    const m = MP.marksFor({ target: pg(['Edit', 'Share']), incoming: pg(['Edit', 'Share']), typeName: 'FlexiPage' }, t, 'order');
+    assert.deepStrictEqual(m.dups.map(x => [x.b0, x.sameAs]), [[14, 9]]);
+    const held = MP.marksFor({ target: t, incoming: t, typeName: 'FlexiPage' }, t.replace('</valueList>', ''), 'order');
+    assert.ok(held.hold && held.xmlError.line > 0 && held.xmlError.column > 0 && /valueList/.test(held.xmlError.message), JSON.stringify(held.xmlError));
+    // a duplicate removed from a start, then removed in the target too: its row says so
+    const removed = new Set(d.removed);
+    const two = MP.marksFor({ target: t, incoming: t, typeName: 'FlexiPage', removedDups: removed }, d.text, 'order');
+    assert.deepStrictEqual(two.pieces.filter(p => p.kind !== 'same').map(p => [p.kind, !!p.dupRemoved]), [['removed', true]]);
+  });
+
+  ok('a merge that starts from a branch\u2019s file has its identical duplicates removed once, when it is prepared - and the merge editor is told how many', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra dd '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const it = v => '                        <valueListItems>\n                            <value>' + v + '</value>\n                        </valueListItems>\n';
+      const pg = acts => '<?xml version="1.0" encoding="UTF-8"?>\n<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + acts.map(it).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
+      const mv = await realMergeView(root, {});
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.flexipage-meta.xml', pg(['Edit', 'Share']))), mv.vs.Uri.file(put('f.flexipage-meta.xml', pg(['Edit', 'Share', 'Clone', 'Clone']))), null,
+        { applyToUri: mv.vs.Uri.file(put('r.flexipage-meta.xml', '')), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch' });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const init = w.last('init');
+      assert.strictEqual(init.start, 'feature');
+      assert.strictEqual((init.text.match(/<value>Clone</g) || []).length, 1, 'the feature branch\u2019s duplicate removed before you see it');
+      assert.strictEqual(init.dupRemoved.feature, 1);
+      assert.deepStrictEqual(init.marks.dups, [], 'nothing left to mark');
+      w.panel.dispose();
+    } finally { rmTree(root); }
+  });
+
+  section('3.8.0: the Manual tab');
+
+  ok('the Manual tab: two versions pasted or chosen, what each is, merged in the merge editor as a manual merge; a package from a commit; shown while Copado is not connected, or always, or opened for a file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra man '));
+    try {
+      const vs = fakeCode(root, {});
+      const [M] = loadWith(vs, ['../manualUi']);
+      const started = [], packaged = [], pages = [];
+      let org = '';
+      const reg = {};
+      M.activate({ subscriptions: [] }, { startSession: async (...a) => { started.push(a); }, generatePackage: async f => { packaged.push(f); },
+        storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), copadoOrg: () => org, showPage: async nav => { pages.push(nav); } }, (id, fn) => { reg[id] = fn; });
+      const T = '<?xml version="1.0" encoding="UTF-8"?>\n<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <fields>A</fields>\n</Layout>\n';
+      assert.strictEqual(M.snapshot().show, true, 'always there, with or without Copado');
+      await M.act('manual.set', { side: 'target', text: T, name: 'Account-Sales.layout-meta.xml' });
+      const s1 = M.snapshot();
+      assert.deepStrictEqual([s1.target.type, s1.target.lines, s1.target.valid, s1.target.head.length, s1.incoming], ['Layout', 4, true, 5, null]);
+      await M.act('manual.merge');
+      assert.strictEqual(started.length, 0, 'not without both versions');
+      await M.act('manual.set', { side: 'incoming', text: '<Layout><fields>' });
+      assert.deepStrictEqual([M.snapshot().incoming.valid, typeof M.snapshot().incoming.problem], [false, 'string'], 'not valid: said, and why');
+      await M.act('manual.merge');
+      assert.strictEqual(started.length, 0, 'not while one is not valid XML');
+      await M.act('manual.set', { side: 'incoming', text: T.replace('<fields>A</fields>', '<fields>A</fields>\n    <fields>B</fields>') });
+      await M.act('manual.swap');
+      assert.ok(/B/.test(M.snapshot().target.head.join('')), 'swapped');
+      await M.act('manual.swap');
+      await M.act('manual.merge');
+      assert.strictEqual(started.length, 1);
+      const [tUri, iUri, anc, so] = started[0];
+      assert.strictEqual(fs.readFileSync(tUri.fsPath, 'utf8'), T, 'the target, as pasted');
+      assert.ok(/<fields>B<\/fields>/.test(fs.readFileSync(iUri.fsPath, 'utf8')));
+      assert.deepStrictEqual([anc, so.manual, so.applyOnSave, path.basename(tUri.fsPath)], [null, true, false, 'Account-Sales.layout-meta.xml'], 'a manual merge: copied or saved as a file, never written over anything');
+      assert.strictEqual(M.snapshot().last.type, 'Layout');
+      await M.act('manual.again');
+      assert.strictEqual(started.length, 2, 'Open again');
+      // a package from a commit file
+      await M.act('manual.commitSet', { text: JSON.stringify([{ t: 'ApexClass', n: 'OpsService', a: 'Add' }, { t: 'Layout', n: 'Account-Sales', a: 'Add' }]) });
+      assert.strictEqual(M.snapshot().commit.components, 2);
+      await M.act('manual.package');
+      assert.strictEqual(packaged.length, 1);
+      assert.ok(/OpsService/.test(fs.readFileSync(packaged[0][0].fsPath, 'utf8')));
+      // Merge in Release Assistant: the file as the target, the tab opened whatever the setting
+      const f = path.join(root, 'Case.layout-meta.xml'); fs.writeFileSync(f, T.replace('A', 'C'));
+      await reg['cmr.manual.mergeWith'](vs.Uri.file(f));
+      assert.deepStrictEqual([M.snapshot().target.name, pages], ['Case.layout-meta.xml', ['Manual']]);
+      const pkg = require('../package.json');
+      assert.ok(pkg.contributes.menus['explorer/context'].some(m => m.command === 'cmr.manual.mergeWith' && /\.xml/.test(m.when)), 'on an XML file\u2019s right-click');
+      assert.strictEqual(pkg.contributes.commands.find(c => c.command === 'cmr.manual.mergeWith').title, 'Merge in Release Assistant\u2026');
+    } finally { rmTree(root); }
+  });
+
+  ok('the page\u2019s Manual tab: only when shown; each version with what it is; Merge and review only with both valid; no banner', () => {
+    const page = runPage();
+    const base = { copadoOrg: '', recent: [], current: null, validation: null };
+    page.state(Object.assign({}, base, { manual: { show: true } }));
+    assert.ok(/class="nav[^"]*" data-nav="Manual"/.test(page.html), 'always in the tab bar');
+    assert.ok(!/data-nav="Home"/.test(page.html), 'no Home tab: Promotions is the start');
+    const side = (type, valid) => ({ name: 'Account.layout-meta.xml', type, lines: 412, valid, problem: valid ? null : 'Element <a> is never closed', head: ['<?xml version="1.0" encoding="UTF-8"?>', '<Layout>'] });
+    page.state(Object.assign({}, base, { manual: { show: true, target: side('Layout', true), incoming: null, commit: null, last: null } }));
+    page.click({ nav: 'Manual' });
+    let t = page.text();
+    assert.ok(/Merge two versions/.test(t) && /Target\s+the resolution \u2013 keeps everything\s+Layout \u00b7 412 lines \u00b7 valid/.test(t), t.slice(0, 400));
+    assert.ok(page.html.includes('class="mpaste" data-side="incoming"'), 'the other side: paste here');
+    assert.ok(/data-m="manual.merge" disabled/.test(page.html), 'not yet');
+    assert.ok(!/isn\u2019t connected|not connected/.test(t), 'no banner');
+    page.state(Object.assign({}, base, { manual: { show: true, target: side('Layout', true), incoming: side('Layout', true), commit: { name: 'commit.json', components: 3 }, last: { type: 'Layout', at: new Date().toISOString() } } }));
+    t = page.text();
+    assert.ok(!/data-m="manual.merge" disabled/.test(page.html) && /Last merge\s+Layout \u00b7 just now/.test(t) && /commit\.json\s+3 components/.test(t));
+    page.click({ m: 'manual.merge' });
+    assert.deepStrictEqual(page.posted.pop(), { type: 'act', scope: 'manual', name: 'manual.merge', payload: {} });
+    page.click({ m: 'manual.pick', side: 'incoming' });
+    assert.deepStrictEqual(page.posted.pop(), { type: 'act', scope: 'manual', name: 'manual.pick', payload: { side: 'incoming' } });
+    page.state(Object.assign({}, base, { manual: { show: true, target: side('Layout', false), incoming: null, commit: null, last: null } }));
+    assert.ok(/not valid/.test(page.text()) && /Element <a> is never closed/.test(page.text()), 'not valid: and why');
+  });
+
+  section('3.8.2: Home - one box, recent work, tools');
+
+  ok('the page\u2019s Promotions tab with nothing open: first; one box opens a promotion or a story; recent work; tools - Manual merge opens the Manual tab; set the Copado org first when there is none', () => {
+    const page = runPage();
+    const base = { copadoOrg: 'copado', recent: [{ name: 'P12340', status: 'Completed', from: 'int', to: 'qa', total: 2, done: 2 }], current: null, validation: null };
+    page.state(Object.assign({}, base, { life: { story: {} } }));
+    assert.ok(/class="nav on" data-nav="Promotions"/.test(page.html) && !/data-nav="Home"/.test(page.html), 'Promotions first - Home and Promotions are one');
+    const t = page.text();
+    assert.ok(!/Release pipeline|Needs you/.test(t), 'no pipeline');
+    assert.ok(!page.posted.some(m => m.name === 'home.load'), 'nothing read from Copado for it');
+    assert.ok(/Open a promotion/.test(t) && /Recent promotions\s+P12340\s+Completed\s+int\s+qa\s+Open/.test(t) && /Tools\s+Validate a deployment/.test(t) && /Manual merge/.test(t), t.slice(0, 400));
+    page.click({ nav: 'Manual' });
+    assert.ok(/class="nav on" data-nav="Manual"/.test(page.html) && /Merge two versions/.test(page.text()), 'Manual merge opens the Manual tab');
+    page.click({ nav: 'Promotions' });
+    page.click({ a: 'openRecent', ref: 'P12340' });
+    assert.deepStrictEqual(page.posted.pop(), { type: 'act', name: 'open', payload: { ref: 'P12340' } }, 'opened like any promotion');
+    page.state(Object.assign({}, base, { copadoOrg: '', recent: [], life: { story: {} } }));
+    assert.ok(/Set the Copado org to open promotions and stories/.test(page.text()) && /Promotions you open appear here/.test(page.text()), 'not connected: what to do');
+    const L = require('../src/lifecycle');
+    assert.ok(!('home' in L) && !('homeView' in L), 'no pipeline reader');
+  });
+
+  section('3.8.0: an open-source repository');
+
+  ok('the README\u2019s badges point at the repository package.json names, and say the VS Code version it needs', () => {
+    const root = path.join(__dirname, '..');
+    const pkg = require('../package.json');
+    const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+    const repo = /github\.com\/([^/]+\/[^/.]+)/.exec(pkg.repository.url)[1];
+    // a badge in Markdown or HTML: by its name
+    const badge = b => readme.includes('[![' + b + ']') || readme.includes('alt="' + b + '"');
+    for (const b of ['Latest release', 'CI', 'MIT licence', 'Salesforce CLI v2']) assert.ok(badge(b), b);
+    assert.ok(readme.includes('img.shields.io/github/v/release/' + repo) && readme.includes('github.com/' + repo + '/actions/workflows/test.yml/badge.svg'), 'the release and CI badges are for ' + repo);
+    const min = /\^(\d+\.\d+)/.exec(pkg.engines.vscode)[1];
+    assert.ok(badge('VS Code ' + min + ' or later') && /Requirements:\*\* VS Code /.test(readme) && readme.includes('VS Code ' + min + ' or later,'), 'VS Code ' + min);
+    // the settings the README names are settings
+    const all = Object.assign({}, ...pkg.contributes.configuration.map(c => c.properties));
+    for (const k of [...readme.matchAll(/`(cmr\.[\w.]+)`/g)].map(m => m[1])) assert.ok(k in all, 'the README names a setting that does not exist: ' + k);
+    // every picture it shows is there, and every picture there is shown
+    const pics = [...readme.matchAll(/\((media\/readme\/[\w-]+\.png)\)/g)].map(m => m[1]);
+    for (const f of pics) assert.ok(fs.existsSync(path.join(root, f)), f);
+    assert.deepStrictEqual(fs.readdirSync(path.join(root, 'media', 'readme')).filter(f => f.endsWith('.png')).map(f => 'media/readme/' + f).filter(f => !pics.includes(f)), [], 'pictures nothing shows');
+    assert.deepStrictEqual([pkg.bugs.url, pkg.homepage], ['https://github.com/' + repo + '/issues', 'https://github.com/' + repo + '#readme']);
+    for (const f of ['SECURITY.md', 'CONTRIBUTING.md', 'LICENSE', '.github/ISSUE_TEMPLATE/bug_report.md', '.github/ISSUE_TEMPLATE/feature_request.md', '.github/pull_request_template.md']) assert.ok(fs.existsSync(path.join(root, f)), f);
+  });
+
+  section('3.8.3: the merge editor\u2019s edges');
+
+  ok('unsaved changes are never lost: a merge closed or replaced keeps them as a draft and offers them back; discarding or saving clears it', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra draft '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const T = '<?xml version="1.0" encoding="UTF-8"?>\n<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <relatedLists>\n        <fields>A</fields>\n    </relatedLists>\n</Layout>\n';
+      const mv = await realMergeView(root, {});
+      const { vs } = mv;
+      const t = put('t.layout-meta.xml', T), f = put('f.layout-meta.xml', T.replace('<fields>A</fields>', '<fields>A</fields>\n        <fields>B</fields>')), r = put('r.layout-meta.xml', '');
+      const start = () => mv.deps().startSession(vs.Uri.file(t), vs.Uri.file(f), null, { applyToUri: vs.Uri.file(r), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch' });
+      await start();
+      let w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const mine = w.last('init').text.replace('<fields>B</fields>', '<fields>B</fields>\n        <fields>MINE</fields>');
+      await w.send({ type: 'text', seq: 1, text: mine });
+      await w.send({ type: 'dirty', dirty: true });
+      // the tab closed with that unsaved
+      w.panel.dispose();
+      await new Promise(res => setImmediate(res));
+      assert.ok(vs.log.info.some(m => /unsaved changes to r\.layout-meta\.xml are kept/.test(m)), 'it says so');
+      vs.answers.info.push({ re: /closed with changes you had not saved/, v: 'Restore my changes' });
+      await start();
+      w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      assert.strictEqual(w.last('init').text, mine, 'offered back, and restored');
+      // another merge opened over it: kept again
+      await w.send({ type: 'dirty', dirty: true });
+      vs.answers.info.push({ re: /closed with changes you had not saved/, v: 'Start fresh' });
+      await start();
+      w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      assert.notStrictEqual(w.last('init').text, mine, 'start fresh: the merge as prepared');
+      // discarded: nothing kept, nothing offered next time
+      await w.send({ type: 'dirty', dirty: true });
+      vs.answers.warn.push({ re: /^Discard this merge\?/, v: 'Discard' });
+      await w.send({ type: 'discard' });
+      const asked = vs.log.info.filter(m => /closed with changes you had not saved/.test(m)).length;
+      await start();
+      assert.strictEqual(vs.log.info.filter(m => /closed with changes you had not saved/.test(m)).length, asked, 'no draft after discarding');
+      mv.webviews[mv.webviews.length - 1].panel.dispose();
+    } finally { rmTree(root); }
+  });
+
+  ok('edges of the comparison: Windows line endings, an emptied file, comments between elements, identical blocks swapped, self-closing elements, CDATA, no XML declaration', () => {
+    const lay = (fields, extra) => '<?xml version="1.0" encoding="UTF-8"?>\n<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <relatedLists>\n' + fields.map(f => '        <fields>' + f + '</fields>\n').join('') + (extra || '') + '        <relatedList>R</relatedList>\n    </relatedLists>\n</Layout>\n';
+    // Windows line endings: lined up, and a button gives back exactly what was there
+    const crlf = t => t.replace(/\n/g, '\r\n');
+    const T1 = crlf(lay(['A', 'B', 'C'])), M1 = crlf(lay(['A', 'C']));
+    const r1 = MA().align(T1, T1, M1, { type: 'Layout' });
+    covers(r1, M1);
+    const rm = r1.pieces.find(p => p.kind === 'removed');
+    assert.ok(rm && applyOps(M1, rm.undo) === T1, 'Restore, CRLF kept');
+    // an emptied file: held, and it says where
+    const MP = require('../src/mergePanel');
+    const empty = MP.marksFor({ target: lay(['A']), incoming: lay(['A']), typeName: 'Layout' }, '', 'order');
+    assert.ok(empty.hold && empty.xmlError, 'held: ' + JSON.stringify(empty.xmlError));
+    // a comment between elements: Restore puts the block back with it, exactly
+    const T3 = lay(['A', 'B'], '        <!-- kept for the sales team -->\n        <fields>C</fields>\n'), M3 = lay(['A', 'B']);
+    const r3 = MA().align(T3, T3, M3, { type: 'Layout' });
+    covers(r3, M3);
+    assert.strictEqual(applyOps(M3, r3.pieces.find(p => p.kind === 'removed').undo), T3);
+    // two identical blocks swapped: nothing moved, nothing changed
+    const item = v => '        <valueListItems>\n            <value>' + v + '</value>\n        </valueListItems>\n';
+    const fx = items => '<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + items.map(item).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>main</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
+    const r4 = MA().align(fx(['Edit', 'Share', 'Edit']), null, fx(['Edit', 'Edit', 'Share']), { type: 'FlexiPage' });
+    assert.deepStrictEqual([r4.moves.length, r4.pieces.filter(p => p.kind !== 'same').length], [1, 0], 'one block moved - not two, not a change');
+    // self-closing elements and attributes; a CDATA value changed; no XML declaration
+    const T5 = '<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">\n    <labels>\n        <fullName>Hello</fullName>\n        <categories/>\n        <value><![CDATA[Hi & welcome]]></value>\n    </labels>\n</CustomLabels>\n';
+    const M5 = T5.replace('Hi & welcome', 'Hello & welcome');
+    const r5 = MA().align(T5, T5, M5, { type: 'CustomLabels' });
+    covers(r5, M5);
+    const ch = r5.pieces.filter(p => p.kind !== 'same');
+    assert.strictEqual(ch.length, 1, JSON.stringify(ch.map(p => [p.kind, p.label])));
+    assert.strictEqual(applyOps(M5, ch[0].undo), T5, 'Use target gives the CDATA back exactly');
+  });
+
+  section('3.9.1: a page\u2019s actions and fields are their values');
+
+  ok('an action or a field in a FlexiPage list is matched by its value: a shortened visibility rule is that rule\u2019s edit, a replaced field is one out and one in - never a move', () => {
+    const crit = r => '                                <criteria>\n                                    <leftValue>{!Record.StageName}</leftValue>\n                                    <operator>EQUAL</operator>\n                                    <rightValue>' + r + '</rightValue>\n                                </criteria>\n';
+    const item = (v, crits) => '                        <valueListItems>\n                            <value>' + v + '</value>\n' + (crits ? '                            <visibilityRule>\n                                <booleanFilter>1 OR 2 OR 3</booleanFilter>\n' + crits.map(crit).join('') + '                            </visibilityRule>\n' : '') + '                        </valueListItems>\n';
+    const pg = items => '<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + items.join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
+    const say = r => r.pieces.filter(p => p.kind !== 'same').map(p => [p.kind, p.label.replace(/ \(\d+ lines?\)$/, '')]);
+    // the rule shortened, two actions not in the feature
+    const T = pg([item('Share'), item('Early_Quote', ['1 - Qualification', '2 - Discovery', '3 - Product']), item('Clone_Without'), item('Clone_With')]);
+    const M2 = pg([item('Share'), item('Early_Quote', ['1 - Qualification', '2 - Discovery'])]);
+    const r2 = MA().align(T, T, M2, { type: 'FlexiPage' });
+    covers(r2, M2);
+    assert.deepStrictEqual(say(r2), [['removed', 'criteria: {!Record.StageName}, EQUAL, 3 - Product'], ['removed', 'valueListItems Clone_Without'], ['removed', 'valueListItems Clone_With']]);
+    assert.deepStrictEqual(r2.moves, [], 'nothing moved');
+    for (const p of r2.pieces.filter(x => x.kind === 'removed')) assert.ok(applyOps(M2, p.undo).length > M2.length, 'Restore puts it back');
+    // a field replaced by another
+    const T6 = pg([item('ORDERS.ORDER_NUMBER'), item('ORDERS.TOTAL_AMOUNT'), item('ORDERS.STATUS')]), M6 = pg([item('ORDERS.ORDER_NUMBER'), item('ORDERS.EXPIRY'), item('ORDERS.STATUS')]);
+    const r6 = MA().align(T6, T6, M6, { type: 'FlexiPage' });
+    assert.deepStrictEqual([say(r6), r6.moves.length], [[['removed', 'valueListItems ORDERS.TOTAL_AMOUNT'], ['own', 'valueListItems ORDERS.EXPIRY']], 0]);
+    assert.strictEqual(applyOps(applyOps(M6, r6.pieces.find(p => p.kind === 'own').undo), r6.pieces.find(p => p.kind === 'removed').undo), T6, 'Undo and Restore give the target back');
+    // actions reordered: one move
+    const TR = pg([item('A'), item('B'), item('C')]), MR = pg([item('C'), item('A'), item('B')]);
+    assert.strictEqual(MA().align(TR, TR, MR, { type: 'FlexiPage' }).moves.length, 1);
+    // the same action twice with different rules: a duplicate to decide, not removed
+    const D = require('../src/mergeDuplicates');
+    const twice = pg([item('Share'), item('Share', ['1 - Qualification'])]);
+    assert.deepStrictEqual([D.inText(twice).length, D.inText(twice)[0].identical, D.dedupe(twice).removed.length], [1, false, 0]);
+  });
+
+  section('3.9.2: the full width');
+
+  ok('the page and the merge editor use the full width: VS Code\u2019s own padding on a webview\u2019s body is taken off', () => {
+    for (const f of ['page.css', 'merge.css']) {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'media', f), 'utf8');
+      const rule = /(?:^|\n)html, body \{([^}]*)\}/.exec(css);
+      assert.ok(rule && /padding: 0/.test(rule[1]) && /margin: 0/.test(rule[1]), f + ': html, body { margin: 0; padding: 0 }');
+    }
+  });
+
   section('3.0: what is shipped');
 
   ok('the package: every command registered and contributed, every setting read, the Command Palette short, nothing removed left behind', () => {
     const root = path.join(__dirname, '..');
     const p = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-    const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'quickMerge.js', 'treeView.js'].concat(fs.readdirSync(path.join(root, 'src')).map(f => 'src/' + f));
+    const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'manualUi.js'].concat(fs.readdirSync(path.join(root, 'src')).map(f => 'src/' + f));
     const code = files.map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
     const declared = p.contributes.commands.map(c => c.command);
     const registered = [...code.matchAll(/cmd\('(cmr\.[\w.]+)'/g)].map(m => m[1]);
@@ -2101,12 +2374,14 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual([...page.matchAll(/'(cmr\.[\w.]+)'/g)].map(m => m[1]).filter(c => !declared.includes(c)), [], 'the page calls a command that does not exist');
     const hidden = p.contributes.menus.commandPalette.filter(m => m.when === 'false').map(m => m.command);
     const visible = declared.filter(c => !hidden.includes(c));
-    assert.strictEqual(visible.length, 12, 'the Command Palette keeps its 12 starting points: ' + visible.join(', '));
+    // the starting points: preparing, inspecting and validating a story are on its page, merging two files on the Manual tab
+    assert.deepStrictEqual(visible.sort(), ['cmr.git.check', 'cmr.openSettings', 'cmr.page.open', 'cmr.policy.create', 'cmr.promotion.open', 'cmr.repo.connect', 'cmr.repo.forget', 'cmr.writeWorkspaceSettings'],
+      'the Command Palette keeps its starting points: ' + visible.join(', '));
     const settings = Object.assign({}, ...p.contributes.configuration.map(g => g.properties));
     const keys = Object.keys(settings).map(k => k.slice(4));
     const used = new Set([...code.matchAll(/\.get\('([a-zA-Z]+\.[a-zA-Z.]+)'/g)].map(m => m[1]));
     assert.deepStrictEqual(keys.filter(k => !used.has(k) && !code.includes("'cmr." + k + "'")), [], 'a setting nothing reads');
-    assert.deepStrictEqual([...used].filter(k => !keys.includes(k) && !['lastTests', 'recentPromotions', 'askedDiffLens'].some(w => k.endsWith(w))), [], 'a setting read but not declared');
+    assert.deepStrictEqual([...used].filter(k => !keys.includes(k) && !['lastTests', 'recentPromotions'].some(w => k.endsWith(w))), [], 'a setting read but not declared');
     for (const gone of ['cmr.selective.folder', 'cmr.selective.autoImport', 'cmr.selective.confirm', 'cmr.selective.import', 'cmr.selective.download', 'cmr.selective.undo']) {
       assert.ok(!(gone in settings) && !declared.includes(gone) && !code.includes("'" + gone.slice(4) + "'") && !code.includes("'" + gone + "'"), gone + ' is gone');
     }

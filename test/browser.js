@@ -23,15 +23,15 @@ const T = page(TEAM() + REG + APP + OWN);
 const base = { file: 'Account_Record_Page.flexipage-meta.xml', labels: { target: 'Target branch (HEAD)', merged: 'Your resolution' }, theirs: 'the feature branch', short: 'the feature', typeName: 'FlexiPage', target: T, incoming: T };
 const look = p => p.evaluate(() => ({
   chips: document.querySelector('#chips').textContent,
-  rows: [...document.querySelectorAll('#right .zone.head')].map(z => z.textContent),
-  buttons: [...document.querySelectorAll('.acts button')].map(b => b.textContent),
+  rows: [...document.querySelectorAll('#right .zone.head:not(.l)')].map(z => z.textContent),
+  buttons: [...document.querySelectorAll('.acts button')].map(b => b.title),
   ghost: document.querySelectorAll('#right .zone.ghost .gl').length,
   level: (() => { const y = s => { const l = [...document.querySelectorAll(s + ' .view-line')].find(v => /RecordTeam_cField/.test(v.textContent)); return l ? Math.round(l.getBoundingClientRect().top) : null; }; return [y('#left'), y('#right')]; })(),
-  held: !document.getElementById('held').hidden, mode: document.getElementById('mode').textContent, left: document.getElementById('lefthead').textContent
+  held: /Marks paused/.test(document.getElementById('stMarks').textContent), status: document.querySelector('.status').textContent, left: document.getElementById('lefthead').textContent
 }));
 // as you would: F7 to the next change until its button is on screen, then click it
 const click = async (p, label) => {
-  const sel = '.acts button:text-is("' + label + '")';
+  const sel = '.acts button[title="' + label + '"]';
   for (let i = 0; i < 8; i++) {
     const seen = await p.$eval(sel, b => { const r = b.getBoundingClientRect(), e = document.getElementById('right').getBoundingClientRect(); return r.top >= e.top && r.bottom <= e.bottom; }).catch(() => false);
     if (seen) break;
@@ -48,15 +48,20 @@ async function eventually(fn, ms) {
     await new Promise(r => setTimeout(r, 100));
   }
 }
+// a choice in the toolbar's View menu, or its \u22ef menu
+const menu = async (p, btn, label) => { await p.click('#' + btn); await p.click('.dmenu:not([hidden]) .mi:has-text("' + label + '")'); };
 const checks = [];
 const ok = (name, fn) => checks.push([name, fn]);
 
 ok('moved and edited, and a block removed: lined up, struck through, every button one undoable edit; Ctrl+S saves', async () => {
   const mine = page(REG + APP + TEAM('required'));
   await run(Object.assign({}, base, { text: mine }), async (p, h) => {
+    // the rows are taller than a line: bring the moved block into view first
+    await p.evaluate(() => { for (const ed of window.monaco.editor.getEditors()) { const n = ed.getModel().getLinesContent().findIndex(l => l.includes('RecordTeam_cField')); if (n >= 0) ed.revealLineInCenter(n + 1); } });
+    await p.waitForTimeout(300);
     const a = await look(p);
     assert.strictEqual(a.chips, '1 moved1 your edit1 removed');
-    assert.deepStrictEqual(a.rows, ['\u21b6Removed: fieldInstance RecordOwner_cField (10 lines)', '\u2195Moved: fieldInstance RecordTeam_cField \u00b7 1st \u2192 3rd', '\u270eYour edit: uiBehavior: none \u2192 required']);
+    assert.deepStrictEqual(a.rows, ['Removed', 'Moved', 'Edited'], 'one word each');
     assert.deepStrictEqual(a.buttons, ['Restore', 'Move back', 'Use target']);
     assert.strictEqual(a.ghost, 10, 'the removed block, struck through, line for line');
     assert.ok(a.level[0] != null && a.level[0] === a.level[1], 'the moved block level in both panes: ' + a.level);
@@ -88,15 +93,15 @@ ok('typing: compared again as you go; broken XML pauses the marks; Literal order
     await eventually(async () => {
       const a = await look(p);
       assert.strictEqual(a.chips, '1 your edit', a.chips + ' ' + h.text().split('\n')[7]);
-      assert.ok(a.rows.some(r => /uiBehavior: none \u2192 edit/.test(r)), JSON.stringify(a.rows));
+      assert.deepStrictEqual(a.rows, ['Edited']);
     });
     // break the XML: the marks hold, and it says so
     await p.keyboard.type('<');
     await eventually(async () => assert.ok((await look(p)).held, 'paused'));
     await p.keyboard.press('Backspace');
     await eventually(async () => { const a = await look(p); assert.ok(!a.held && a.chips === '1 your edit', JSON.stringify(a.chips)); });
-    await p.click('#mode');
-    await eventually(async () => { const a = await look(p); assert.ok(/as it is/.test(a.left) && /In your order/.test(a.mode), a.left + ' / ' + a.mode); });
+    await menu(p, 'viewBtn', 'Target in literal order');
+    await eventually(async () => { const a = await look(p); assert.ok(/as it is/.test(a.left), a.left); });
     assert.deepStrictEqual(h.errors, []);
   });
 });
@@ -112,7 +117,7 @@ ok('what the feature branch removed is marked, whatever the start: still here - 
   await run(Object.assign({}, qa, { text: both, start: 'merged' }), async (p, h) => {
     let a = await look(p);
     assert.strictEqual(a.chips, '2 not taken from the feature');
-    assert.deepStrictEqual(a.rows, ['\u2212Not in the feature branch \u00b7 still here: valueListItems: NewCase (10 lines)', '\u2212Not in the feature branch \u00b7 still here: valueListItems: LogACall (10 lines)']);
+    assert.deepStrictEqual(a.rows, ['Kept \u00b7 not in feature', 'Kept \u00b7 not in feature']);
     assert.deepStrictEqual(a.buttons, ['Remove', 'Remove']);
     await shot(p, 'merge-editor-not-in-feature.png');
     // the first taken out: now out of your resolution, and not in the feature branch either - Restore
@@ -120,17 +125,21 @@ ok('what the feature branch removed is marked, whatever the start: still here - 
     await click(p, 'Remove');
     await eventually(() => assert.strictEqual(h.text(), PF, 'Remove twice: the feature branch\u2019s version'));
     // Start from: the target, in one step; Ctrl+Z goes back
-    await p.selectOption('#startFrom', 'target');
+    await menu(p, 'viewBtn', 'Target branch (HEAD)');
     await eventually(() => assert.strictEqual(h.text(), PT));
-    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    // the menu leaves you in the editor: Ctrl+Z straight away
+    assert.ok(await p.evaluate(() => !!document.activeElement.closest('#right')), 'still in the editor');
+    await p.keyboard.press('Control+z');
     await eventually(() => assert.strictEqual(h.text(), PF, 'Ctrl+Z: back to what you had'));
     assert.deepStrictEqual(h.errors, []);
   });
   await run(Object.assign({}, qa, { text: PF, start: 'feature' }), async (p, h) => {
     const a = await look(p);
-    assert.deepStrictEqual(a.rows, ['\u21b6Not in the feature branch: valueListItems: NewCase (10 lines)', '\u21b6Not in the feature branch: valueListItems: LogACall (10 lines)']);
+    assert.deepStrictEqual(a.rows, ['Not in feature', 'Not in feature']);
     assert.deepStrictEqual(a.buttons, ['Restore', 'Restore']);
-    assert.strictEqual(await p.$eval('#startFrom', s => [...s.options].map(o => o.textContent).join(' | ')), 'The feature branch | Target branch (HEAD) | Merged (both)');
+    await p.click('#viewBtn');
+    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), '\u25cfThe feature branch | \u25cbTarget branch (HEAD) | \u25cbMerged (both) | Hide identical lines | Target in literal order', 'Start from and the view, in one menu');
+    await p.keyboard.press('Escape');
     assert.deepStrictEqual(h.errors, []);
   });
 });
@@ -203,7 +212,7 @@ ok('horizontal scrolling in step, as vertical; and the editor\u2019s own keys: m
     await p.keyboard.press('Control+f');
     await eventually(async () => assert.ok(await p.$('#right .find-widget.visible'), 'Ctrl+F: find'));
     await p.keyboard.press('Escape');
-    await p.click('#keys'); await p.waitForTimeout(100);
+    await menu(p, 'moreBtn', 'Keyboard shortcuts'); await p.waitForTimeout(100);
     assert.ok(/Ctrl.*X.*Ctrl.*C.*Ctrl.*V/.test(await p.$eval('#help', e => e.textContent)), 'the shortcuts list');
   });
 });
@@ -216,36 +225,36 @@ ok('Hide identical: runs of identical lines folded on both sides, the panes leve
     const folds = () => p.evaluate(() => ({
       right: [...document.querySelectorAll('#right .zone.fold')].map(z => z.textContent),
       left: document.querySelectorAll('#left .zone.fold').length,
-      button: document.getElementById('hide').textContent
     }));
     const level = id => p.evaluate(id => { const y = s => { const l = [...document.querySelectorAll(s + ' .view-line')].find(v => v.textContent.includes(id)); return l ? Math.round(l.getBoundingClientRect().top) : null; }; return [y('#left'), y('#right')]; }, id);
     assert.deepStrictEqual((await folds()).right, [], 'off to start with');
-    await p.click('#hide');
+    await menu(p, 'viewBtn', 'Hide identical lines');
     await eventually(async () => {
       const f = await folds();
       assert.ok(f.right.length >= 2 && f.right.length === f.left, 'folded on both sides: ' + JSON.stringify(f));
       // every row actually shown, in its place - not only in the page
       const shown = await p.evaluate(() => ['#left', '#right'].map(s => [...document.querySelectorAll(s + ' .zone.fold')].filter(z => { const r = z.getBoundingClientRect(); return r.height > 0 && z.parentElement && getComputedStyle(z.parentElement).display !== 'none'; }).length));
       assert.deepStrictEqual(shown, [f.left, f.right.length], 'every fold row shown');
-      assert.ok(f.right.every(t => /^\u22ef\d+ identical lines$/.test(t)), JSON.stringify(f.right));
-      assert.strictEqual(f.button, '\u2261 Show identical');
+      assert.ok(f.right.every(t => /^\d+ hidden lines$/.test(t)), JSON.stringify(f.right));
+      assert.strictEqual(await p.$$eval('#right .fold-m svg', x => x.length), f.right.length, 'the expand arrows in the line-number column');
     });
     await eventually(() => assert.ok(h.sent.some(m => m.type === 'pref' && m.hideIdentical === true), 'remembered'));
     // the first change, its rows and its context, level in both panes
     await eventually(async () => {
       const a = await look(p);
-      assert.ok(a.rows.some(r => /uiBehavior: readonly \u2192 required/.test(r)), JSON.stringify(a.rows));
+      assert.ok(a.rows.includes('Edited'), JSON.stringify(a.rows));
       const lv = await level('RecordF9_cField');
       assert.ok(lv[0] != null && lv[0] === lv[1], 'the changed field level in both panes: ' + lv);
     });
-    const hidden = (await folds()).right.reduce((n, t) => n + +/\d+/.exec(t)[0], 0);
+    const hidden = (await folds()).right.reduce((n, t) => n + +/(\d+) hidden/.exec(t)[1], 0);
     assert.ok(hidden > 300, hidden + ' lines folded of ' + LM.split('\n').length);
     // F7 to the second change: visible
     await p.click('#right .view-lines'); await p.keyboard.press('F7'); await p.keyboard.press('F7');
     await eventually(async () => { const lv = await level('RecordF32_cField'); assert.ok(lv[0] != null && lv[0] === lv[1], 'second change level: ' + lv); });
     // Show opens one run
     const before = (await folds()).right.length;
-    await click(p, 'Show');
+    // a click anywhere on the bar shows its lines
+    await p.click('#right .rowclick');
     await eventually(async () => assert.strictEqual((await folds()).right.length, before - 1, 'one run opened'));
     // the cursor onto a folded line opens its run: Ctrl+G to a line near the end, inside the last run
     await p.click('#right .view-lines'); await p.keyboard.press('Control+g'); await p.waitForTimeout(300);
@@ -257,7 +266,7 @@ ok('Hide identical: runs of identical lines folded on both sides, the panes leve
     await p.keyboard.type('RecordF20_cField'); await p.keyboard.press('Enter'); await p.keyboard.press('Escape');
     await eventually(async () => assert.strictEqual((await folds()).right.length, left - 1, 'Ctrl+F opened the run holding the match'));
     // off again: nothing folded
-    await p.click('#hide');
+    await menu(p, 'viewBtn', 'Hide identical lines');
     await eventually(async () => assert.deepStrictEqual((await folds()).right, []));
     await eventually(() => assert.ok(h.sent.some(m => m.type === 'pref' && m.hideIdentical === false)));
     assert.deepStrictEqual(h.errors, []);
@@ -267,6 +276,65 @@ ok('Hide identical: runs of identical lines folded on both sides, the panes leve
   await run(Object.assign({}, base, { target: LT, incoming: LT, text: LM, hideIdentical: true }), async (p, h) => {
     await eventually(async () => assert.ok((await p.evaluate(() => document.querySelectorAll('#right .zone.fold').length)) >= 2));
     await shot(p, 'merge-editor-hide-identical.png');
+  });
+});
+
+ok('a duplicate you add is marked on its lines - a row, a margin mark, an underline, no pop-up - and removed with one click; broken XML underlined while what you type stays marked', async () => {
+  await run(Object.assign({}, base, { text: T }), async (p, h) => {
+    // copy the Region block's value list item... here: a whole field block, pasted again below the last one
+    const extra = blk('readonly', 'Region__c', 'Region_cField');
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+End');
+    const lines = h.text().split('\n');
+    const at = lines.findIndex(l => l.includes('<name>main</name>')) + 1;
+    await p.keyboard.press('Control+g'); await p.waitForTimeout(200); await p.keyboard.type(String(at)); await p.keyboard.press('Enter');
+    await p.keyboard.press('Home');
+    await p.evaluate(t => { const ed = window.monaco.editor.getEditors().find(e => !e.getOption(window.monaco.editor.EditorOption.readOnly)); const pos = ed.getPosition(); ed.executeEdits('t', [{ range: new window.monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1), text: t }]); }, extra);
+    await eventually(async () => {
+      const a = await look(p);
+      assert.ok(a.rows.some(r => /^Added by you \u00b7 Duplicate of line \d+$/.test(r)), 'one row for both: ' + JSON.stringify(a.rows));
+      assert.deepStrictEqual(a.buttons, ['Undo', 'Remove copy'], 'both actions side by side');
+      assert.ok(await p.$('#right .dup-glyph') && await p.$('#right .squiggly-warning'), 'a margin mark and an underline');
+      assert.ok(/\u26a0 1 duplicate/.test(a.status), a.status);
+    });
+    assert.strictEqual(await p.$('.monaco-hover:not(.hidden)'), null, 'no pop-up');
+    await p.evaluate(() => { const ed = window.monaco.editor.getEditors().find(e => !e.getOption(window.monaco.editor.EditorOption.readOnly)); const d = document.querySelector('#right .dup-glyph'); if (ed) ed.revealLineInCenter(ed.getModel().getLineCount() - 8); });
+    await p.waitForTimeout(300);
+    await shot(p, 'merge-editor-duplicate.png');
+    await click(p, 'Remove copy');
+    await eventually(() => assert.strictEqual(h.text(), T, 'removed: back to the target exactly'));
+    // break the XML: underlined where it breaks, what you type keeps a dotted margin
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+Home'); await p.keyboard.press('ArrowDown'); await p.keyboard.press('End');
+    await p.keyboard.type('<broken>');
+    await eventually(async () => {
+      const a = await look(p);
+      assert.ok(/Marks paused \u2013 not valid XML at line \d+/.test(a.status), a.status);
+      assert.ok(await p.$('#right .squiggly-error'), 'underlined where it breaks');
+      assert.ok(await p.$('#right .typed-g'), 'what you typed keeps a dotted margin');
+    });
+    await p.keyboard.press('Control+z');
+    await eventually(async () => assert.ok(/Marks live/.test((await look(p)).status)));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a button whose lines you just changed does nothing, and says so; one Save and close; every button the same drawn icon', async () => {
+  const mine = page(REG + APP + TEAM('required'));
+  await run(Object.assign({}, base, { text: mine }), async (p, h) => {
+    assert.deepStrictEqual(await p.$$eval('.top button', bs => bs.map(b => b.id)), ['prev', 'next', 'viewBtn', 'saveClose', 'moreBtn'], 'Save & Close, no Save button; More at the far right');
+    assert.strictEqual(await p.$eval('#saveClose', b => b.textContent), 'Save & Close');
+    assert.ok(/^\d+ of \d+$/.test(await p.$eval('#pos', e => e.textContent)), 'where you are among the changes');
+    const icons = await p.$$eval('.acts .ib', bs => bs.map(b => { const s = b.querySelector('svg'); return s ? [s.getAttribute('width'), b.textContent] : null; }));
+    assert.ok(icons.length && icons.every(i => i && i[0] === '14' && i[1]), 'an icon and its word: ' + JSON.stringify(icons));
+    // change the edited line, and click its Use target before the marks catch up
+    await p.evaluate(() => {
+      const ed = window.monaco.editor.getEditors().find(e => !e.getOption(window.monaco.editor.EditorOption.readOnly));
+      const m = ed.getModel(), n = m.getLinesContent().findIndex(l => l.includes('<value>required</value>')) + 1;
+      ed.executeEdits('t', [{ range: new window.monaco.Range(n, 1, n, m.getLineMaxColumn(n)), text: '                    <value>edit</value>' }]);
+      document.querySelector('.acts button[title="Use target"]').click();
+    });
+    await eventually(async () => assert.ok(/Those lines have changed since they were marked - nothing was done/.test(await p.$eval('#note', n => n.textContent))));
+    assert.ok(h.text().includes('<value>edit</value>') || (await p.evaluate(() => window.monaco.editor.getEditors().some(e => e.getValue().includes('<value>edit</value>')))), 'nothing was done');
+    assert.deepStrictEqual(h.errors, []);
   });
 });
 

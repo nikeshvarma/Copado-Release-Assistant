@@ -21,6 +21,7 @@
  *   }) -> { panel, reveal(line), apply(undo), dispose() }
  */
 const { align } = require('./mergeAlign');
+const MD = require('./mergeDuplicates');
 
 const nonceOf = () => { let s = ''; const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; for (let i = 0; i < 32; i++) s += c[Math.floor(Math.random() * c.length)]; return s; };
 const attr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -34,16 +35,16 @@ function html(webview, media) {
     '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src ' + csp + ' data:; font-src ' + csp + ' data:; style-src ' + csp + ' \'unsafe-inline\'; script-src ' + csp + ' \'nonce-' + nonce + '\';">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="' + attr(u('merge.css')) + '"></head>' +
     '<body data-vs="' + attr(u('monaco/vs')) + '">' +
-    '<div class="top"><span class="title" id="title"></span><span class="chips" id="chips"></span><span id="held" hidden>\u26a0 marks paused \u2013 not valid XML right now</span><span class="sp"></span><span id="note" role="status"></span>' +
-    '<label class="start" title="Where your resolution starts - switching replaces the right pane in one step that Ctrl+Z undoes">Start from <select id="startFrom"></select></label>' +
-    '<button id="prev" title="Previous change (Shift+F7)" aria-label="Previous change">\u2191</button><button id="next" title="Next change (F7)" aria-label="Next change">\u2193</button>' +
-    '<button id="hide" aria-pressed="false"></button><button id="mode" title="Show the target in your order, or as it is"></button><button id="keys" title="Keyboard shortcuts" aria-expanded="false">\u2328</button><button id="discard">Discard</button>' +
-    '<button id="save" title="Save as your resolution (Ctrl+S) \u2013 the merge stays open">\u2713 Save</button><button id="saveClose">Save and close</button></div>' +
+    '<div class="top"><span class="title" id="title"></span><span class="chips" id="chips"></span><span class="sp"></span>' +
+    '<span class="navg"><button id="prev" title="Previous change (Shift+F7)" aria-label="Previous change"></button><span id="pos" aria-live="polite"></span><button id="next" title="Next change (F7)" aria-label="Next change"></button></span>' +
+    '<span class="mwrap"><button id="viewBtn" class="tb" aria-haspopup="menu" aria-expanded="false" title="Start from, hide identical lines, the target\u2019s order"></button><div id="viewMenu" class="dmenu" role="menu" hidden></div></span>' +
+    '<button id="saveClose" class="pri" title="Save as your resolution and close \u2013 Ctrl+S saves and keeps it open">Save &amp; Close</button>' +
+    '<span class="mwrap"><button id="moreBtn" class="tb ic" aria-haspopup="menu" aria-expanded="false" title="More" aria-label="More"></button><div id="moreMenu" class="dmenu right" role="menu" hidden></div></span></div>' +
     '<div id="help" hidden role="dialog" aria-label="Keyboard shortcuts"></div>' +
     '<div id="menu" hidden role="menu"></div>' +
     '<div class="heads"><div id="lefthead"></div><div></div><div id="righthead"></div></div>' +
     '<div class="panes"><div id="left"></div><div id="gap"><div id="joins"></div></div><div id="right"></div></div>' +
-    '<div class="foot">Type in the right pane \u00b7 the buttons change whole elements, and Ctrl+Z undoes them \u00b7 F7 next change \u00b7 Ctrl+S saves</div>' +
+    '<div class="status" role="status"><span id="stSaved"></span><span id="stMarks"></span><span id="stDups"></span><span id="note"></span><span class="sp"></span><span class="hints">F7 next change \u00b7 F8 next problem \u00b7 Ctrl+S save</span></div>' +
     '<script nonce="' + nonce + '" src="' + attr(u('monaco/vs/loader.js')) + '"></script>' +
     '<script nonce="' + nonce + '" src="' + attr(u('merge.js')) + '"></script></body></html>';
 }
@@ -51,11 +52,27 @@ function html(webview, media) {
 /** The pieces, without what the page does not need: the left pane's lines come once, as its text. */
 function marksFor(o, text, mode) {
   const r = align(o.target, o.incoming, text, { type: o.typeName, mode });
-  if (r.hold) return r;
+  if (r.hold) return Object.assign(r, { xmlError: xmlError(text) });
+  const removed = o.removedDups || new Set();
   return {
     left: r.left, mode: r.mode, counts: r.counts, moves: r.moves,
-    pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, context: p.context, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature }))
+    // duplicates in your resolution as it is - one you add is marked as you type
+    dups: MD.inText(text),
+    pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, context: p.context, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature,
+      dupRemoved: p.kind === 'removed' && removed.size && p.ghost ? removed.has(MD.flat(p.ghost.join(''))) || undefined : undefined }))
   };
+}
+
+/** Where your resolution stops being XML: { line, column, message }, 1-based - for the editor to underline. */
+function xmlError(text) {
+  const X = require('./xmlParser');
+  const d = X.parse(String(text));
+  const e = (d.errors || [])[0];
+  if (!e) return d.root ? null : { line: 1, column: 1, message: String(text).trim() ? 'No root element' : 'The file is empty' };
+  const starts = X.lineStarts(String(text));
+  const off = e.offset != null ? e.offset : e.start != null ? e.start : 0;
+  const line = X.lineAt(starts, off);
+  return { line: line + 1, column: off - starts[line] + 1, message: String(e.message || e) };
 }
 
 function open(vscode, extensionUri, o) {
@@ -72,14 +89,14 @@ function open(vscode, extensionUri, o) {
     try {
       if (m.type === 'ready') {
         post({ type: 'init', title, file: o.file, applyOnly: !!o.applyOnly, labels: o.labels, theirs: o.theirs, short: o.short, mode, text, savedText: o.savedText != null ? o.savedText : null,
-          starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical,
+          starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, dupRemoved: o.dupRemoved || null, manual: !!o.manual,
           marks: marksFor(o, text, mode), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
       } else if (m.type === 'text' || m.type === 'mode') {
         if (m.type === 'mode') mode = m.mode === 'literal' ? 'literal' : 'order';
         text = String(m.text);
         if (o.onText) o.onText(text);
         const marks = marksFor(o, text, mode);
-        post(marks.hold ? { type: 'marks', seq: m.seq, hold: true } : { type: 'marks', seq: m.seq, mode, marks, conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
+        post(marks.hold ? { type: 'marks', seq: m.seq, hold: true, xmlError: marks.xmlError } : { type: 'marks', seq: m.seq, mode, marks, conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
       } else if (m.type === 'save') {
         text = String(m.text);
         if (o.onText) o.onText(text);
@@ -90,6 +107,11 @@ function open(vscode, extensionUri, o) {
         await vscode.env.clipboard.writeText(String(m.text));
       } else if (m.type === 'paste') {
         post({ type: 'pasted', id: m.id, text: await vscode.env.clipboard.readText() });
+      } else if (m.type === 'report' || m.type === 'swap' || m.type === 'copyResult' || m.type === 'saveAs') {
+        // the \u22ef menu's report and swap; a manual merge's two ways out - copied, or saved as a file
+        if (m.text != null) { text = String(m.text); if (o.onText) o.onText(text); }
+        const r = o[m.type] ? await o[m.type](text) : null;
+        if (r && r.message) post({ type: 'saved', ok: !!r.ok, message: r.message, text });
       } else if (m.type === 'discard') {
         if (o.discard) await o.discard();
       } else if (m.type === 'pref') {
@@ -97,6 +119,7 @@ function open(vscode, extensionUri, o) {
         if (o.onPref) await o.onPref({ hideIdentical: !!m.hideIdentical });
       } else if (m.type === 'dirty') {
         panel.title = (m.dirty ? '\u25cf ' : '') + title;
+        if (o.onDirty) o.onDirty(!!m.dirty);
       }
     } catch (e) {
       post({ type: 'saved', ok: false, message: 'Something went wrong: ' + ((e && e.message) || e) });

@@ -55,7 +55,6 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .join { position: absolute; left: 0; right: 0; height: 2px; background: var(--purple-strong); }
 .join::before, .join::after { content: ""; position: absolute; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--purple-strong); }
 .join::before { left: -3px; } .join::after { right: -3px; }
-.foot { flex: 0 0 auto; padding: 4px 12px; font-size: 11.5px; color: var(--vscode-descriptionForeground); border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); }
 
 /* lines */
 .monaco-editor .del { background: var(--red); }
@@ -74,17 +73,21 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 
 /* rows between lines: a header for each change, struck-through lines, blank padding */
 .zone { box-sizing: border-box; width: 100%; }
-.zone.head { display: flex; align-items: center; gap: 6px; padding-left: 8px; font: 11.5px var(--vscode-font-family, sans-serif); white-space: nowrap; overflow: hidden; }
-.zone.head .ic { width: 14px; text-align: center; }
+.zone.head { display: flex; align-items: center; gap: 6px; padding-left: 10px; font: 600 11px var(--vscode-font-family, sans-serif); letter-spacing: .1px; white-space: nowrap; overflow: hidden; }
+.zone.head .dotk { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
 .zone.head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .zone.head .dim { opacity: .8; }
-.zone.head.move { color: var(--purple-text); background: var(--purple); box-shadow: inset 3px 0 0 var(--purple-strong); }
-.zone.head.removed, .zone.head.dropped { color: var(--red-text); background: rgba(241,76,76,.08); box-shadow: inset 3px 0 0 var(--red-strong); }
-.zone.head.feature, .zone.head.changed-feature { color: var(--green-strong); background: rgba(155,185,85,.08); box-shadow: inset 3px 0 0 var(--green-strong); }
+.zone.head.mv, .zone.head.move { color: var(--purple-text); background: var(--purple); box-shadow: inset 3px 0 0 var(--purple-strong); }
+.zone.head.rem, .zone.head.removed, .zone.head.dropped { color: var(--red-text); background: rgba(241,76,76,.08); box-shadow: inset 3px 0 0 var(--red-strong); }
+.zone.head.feat, .zone.head.feature, .zone.head.changed-feature { color: var(--green-strong); background: rgba(155,185,85,.08); box-shadow: inset 3px 0 0 var(--green-strong); }
 .zone.head.own, .zone.head.changed-own { color: var(--blue-text); background: rgba(55,148,255,.07); box-shadow: inset 3px 0 0 var(--blue-strong); }
-.zone.head.kept, .zone.head.differs { color: var(--orange-text); background: rgba(232,145,45,.08); box-shadow: inset 3px 0 0 var(--orange-strong); }
+.zone.head.keep, .zone.head.kept, .zone.head.differs { color: var(--orange-text); background: rgba(232,145,45,.08); box-shadow: inset 3px 0 0 var(--orange-strong); }
 .zone.head.conf { color: var(--yellow-strong); background: var(--yellow); box-shadow: inset 3px 0 0 var(--yellow-strong); }
-.zone.head.l { opacity: .85; }
+.zone.head.l { opacity: .7; }
+.zone.head.dup { color: var(--yellow-strong); background: rgba(204,167,0,.1); }
+.zone.head.dupr { color: var(--vscode-descriptionForeground); background: rgba(150,150,150,.08); }
+.zone.ghost.dupr { background: rgba(150,150,150,.06); }
+.zone.ghost.dupr .gl { color: var(--vscode-descriptionForeground); text-decoration-color: rgba(150,150,150,.6); }
 .zone.ghost { background: rgba(241,76,76,.07); padding-left: 8px; overflow: hidden; }
 .zone.ghost.dropped { background: rgba(155,185,85,.06); }
 .zone.ghost .gl { white-space: pre; text-decoration: line-through; text-decoration-color: rgba(241,76,76,.6); color: var(--red-text); opacity: .85; }
@@ -92,5 +95,69 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .zone.fold { display: flex; align-items: center; gap: 6px; padding-left: 8px; font: 11.5px var(--vscode-font-family, sans-serif); color: var(--vscode-descriptionForeground); background: var(--vscode-editorGutter-background, rgba(128,128,128,.06)); border-top: 1px dashed rgba(128,128,128,.35); border-bottom: 1px dashed rgba(128,128,128,.35); box-sizing: border-box; }
 .zone.fold .ic { width: 14px; text-align: center; }
 .zone.pad { background: repeating-linear-gradient(-45deg, transparent 0 6px, rgba(128,128,128,.12) 6px 7px); }
-.acts { position: absolute; right: 22px; display: flex; align-items: center; gap: 5px; z-index: 5; }
-.acts button { padding: 0 8px; font-size: 11px; height: calc(100% - 4px); }
+
+.rowclick { position: absolute; left: 0; right: 14px; cursor: pointer; z-index: 4; }
+.rowclick:hover { background: rgba(128,128,128,.08); }
+/* duplicates: on their lines, no pop-up */
+.monaco-editor .dupl { background: rgba(204,167,0,.1); }
+.monaco-editor .dupl-g { border-left: 3px solid var(--yellow-strong); margin-left: 3px; }
+.monaco-editor .dup-glyph::before { content: "\26a0"; color: var(--yellow-strong); font-size: 11px; padding-left: 3px; }
+.monaco-editor .dupl-l { background: rgba(150,150,150,.07); }
+/* lines typed while the XML is not valid: a dotted margin until it is */
+.monaco-editor .typed-g { border-left: 2px dotted var(--vscode-descriptionForeground); margin-left: 4px; }
+/* the toolbar's menus */
+.mwrap { position: relative; display: inline-flex; }
+.dmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 220px; padding: 4px 0; background: var(--vscode-menu-background, #252526); color: var(--vscode-menu-foreground, inherit); border: 1px solid var(--vscode-menu-border, rgba(128,128,128,.35)); border-radius: 5px; box-shadow: 0 4px 14px rgba(0,0,0,.35); font-size: 12.5px; }
+.dmenu.right { left: auto; right: 0; }
+.dmenu .mh { padding: 4px 12px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--vscode-descriptionForeground); }
+.dmenu .mi { display: flex; gap: 8px; padding: 4px 12px; cursor: default; white-space: nowrap; }
+.dmenu .mi:hover { background: var(--vscode-menu-selectionBackground, #04395e); color: var(--vscode-menu-selectionForeground, #fff); }
+.dmenu .mi .rk { width: 14px; color: var(--vscode-textLink-foreground, #4daafc); }
+.dmenu .mi.bad { color: var(--red-text); }
+.dmenu .sep { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, rgba(128,128,128,.35)); }
+/* the status bar: what was a note in the toolbar */
+.status { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; height: 24px; padding: 0 12px; font-size: 11.5px; color: var(--vscode-descriptionForeground); border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); white-space: nowrap; overflow: hidden; }
+.status .ok { color: var(--green-strong); } .status .paused { color: var(--red-text); } .status .dirty { color: var(--vscode-editorWarning-foreground, #cca700); }
+.status .dupt { margin-right: 10px; } .status .warnt { color: var(--yellow-strong); } .status .hints { opacity: .8; }
+#note.warn { color: var(--vscode-editorWarning-foreground, #cca700); }
+
+/* buttons on a row: drawn icons, the same size and weight as the toolbar's */
+.acts { position: absolute; right: 18px; display: flex; align-items: center; gap: 4px; z-index: 5; }
+.acts .ib { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 18px; padding: 0; border-radius: 4px;
+  color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); border: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent); }
+.acts .ib:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+.acts .ib svg, .top button svg { display: block; }
+.top #prev, .top #next, .top #moreBtn { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 24px; padding: 0 6px; }
+
+/* the toolbar: the change counter between the arrows, View, Save & Close, and More at the far right */
+.top .navg { display: inline-flex; align-items: center; height: 26px; border: 1px solid var(--vscode-button-border, color-mix(in srgb, var(--vscode-foreground) 28%, transparent)); border-radius: 6px; background: var(--vscode-editor-background); }
+.top .navg button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; padding: 0; border: 0; background: none; color: var(--vscode-foreground); border-radius: 5px; }
+.top .navg button:hover { background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
+.top #pos { font-size: 12px; padding: 0 8px; line-height: 24px; color: var(--vscode-foreground); border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent); border-right: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent); white-space: nowrap; }
+.top .tb { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-foreground) 6%, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-button-border, color-mix(in srgb, var(--vscode-foreground) 28%, transparent)); font-size: 12.5px; }
+.top .tb:hover { background: color-mix(in srgb, var(--vscode-foreground) 12%, var(--vscode-editor-background)); }
+.top .tb.ic { width: 30px; padding: 0; justify-content: center; }
+.top .pri { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border-radius: 6px; font-weight: 600; font-size: 12.5px;
+  color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 1px solid var(--vscode-button-background); }
+.top .pri:hover { background: var(--vscode-button-hoverBackground); }
+.top button svg { display: block; flex: 0 0 auto; }
+/* buttons on a row: icon and word, in the row's colour */
+.acts { position: absolute; right: 18px; display: flex; align-items: center; gap: 6px; z-index: 5; }
+.acts .ib { display: inline-flex; align-items: center; gap: 5px; width: auto; min-width: 0; height: 20px; padding: 0 8px 0 6px; white-space: nowrap; border-radius: 5px; font: 600 11.5px var(--vscode-font-family, sans-serif);
+  color: var(--vscode-foreground); background: color-mix(in srgb, currentColor 12%, transparent); border: 1px solid color-mix(in srgb, currentColor 45%, transparent); }
+.acts .ib.feat { color: var(--green-strong); } .acts .ib.own { color: var(--blue-text, #8cc2ff); } .acts .ib.rem { color: var(--red-text); } .acts .ib.keep { color: #f0a75a; }
+.acts .ib.mv { color: #c9a6ec; } .acts .ib.conf, .acts .ib.dup { color: var(--yellow-strong); } .acts .ib.dupr { color: var(--vscode-descriptionForeground); }
+.acts .ib:hover { background: color-mix(in srgb, currentColor 24%, transparent); }
+.acts .ib svg { display: block; }
+.zone.head .also.dup { color: var(--yellow-strong); } .zone.head .also { margin-left: 2px; }
+/* the hidden-lines row: the arrows where the line numbers are, the count, a dashed rule - a break in the file */
+.zone.fold { display: flex; align-items: center; padding-left: 4px; box-sizing: border-box; background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent); font: 12px var(--vscode-font-family, sans-serif); }
+.zone.fold .ft { color: var(--vscode-editorLineNumber-foreground, #6e7681); white-space: nowrap; }
+.zone.fold .rule { flex: 1; margin: 0 14px 0 12px; border-top: 1px dashed color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
+.fold-m .fx { position: absolute; top: 0; display: flex; align-items: center; justify-content: flex-end; }
+.fold-m { cursor: pointer;
+  color: var(--vscode-editorLineNumber-foreground, #6e7681); background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent); }
+.fold-m.hov, .zone.fold.hov .ft { color: var(--vscode-editorLineNumber-activeForeground, var(--vscode-foreground)); }
+.zone.fold.hov .rule { border-top-color: color-mix(in srgb, var(--vscode-foreground) 24%, transparent); }
+.rowclick { position: absolute; left: 0; right: 14px; cursor: pointer; z-index: 4; }

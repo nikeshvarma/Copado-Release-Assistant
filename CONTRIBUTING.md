@@ -47,20 +47,20 @@ The package is the files git tracks, less what `.vscodeignore` leaves out - comm
 - **Nothing is resolved without the user.** A merge is a suggestion until it is reviewed; the merge editor marks everything either branch has.
 - **A test with every change.** Unit checks go in `test/smoke.js` / `test/smoke3.js` (the engine, and the VS Code-facing modules against a stand-in VS Code); the merge editor's page in `test/browser.js`; behaviour that needs VS Code itself in `test/integration/suite/`. Add a check that fails without your change. Tests must pass on Windows and macOS too: build paths with `path.join`, never assume `/` or `\n` line endings from the file system.
 - **No real org data, anywhere.** Fixtures, tests, examples and pictures use generic names - `ACME_`, `example.com`, `P12345`, `US-0012345`; never metadata, ids, usernames, promotion or story numbers from a real org. A test keeps real-looking numbers out of what ships.
-- **Pictures for the README** are drawn by `node scripts/readme-images.js` (the diagrams) and `node test/browser.js media/readme/shots` (the merge editor) - redraw them when what they show changes.
+- **Pictures for the README** are real renders of the extension's screens with generic sample data, all 1280×760, dark theme, in the same frame. The merge editor's come from `SHOT_SIZE=1280x760 node test/browser.js <folder>`. Redraw a picture when what it shows changes, and keep the set consistent. Report security issues privately - see [SECURITY.md](SECURITY.md).
 
 ## Layout
 
 ```
-extension.js     entry point: diagnostics, formatting, merge sessions (the merge editor or VS Code's diff view)
+extension.js     entry point: diagnostics, formatting, merge sessions in the merge editor
 release.js       package.xml, branch conflicts, validation, user stories
 promotionUi.js   promotions on the Release Assistant page
-releasePage.js   the Release Assistant page        media/page.js   its script
-quickMerge.js    one-click merge of the conflict/metadata pair
-treeView.js      the side bar's Merge section
+releasePage.js   the Release Assistant page - Home, Promotions, Stories, Manual        media/page.js   its script
+manualUi.js      the page's Manual tab: two versions merged by hand, a package from a commit file
+lifecycleUi.js   the page's Home (the release pipeline) and Stories
 media/merge.*    the merge editor's page            media/monaco/   Monaco Editor (MIT)
 src/             the engine - no VS Code dependency, fully unit-tested: merge, mergeAlign (the merge
-                 editor's pieces and moves), xmlCompare, mergeStart, mergePanel (the panel), registry and
+                 editor's pieces and moves), mergeDuplicates, xmlCompare, mergeStart, mergePanel (the panel), registry and
                  keys (what identifies each metadata element), the Copado side (copadoClient, promotion,
                  promotionWork), guard (the team policy), ...
 scripts/         packaging and checks - plain Node

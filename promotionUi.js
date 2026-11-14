@@ -140,7 +140,7 @@ async function load(promotion, c, a) {
   const dir = path.join((await h.deps.storageDir('promotions')).fsPath, promotion.name.replace(/[^\w.-]/g, '_'));
   const s = W.store(dir);
   if (!current || current.promotion.id !== promotion.id) stopWatch();
-  current = { s, promotion, info: (current && current.promotion.id === promotion.id && current.info) || null, jobs: current && current.promotion.id === promotion.id ? current.jobs : null };
+  current = { s, promotion, info: (current && current.promotion.id === promotion.id && current.info) || null, jobs: current && current.promotion.id === promotion.id ? current.jobs : null, components: current && current.promotion.id === promotion.id ? current.components : null };
   const t0 = Date.now();
   let r;
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Opening ' + promotion.name }, async progress => {
@@ -506,7 +506,7 @@ async function precheck() {
   const conflictOf = f => {
     const rels = Object.keys(st.files);
     if (f.file && rels.includes(f.file)) return f.file;
-    return rels.find(rel => { const comp = W.componentOf(rel); return comp && comp.type.toLowerCase() === String(f.type).toLowerCase() && comp.name.toLowerCase() === String(f.fullName).toLowerCase(); }) || null;
+    return rels.find(rel => { const comp = W.componentOf(rel); return comp && comp.type.toLowerCase() === String(f.type).toLowerCase() && comp.name.toLowerCase() === W.decodeName(f.fullName).toLowerCase(); }) || null;
   };
   const onEvent = ev => {
     if (run.state !== 'running') return;
@@ -545,7 +545,7 @@ async function precheck() {
       if (!Array.isArray(rows)) rows = [];
       for (const u of used) {
         const comp = W.componentOf(u.rel);
-        if (comp && !rows.some(r => r.t === comp.type && r.n === comp.name)) rows.push({ t: comp.type, n: comp.name, a: 'Add' });
+        if (comp && !rows.some(r => r.t === comp.type && W.decodeName(r.n) === comp.name)) rows.push({ t: comp.type, n: comp.name, a: 'Add' });
       }
       // a resolution made in Copado's editor is used as Copado holds it
       for (const u of used.filter(x => x.copado)) {
@@ -614,6 +614,59 @@ let jobTrees = null, jobTreesOrg = null;
 function stopWatch() { if (watchTimer) clearTimeout(watchTimer); watchTimer = null; }
 
 /** Reads the promotion's job records once; keeps polling, read-only, while a job runs. */
+/**
+ * What the promotion's stories committed: Copado's promotion change list, else each story's commit
+ * (src/lifecycle.js) - with the story each came from. Read once, read-only; where each stands is worked
+ * out with the page's state (componentsView), so it follows the conflicts and the pre-check as they change.
+ */
+async function readComponents() {
+  if (!current) return;
+  const c = needOrg();
+  if (!c) return;
+  const at = current;
+  at.components = { loading: true };
+  changed.fire();
+  try {
+    const a = await api(c);
+    const notes = [];
+    const stories = await L.promotionStories(a, at.promotion.id);
+    const [all, per] = await Promise.all([L.promotionComponents(a, at.promotion.id, stories, notes), L.storyComponents(a, stories, notes).catch(() => ({}))]);
+    const byStory = new Map();
+    for (const st of stories) for (const r of (per[st.id] || {}).rows || []) {
+      const k = (r.t + '|' + W.decodeName(r.n)).toLowerCase();
+      (byStory.get(k) || byStory.set(k, new Set()).get(k)).add(st.name);
+    }
+    const seen = new Map();
+    for (const r of all.rows || []) {
+      const name = W.decodeName(r.n), k = (r.t + '|' + name).toLowerCase();
+      if (!seen.has(k)) seen.set(k, { type: r.t, name, action: r.a || 'Add', stories: [...(byStory.get(k) || [])].sort() });
+    }
+    at.components = { at: Date.now(), source: all.source, notes, rows: [...seen.values()].sort((x, y) => x.type.localeCompare(y.type) || x.name.localeCompare(y.name)) };
+    h.output.appendLine('copado: ' + at.promotion.name + ' - ' + at.components.rows.length + ' component(s) from ' + (all.source || 'nowhere') + (notes.length ? ' (' + notes.join('; ') + ')' : ''));
+  } catch (e) {
+    at.components = { error: e.message };
+  }
+  if (current === at) changed.fire();
+}
+
+/** Each committed component and where it stands: a conflict (resolved or not), from the branch, not on the branch. */
+function componentsView(st, comps) {
+  if (!comps || !comps.rows) return comps || null;
+  const conflicts = new Map();
+  for (const [rel, e] of Object.entries(st.files)) { const c = W.componentOf(rel); if (c) conflicts.set((c.type + '|' + c.name).toLowerCase(), { rel, state: e.state }); }
+  const pre = st.precheck && st.precheck.files ? st.precheck : null;
+  const notOnBranch = new Set(((pre && pre.files.missing) || []).map(m => m.toLowerCase().replace(/ \(type not supported\)$/, '').replace(/^(\S+) /, '$1|')));
+  const rows = comps.rows.map(r => {
+    const k = (r.type + '|' + r.name).toLowerCase(), cf = conflicts.get(k);
+    const where = cf ? (['uploaded', 'copado'].includes(cf.state) ? 'conflict-uploaded' : ['resolved', 'auto'].includes(cf.state) ? 'conflict-resolved' : 'conflict-open')
+      : notOnBranch.has(k) ? 'missing' : pre && pre.state !== 'running' ? 'branch' : 'commit';
+    return Object.assign({}, r, { where, rel: cf ? cf.rel : null });
+  });
+  const count = w => rows.filter(r => r.where === w).length;
+  return { at: comps.at, source: comps.source, rows, checked: !!pre, branches: pre ? pre.files.branches || [] : [],
+    counts: { all: rows.length, conflicts: rows.filter(r => r.where.startsWith('conflict')).length, missing: count('missing') } };
+}
+
 async function readJobs(opts) {
   if (!current) return;
   const c = needOrg();
@@ -648,7 +701,7 @@ function withResolutions(errors) {
   if (!st) return errors;
   const byComp = new Map();
   for (const rel of Object.keys(st.files)) { const c = W.componentOf(rel); if (c) byComp.set((c.type + '|' + c.name).toLowerCase(), rel); }
-  return errors.map(e => Object.assign({}, e, { resolution: byComp.get((e.type + '|' + e.fullName).toLowerCase()) || null }));
+  return errors.map(e => Object.assign({}, e, { resolution: byComp.get((e.type + '|' + W.decodeName(e.fullName)).toLowerCase()) || null }));
 }
 
 /** The deployment's component errors in Deploy Check, mapped to files with the fix advice. */
@@ -706,7 +759,8 @@ async function snapshot() {
         // resolutions in Copado that a deployment would trip on: not well-formed, or named by Copado's latest errors
         health: W.uploadedHealth(current.s, st, libs),
         flagged: (current.jobs && current.jobs.errors || []).filter(e => e.resolution).reduce((m, e) => { (m[e.resolution] = m[e.resolution] || []).push(e.problem); return m; }, {}),
-        canUndo: !!W.lastBatch(current.s) };
+        canUndo: !!W.lastBatch(current.s),
+        components: componentsView(st, current.components) };
     }
   }
   return out;
@@ -752,6 +806,7 @@ async function actOnce(name, p) {
     case 'precheck': return precheck();
     case 'validateBranch': return validateBranch();
     case 'jobs': return readJobs({ notify: true });
+    case 'components': return readComponents();
     case 'revise': return revise(rel);
     case 'recreate': return setRecreate(!!p.value);
     case 'upload': return uploadAll({ confirmed: true, status: !!p.status, recreate: !!p.recreate });
@@ -768,4 +823,4 @@ async function actOnce(name, p) {
 /** Opens a promotion from elsewhere on the page (the pipeline, a story's journey). */
 async function openById(id) { return openRef(id); }
 
-module.exports = { activate, promotionRef, snapshot, act, openById, onChange: f => changed.event(f), fire: () => changed.fire() };
+module.exports = { activate, promotionRef, snapshot, act, openById, onChange: f => changed.event(f), fire: () => changed.fire(), componentsView };

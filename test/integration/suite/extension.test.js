@@ -67,30 +67,26 @@ const mergedFile = () => {
   return f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
 };
 
-test('quick merge opens the merge editor on feature.xml merged into resolution.xml; Cancel merge closes it', async () => {
-  await vscode.commands.executeCommand('cmr.quickMerge.run');
+test('Merge in Release Assistant opens the page on its Manual tab, with the file as the target', async () => {
+  const file = vscode.Uri.file(path.join(root(), 'conflict', 'metadata', 'resolution.xml'));
+  await vscode.commands.executeCommand('cmr.manual.mergeWith', file);
+  await until(() => vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputWebview && /cmrPage/.test(t.input.viewType)), 'the Release Assistant page', 30000);
+  const manual = require(path.join(vscode.extensions.getExtension(ID).extensionPath, 'manualUi.js'));
+  const snap = manual.snapshot();
+  assert.deepStrictEqual([snap.show, snap.target && snap.target.name, snap.target && snap.target.type, snap.target && snap.target.valid], [true, 'resolution.xml', 'PermissionSet', true]);
+});
+
+test('a manual merge opens the merge editor on the two versions merged; closing its tab ends the merge', async () => {
+  const manual = require(path.join(vscode.extensions.getExtension(ID).extensionPath, 'manualUi.js'));
+  const feature = fs.readFileSync(path.join(root(), 'conflict', 'metadata', 'feature.xml'), 'utf8');
+  await manual.act('manual.set', { side: 'incoming', text: feature, name: 'feature.xml' });
+  await manual.act('manual.merge');
   const tab = await until(() => editorTabs()[0], 'the merge editor', 30000);
   assert.ok(/Merge \u00b7 resolution\.xml/.test(tab.label), tab.label);
-  // a permission set starts from the merged result: both files' entries
+  // a permission set starts from the merged result: both versions' entries
   const text = await until(mergedFile, 'the merged file');
   assert.ok(text.includes('From_Feature_Class'), 'the incoming entry was added');
   assert.ok(text.includes('Resolution_Only_Class'), 'the target kept everything');
-  await vscode.commands.executeCommand('cmr.cancelMerge');
+  await vscode.window.tabGroups.close(tab);
   await until(() => !editorTabs().length, 'the merge editor to close');
-});
-
-test('with cmr.merge.editor set to "vscode", quick merge opens VS Code\u2019s diff view with the merged file on the right', async () => {
-  const cmr = vscode.workspace.getConfiguration('cmr');
-  await cmr.update('merge.editor', 'vscode', vscode.ConfigurationTarget.Workspace);
-  try {
-    await vscode.commands.executeCommand('cmr.quickMerge.run');
-    const merged = await until(() => vscode.window.visibleTextEditors.find(e => /MERGED__resolution\.xml$/.test(e.document.fileName)), 'the merged view', 30000);
-    const text = merged.document.getText();
-    assert.ok(text.includes('From_Feature_Class'), 'the incoming entry was added');
-    assert.ok(text.includes('Resolution_Only_Class'), 'the target kept everything');
-    assert.strictEqual(editorTabs().length, 0, 'no merge editor');
-    await vscode.commands.executeCommand('cmr.cancelMerge');
-  } finally {
-    await cmr.update('merge.editor', undefined, vscode.ConfigurationTarget.Workspace);
-  }
 });

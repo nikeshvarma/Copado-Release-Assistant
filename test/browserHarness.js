@@ -18,7 +18,9 @@ async function run(o, script, opts) {
     : '--vscode-editor-background:#1f1f1f;--vscode-editor-foreground:#cccccc;--vscode-foreground:#cccccc;--vscode-descriptionForeground:#9d9d9d;--vscode-button-background:#0078d4;--vscode-button-foreground:#fff;--vscode-button-secondaryBackground:#313131;--vscode-button-secondaryForeground:#cccccc;--vscode-badge-background:#616161;--vscode-badge-foreground:#f8f8f8;--vscode-panel-border:#2b2b2b;--vscode-editor-font-family:\'DejaVu Sans Mono\',monospace;--vscode-editor-font-size:13px;--vscode-font-family:\'DejaVu Sans\',sans-serif;--vscode-font-size:13px;--vscode-editorLineNumber-foreground:#6e7681';
   fs.writeFileSync(file, page.replace('<html lang="en">', '<html lang="en" style="' + vars + '">').replace('<body ', '<body class="' + (opts.light ? 'vscode-light' : 'vscode-dark') + '" '));
   const b = await chromium.launch();
-  const p = await b.newPage({ viewport: { width: opts.width || 1400, height: opts.height || 860 } });
+  // SHOT_SIZE=1280x760 draws the pictures at the README's size
+  const [sw, sh] = String(process.env.SHOT_SIZE || '1400x860').split('x').map(Number);
+  const p = await b.newPage({ viewport: { width: opts.width || sw, height: opts.height || sh } });
   const errors = [], sent = [];
   p.on('pageerror', e => errors.push('pageerror: ' + e.message));
   p.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 160)); });
@@ -35,7 +37,7 @@ async function run(o, script, opts) {
       // and as VS Code may also pass the keystroke on as a native paste: it must not paste twice
       if (opts.nativeToo) await p.evaluate(t => { const d = new DataTransfer(); d.setData('text/plain', t); document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); }, state.clip || '');
     }
-    else if (m.type === 'text' || m.type === 'mode') { if (m.type === 'mode') state.mode = m.mode; text = m.text; const marks = MP.marksFor(o, text, state.mode); await reply(marks.hold ? { type: 'marks', seq: m.seq, hold: true } : { type: 'marks', seq: m.seq, mode: state.mode, marks, conflicts: o.conflictsFor ? o.conflictsFor(text) : [] }); }
+    else if (m.type === 'text' || m.type === 'mode') { if (m.type === 'mode') state.mode = m.mode; text = m.text; const marks = MP.marksFor(o, text, state.mode); await reply(marks.hold ? { type: 'marks', seq: m.seq, hold: true, xmlError: marks.xmlError } : { type: 'marks', seq: m.seq, mode: state.mode, marks, conflicts: o.conflictsFor ? o.conflictsFor(text) : [] }); }
     else if (m.type === 'save') { text = m.text; await reply({ type: 'saved', ok: true, message: 'Saved as your resolution', text }); }
   });
   await p.addInitScript(() => { window.acquireVsCodeApi = () => ({ postMessage: m => window.__toHost(m), setState() {}, getState() { return null; } }); });

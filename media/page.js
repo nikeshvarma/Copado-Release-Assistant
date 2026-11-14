@@ -10,13 +10,14 @@
     back: sv('<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>'),
     route: sv('<circle cx="6" cy="19" r="3"></circle><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"></path><circle cx="18" cy="5" r="3"></circle>'),
     chevD: sv('<path d="m6 9 6 6 6-6"></path>'),
+    box: sv('<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>'),
     report: sv('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="m9 15 2 2 4-4"></path>')
   });
   const app = document.getElementById('app');
-  const logo = document.body.dataset.logo;
   const saved = vscode.getState() || {};
-  const NAVS = ['Promotions', 'Stories'];
-  const ui = { nav: NAVS.includes(saved.nav) ? saved.nav : 'Promotions', sel: saved.sel || null, tab: saved.tab || 'Files', filter: '', modal: false, setStatus: true, choices: saved.choices || {}, busy: false,
+  const NAVS = ['Promotions', 'Stories', 'Manual'];
+  const navs = () => NAVS;
+  const ui = { nav: NAVS.includes(saved.nav) ? saved.nav : 'Promotions', href: '', sel: saved.sel || null, tab: saved.tab || 'Files', filter: '', modal: false, setStatus: true, choices: saved.choices || {}, busy: false,
     ref: '', sref: saved.sref || '', asked: {}, earlier: false, setRecreate: true };
   let data = null;
 
@@ -24,6 +25,7 @@
   const base = p => String(p).split('/').pop();
   const act = (name, payload) => vscode.postMessage({ type: 'act', name, payload: payload || {} });
   const lact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'life', name, payload: payload || {} });
+  const mact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'manual', name, payload: payload || {} });
   const keep = () => vscode.setState({ nav: ui.nav, sel: ui.sel, tab: ui.tab, choices: ui.choices, sref: ui.sref });
   const ago = iso => { if (!iso) return ''; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
   const time = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -41,8 +43,9 @@
 
   function topbar(cur) {
     const p = cur && cur.promotion;
-    const nav = NAVS.map(n => '<button class="nav ' + (ui.nav === n ? 'on' : '') + '" data-nav="' + n + '"' + (n === 'Promotions' && ui.nav === n && p ? ' title="All promotions - open another"' : '') + '>' + esc(n) + '</button>').join('');
-    return '<div class="globalbar"><span class="brand"><img src="' + esc(logo) + '" alt=""><span class="name">Copado Release Assistant</span></span><span class="navs">' + nav + '</span>' +
+    const nav = navs().map(n => '<button class="nav ' + (ui.nav === n ? 'on' : '') + '" data-nav="' + n + '"' + (n === 'Promotions' && ui.nav === n && p ? ' title="All promotions - open another"' : '') + '>' + esc(n) + '</button>').join('');
+    // the tab's own title names the page: the bar starts with its tabs
+    return '<div class="globalbar"><span class="navs">' + nav + '</span>' +
       (ui.nav === 'Promotions' && p ? '<span class="crumb"><button class="crumbback" data-a="home" title="Back to all promotions - open another" aria-label="Back to all promotions">' + I.back + '</button><b>' + esc(p.name) + '</b></span>' : '') + '<span class="spacer"></span>' +
       (ui.nav === 'Promotions' && cur ? '<span class="muted updated">' + I.clock + ' Updated ' + esc(ago(cur.state.syncedAt)) + '</span>' : '') +
       '<span class="org" title="The Copado org"><span class="dot' + (data.copadoOrg ? '' : ' off') + '"></span><span class="orglbl">Copado org: </span><b>' + esc(data.copadoOrg || 'not set') + '</b></span>' +
@@ -106,19 +109,7 @@
 
   /* ------------------------------------------------------------ promotions: start */
 
-  function start() {
-    const recent = data.recent || [];
-    return '<div class="start"><h1>Open a Copado promotion</h1><div class="lead">' + (data.autoResolve ? 'Conflicts are fetched and the ones that need no decision are resolved for you.' : 'Its conflicts are merged for you to review \u2013 nothing is resolved until you accept it.') + '</div>' +
-      '<div class="big-input"><span class="field">' + I.search + '<input id="ref" placeholder="P12345, a user story such as US-0012345, or the promotion\u2019s Copado link" value="' + esc(ui.ref) + '"></span>' +
-      '<button class="btn primary" data-a="open"' + (data.copadoOrg ? '' : ' disabled') + '>' + I.download + 'Open</button></div>' +
-      '<div class="hint">' + (data.copadoOrg ? 'Nothing in Copado changes until you upload resolutions.' : 'Set the Copado org first: <a href="#" data-tool="workbench.action.openSettings">Settings</a> \u203a Copado org.') + '</div>' +
-      (recent.length ? '<div class="section-title">Recent promotions</div><div class="recent">' + recent.map(r => '<div class="rcard"><b>' + esc(r.name) + '</b>' + chip(r.status) +
-        '<span class="what">' + esc(r.from || '?') + ' ' + I.arrow + ' ' + esc(r.to || '?') + '&ensp;' + (r.total ? r.total + ' files, ' + (r.done === r.total ? 'all uploaded' : r.review + r.code ? (r.review + r.code) + ' to resolve' : 'all ready') : 'no conflicts') + '</span><span class="when" title="Fetched">' + esc(ago(r.syncedAt)) + '</span>' +
-        '<button class="btn ' + (r.total && r.done !== r.total ? 'secondary' : 'ghost') + ' small" data-a="openRecent" data-ref="' + esc(r.name) + '">' + (r.total && r.done !== r.total ? 'Continue' : 'Open') + '</button></div>').join('') + '</div>' : '') +
-      '<div class="tools"><div class="section-title">Other tools</div><div class="links">' +
-      [['cmr.copado.prepare', 'play', 'Prepare a user story'], ['cmr.repo.validateStory', 'branch', 'Validate from the feature branch'], ['cmr.validate.run', 'shield', 'Validate a deployment'], ['cmr.git.check', 'branch', 'Branch conflicts'], ['cmr.resolve', 'merge', 'Merge two files'], ['cmr.copado.inspect', 'search', 'Inspect a user story']]
-        .map(([id, ic, t]) => '<button class="btn ghost small" data-tool="' + id + '">' + I[ic] + t + '</button>').join('') + '</div></div></div>';
-  }
+
 
   /* ------------------------------------------------------------ promotions: the open one */
 
@@ -131,7 +122,7 @@
     const st = cur.state, files = Object.values(st.files), n = files.length, info = cur.info || {};
     const count = k => files.filter(e => k.includes(e.state)).length;
     const ready = count(['auto', 'resolved']), review = count(['review']), code = count(['code', 'error']), done = count(['uploaded', 'copado']);
-    const tabs = ['Files', 'Pre-check', 'Deployment', 'Activity'];
+    const tabs = ['Files', 'Components', 'Pre-check', 'Deployment', 'Activity'];
     const login = info.login;
     const who = login && login.alias ? '<span title="The destination\u2019s login - validations run as this user">' + I.key + ' ' + esc(st.to || '') + ' as ' + esc(login.alias) + (login.username && login.username !== login.alias ? ' <span class="muted">(' + esc(login.username) + ')</span>' : '') + '</span>'
       : '<span class="warnc" title="No Salesforce CLI login for the destination yet - you pick one on the first validation">' + I.key + ' no login for ' + esc(st.to || '?') + '</span>';
@@ -330,6 +321,59 @@
         (ui.earlier ? '<div class="jobs dim">' + earlier.map(x => jobRow(x, 0)).join('') + '</div>' : '') : '') + '</div>';
   }
 
+  // what the stories committed, and where each stands: a conflict, from the branch, not on the branch
+  const CSTATE = {
+    'conflict-open': ['open', 'warn', 'warn', 'Conflict \u00b7 to resolve'], 'conflict-resolved': ['resolved', 'ok', 'check', 'Conflict \u00b7 resolved'],
+    'conflict-uploaded': ['resolved', 'ok', 'check', 'Resolved \u00b7 in Copado'], branch: ['branch', 'info', 'check', 'On the branch'],
+    missing: ['missing', 'bad', 'ban', 'Not on the branch'], commit: ['commit', 'grey', 'dot', 'In the commit']
+  };
+  const CICON = {
+    code: sv('<path d="m8 7-4 5 4 5M16 7l4 5-4 5"/>'), field: sv('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 12h5"/>'),
+    page: sv('<rect x="3.5" y="3" width="17" height="18" rx="2"/><path d="M3.5 8h17M9 8v13"/>'), cube: sv('<path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/>'),
+    person: sv('<circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-4 3.6-6 7-6s6.2 2 7 6"/>'), flow: sv('<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v5.5"/>'),
+    box: sv('<path d="M4 8 12 4l8 4v8l-8 4-8-4z"/><path d="m4 8 8 4 8-4M12 12v8"/>'),
+    warn: sv('<path d="M12 3 2.5 20h19z"/><path d="M12 9.5v4.5M12 17.2h.01"/>'), check: sv('<path d="m5 12.5 4.5 4.5L19 7.5"/>'), ban: sv('<circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/>'),
+    dot: '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/></svg>', chev: sv('<path d="m6 9 6 6 6-6"/>'), chevR: sv('<path d="m9 6 6 6-6 6"/>')
+  };
+  const typeIcon = t => CICON[/^Apex|Trigger/.test(t) ? 'code' : /Field|Object|ValueSet|RecordType|ListView|CompactLayout/.test(t) ? 'field' : /FlexiPage|Layout|Tab|Application/.test(t) ? 'page'
+    : /Lightning|Aura|Resource/.test(t) ? 'cube' : /Permission|Profile|Role|Group|Queue/.test(t) ? 'person' : /Flow|Process|Approval/.test(t) ? 'flow' : 'box'];
+  const actionTag = a => { const t = String(a || 'Add'); const cls = /delete|destruct/i.test(t) ? 'del' : /selective/i.test(t) ? 'sel' : /retrieve/i.test(t) ? 'ret' : '';
+    return '<span class="cact ' + cls + '">' + esc(/selective/i.test(t) ? 'Selective' : /retrieveonly/i.test(t) ? 'Retrieve only' : t) + '</span>'; };
+  function componentsView(cur) {
+    const c = cur.components;
+    if (!c || c.loading) return '<div class="scroll"><div class="empty">Reading what the stories committed\u2026</div></div>';
+    const head = '<div class="chead2"><div><h3>What the stories committed</h3><div class="muted">' + (c.rows ? plural(c.rows.length, 'component') + ' ' : '') + (c.source ? 'from ' + esc(c.source) : '') + (c.at ? ' \u00b7 read ' + esc(ago(new Date(c.at).toISOString())) : '') + '</div></div>' +
+      '<span class="spacer"></span><button class="btn secondary small" data-a="components">' + I.refresh + 'Read again</button></div>';
+    if (c.error) return '<div class="scroll">' + head + '<div class="card bad">' + esc(c.error) + '</div></div>';
+    if (!c.rows.length) return '<div class="scroll">' + head + '<div class="empty">Copado has no list of this promotion\u2019s components, and its stories\u2019 commits list none.</div></div>';
+    const key = r => (CSTATE[r.where] || CSTATE.commit)[0];
+    const n = k => c.rows.filter(r => key(r) === k).length;
+    const f = ui.compFilter || 'all', q = String(ui.compName || '').trim().toLowerCase();
+    const filters = [['all', 'All', c.rows.length], ['open', 'To resolve', n('open')], ['resolved', 'Resolved', n('resolved')], ['commit', 'In the commit', n('commit')]]
+      .concat(c.checked ? [['branch', 'On the branch', n('branch')], ['missing', 'Not on the branch', n('missing')]] : []);
+    const shown = c.rows.filter(r => (f === 'all' || key(r) === f) && (!q || r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q)));
+    const note = !c.checked ? '<div class="cnote">' + I.branch + '<span>Run <b>Pre-check</b> to see which components are on the stories\u2019 branches.</span><button class="btn secondary small" data-tab="Pre-check">Run Pre-check</button></div>'
+      : c.counts.missing ? '<div class="card warn">' + plural(c.counts.missing, 'component was', 'components were') + ' not found on ' + esc(c.branches.join(', ') || 'the branches') + '. Check that its file is on the branch, under its Salesforce name \u2013 names with special characters are written encoded, such as <span class="mono">%5BA%5D R%26D Admin</span> for <span class="mono">[A] R&amp;D Admin</span>.</div>' : '';
+    const bar = '<div class="cfbar"><span class="cfsegs" role="tablist">' + filters.map(([v, l, k]) => '<button class="cfs' + (f === v ? ' on' : '') + (k ? '' : ' zero') + '" data-a="compFilter" data-v="' + v + '">' + l + '<span class="cfc">' + k + '</span></button>').join('') + '</span>' +
+      '<span class="spacer"></span><span class="cfsearch">' + I.search + '<input id="cname" placeholder="Filter by name" value="' + esc(ui.compName || '') + '" aria-label="Filter by name"></span></div>';
+    const groups = new Map();
+    for (const r of shown) (groups.get(r.type) || groups.set(r.type, []).get(r.type)).push(r);
+    const fold = ui.compFold || {};
+    const row = r => {
+      const [, cls, ic, label] = CSTATE[r.where] || CSTATE.commit;
+      const cells = '<span class="ccn">' + esc(r.name) + '</span>' + actionTag(r.action) + '<span class="ccs">' + esc((r.stories || []).join(', ')) + '</span><span></span>' +
+        '<span class="cst ' + cls + '">' + CICON[ic] + label + '</span><span class="cgo">' + (r.rel ? CICON.chevR : '') + '</span>';
+      return r.rel ? '<button class="crow opens" data-sel="' + esc(r.rel) + '" data-go="Files" title="Open ' + esc(base(r.rel)) + '">' + cells + '</button>' : '<div class="crow">' + cells + '</div>';
+    };
+    const summary = rs => { const o = rs.filter(r => key(r) === 'open').length, d = rs.filter(r => key(r) === 'resolved').length, m = rs.filter(r => key(r) === 'missing').length;
+      return (o ? '<span class="cs-open">' + o + ' to resolve</span>' : '') + (d ? '<span class="cs-done">' + d + ' resolved</span>' : '') + (m ? '<span class="cs-miss">' + m + ' not on the branch</span>' : ''); };
+    const list = shown.length ? '<div class="ccols"><span>Component</span><span>Action</span><span>Story</span><span></span><span>Where it stands</span><span></span></div>' +
+      [...groups].map(([t, rs]) => '<div class="cgrp' + (fold[t] ? ' folded' : '') + '"><button class="cgh2" data-a="compFold" data-v="' + esc(t) + '" aria-expanded="' + !fold[t] + '">' + CICON.chev + '<span class="cti">' + typeIcon(t) + '</span><b>' + esc(t) + '</b><span class="ccount">' + rs.length + '</span><span class="csum">' + summary(rs) + '</span></button>' +
+        (fold[t] ? '' : rs.map(row).join('')) + '</div>').join('')
+      : '<div class="empty">' + (q ? 'Nothing named like \u201c' + esc(q) + '\u201d here.' : 'None here.') + '</div>';
+    return '<div class="scroll comps">' + head + note + bar + list + '</div>';
+  }
+
   function modal(cur) {
     const p = cur.plan;
     const all = p.revised && p.revised === p.ready.length;
@@ -352,9 +396,10 @@
     const files = Object.values(cur.state.files);
     const allDone = files.length && files.every(e => e.state === 'uploaded' || e.state === 'copado');
     if (ui.tab === 'Deployment' && !cur.jobs && !ui.asked['jobs' + cur.promotion.id]) { ui.asked['jobs' + cur.promotion.id] = true; setTimeout(() => act('jobs'), 0); }
+    if (ui.tab === 'Components' && !cur.components && !ui.asked['comps' + cur.promotion.id]) { ui.asked['comps' + cur.promotion.id] = true; setTimeout(() => act('components'), 0); }
     pickSel(cur, allDone);
     if (cur.precheck && cur.precheck.state === 'running' && ui.seenRun !== cur.precheck.id) { ui.seenRun = cur.precheck.id; ui.tab = 'Pre-check'; keep(); }
-    const body = ui.tab === 'Activity' ? activity(cur) : ui.tab === 'Deployment' ? deployment(cur) : ui.tab === 'Pre-check' ? precheckView(cur) : !files.length ? branchView(cur, false)
+    const body = ui.tab === 'Activity' ? activity(cur) : ui.tab === 'Deployment' ? deployment(cur) : ui.tab === 'Pre-check' ? precheckView(cur) : ui.tab === 'Components' ? componentsView(cur) : !files.length ? branchView(cur, false)
       : '<div class="split">' + list(cur, allDone) + (allDone && ui.sel === OVERVIEW ? '<div class="detail">' + overview(cur) + '</div>' : detail(cur)) + '</div>';
     return header(cur) + validationNote() + body + (ui.modal ? modal(cur) : '');
   }
@@ -377,7 +422,9 @@
       '<div class="meta">' + (j.pipeline ? '<span>' + I.route + esc(j.pipeline) + '</span>' : '') + '<span>' + I.dot + 'in ' + esc(s.env || '?') + '</span>' + (s.baseBranch ? '<span>' + I.branch + 'based on ' + esc(s.baseBranch) + '</span>' : '') + (s.release ? '<span>' + I.file + 'release ' + esc(s.release) + '</span>' : '') + '</div>' +
       '<ol class="track journey">' + j.stages.map(stage).join('') + '</ol>' +
       (j.next ? '<div class="card"><h3>' + I.arrow + 'Next: ' + esc(j.next.env) + '</h3><div class="muted">Validate ' + esc(s.name) + '\u2019s ' + (j.hotfix ? 'hotfix' : 'feature') + ' branch against ' + esc(j.next.env) + '. Nothing is deployed.</div>' +
-        '<div class="actions"><button class="btn primary" data-l="story.validate">' + I.beaker + 'Validate from the branch</button></div></div>'
+        '<div class="actions"><button class="btn primary" data-l="story.validate" title="Check-only, from the story\u2019s feature branch">' + I.beaker + 'Validate from the branch</button>' +
+        '<button class="btn secondary" data-l="story.package" title="The story\u2019s package.xml, from its commit">' + I.box + 'package.xml</button>' +
+        '<button class="btn secondary" data-l="story.report" title="What Copado holds about this story \u2013 read-only">' + I.report + 'Story report</button></div></div>'
         : '<div class="card"><h3>' + I.check + 'At the end of the pipeline</h3><div class="muted">' + (j.backTo && j.backTo.length ? 'A hotfix in production is back-promoted to ' + esc(j.backTo.join(', ')) + '.' : 'Nothing further to promote.') + '</div></div>') +
       (j.promotions.length ? '<div class="sect">Promotions</div><table class="grid"><thead><tr><th>Promotion</th><th>From \u2192 to</th><th>Status</th><th>Date</th></tr></thead><tbody>' + j.promotions.map(p => '<tr><td><button class="link" data-l="promotion.open" data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>' + (p.back ? ' <span class="chip info">back</span>' : '') +
         '</td><td>' + esc((p.from || '?') + ' \u2192 ' + (p.to || '?')) + '</td><td>' + chip(p.status) + '</td><td class="muted">' + esc(day(p.created)) + '</td></tr>').join('') + '</tbody></table>' : '') + '</div>';
@@ -385,15 +432,87 @@
 
   /* ------------------------------------------------------------ drawing */
 
+  // ---- Promotions, with nothing open: one box to open a promotion or a story, recent work, tools ----
+  function start() {
+    const search = '<div class="hsearch">' + I.search + '<input id="href" placeholder="Open a promotion or a story \u2013 P12345, US-0012345, or a Copado link" value="' + esc(ui.href) + '"' + (data.copadoOrg ? '' : ' disabled') + '>' +
+      '<button class="btn primary" data-a="homeOpen"' + (data.copadoOrg ? '' : ' disabled') + '>Open</button></div>';
+    const hero = '<div class="hero"><h1>Open a promotion</h1><div class="lead">' + (data.copadoOrg
+      ? 'Its conflicts are merged for you to review \u2013 nothing in Copado changes until you upload. A user story opens its journey.'
+      : 'Set the Copado org to open promotions and stories: <a href="#" data-tool="workbench.action.openSettings">Settings</a> \u203a Copado org \u2013 or merge by hand on the Manual tab.') + '</div>' + search + '</div>';
+    const recent = data.recent || [];
+    const tools = [['cmr.validate.run', 'shield', 'Validate a deployment', 'Check-only, against an org'], ['cmr.git.check', 'branch', 'Branch conflicts', 'Two git branches, nothing changed']]
+      .map(([id, ic, t, d]) => '<button class="htool" data-tool="' + id + '"><span class="ti">' + I[ic] + '</span><span class="tt"><b>' + t + '</b><small>' + d + '</small></span></button>').join('') +
+      '<button class="htool" data-nav="Manual"><span class="ti">' + I.branch + '</span><span class="tt"><b>Manual merge</b><small>Two versions, pasted or chosen</small></span></button>';
+    return '<div class="scroll home">' + hero + '<div class="hgrid"><div>' +
+      (recent.length ? '<div class="section-title">Recent promotions</div><div class="card hrecent">' + recent.map(r => '<div class="hrow"><b>' + esc(r.name) + '</b>' + chip(r.status) + '<span class="muted">' + esc(r.from || '?') + ' ' + I.arrow + ' ' + esc(r.to || '?') + '</span><span class="spacer"></span>' +
+        '<button class="btn ghost small" data-a="openRecent" data-ref="' + esc(r.name) + '">' + (r.total && r.done !== r.total ? 'Continue' : 'Open') + '</button></div>').join('') + '</div>'
+        : '<div class="muted hnone">Promotions you open appear here.</div>') +
+      '</div><div><div class="section-title">Tools</div>' + tools + '</div></div></div>';
+  }
+
+  // ---- Manual: two versions pasted, dropped or chosen, merged in the merge editor; a package from a commit ----
+  function manualView() {
+    const m = data.manual || {};
+    const card = (side, title, sub) => {
+      const d = m[side];
+      const chip = d ? '<span class="chip ' + (d.valid ? 'resolved' : 'bad') + '">' + esc((d.type || 'not XML') + ' \u00b7 ' + d.lines + ' line' + (d.lines === 1 ? '' : 's') + ' \u00b7 ' + (d.valid ? 'valid' : 'not valid')) + '</span>' : '';
+      const body = d ? '<div class="mcode">' + d.head.map((l, i) => '<div><span class="ln">' + (i + 1) + '</span>' + esc(l) + '</div>').join('') + (d.lines > d.head.length ? '<div class="more">\u2026 ' + (d.lines - d.head.length) + ' more lines</div>' : '') + '</div>' +
+          (d.valid ? '' : '<div class="mbad">' + esc(d.problem) + '</div>')
+        : '<textarea class="mpaste" data-side="' + side + '" aria-label="Paste the ' + title.toLowerCase() + ' here" placeholder="Paste here (Ctrl+V) \u00b7 or drop a file"></textarea>';
+      return '<div class="card mside" data-drop="' + side + '"><div class="mhead"><b>' + title + '</b><span class="muted">' + sub + '</span><span class="spacer"></span>' + chip + '</div>' + body +
+        '<div class="mfoot"><button class="link" data-m="manual.pick" data-side="' + side + '">' + (d ? 'Choose another file\u2026' : 'Choose a file\u2026') + '</button>' +
+        (d ? '<button class="link" data-m="manual.clear" data-side="' + side + '">Clear</button>' + (d.name ? '<span class="muted mono">' + esc(d.name) + '</span>' : '') : '') + '</div></div>';
+    };
+    const ready = m.target && m.incoming && m.target.valid && m.incoming.valid;
+    const c = m.commit;
+    return '<div class="scroll"><div class="manual">' +
+      '<div class="sect">Merge two versions</div>' +
+      '<div class="mpair">' + card('target', 'Target', 'the resolution \u2013 keeps everything') +
+      '<div class="mmid"><button class="btn secondary icon" data-m="manual.swap" title="Swap the two sides" aria-label="Swap the two sides"' + (m.target || m.incoming ? '' : ' disabled') + '>\u21c4</button></div>' +
+      card('incoming', 'Incoming', 'the feature branch \u2013 merged in') + '</div>' +
+      '<div class="actions"><button class="btn primary" data-m="manual.merge"' + (ready ? '' : ' disabled') + '>Merge and review</button><span class="muted">Opens the merge editor \u2013 every change marked, every decision yours; then copy the result or save it as a file</span></div>' +
+      (m.last ? '<div class="card mlast"><b>Last merge</b><span class="muted">' + esc(m.last.type) + ' \u00b7 ' + esc(ago(m.last.at)) + '</span><span class="spacer"></span><button class="btn secondary small" data-m="manual.again">Open again</button></div>' : '') +
+      '<div class="sect">Package from a Copado commit</div>' +
+      '<div class="card mside" data-drop="commit">' + (c ? '<div class="mhead"><b>' + esc(c.name || 'Commit') + '</b><span class="muted">' + plural(c.components || 0, 'component') + '</span><span class="spacer"></span><button class="link" data-m="manual.commitClear">Clear</button></div>'
+        : '<textarea class="mpaste small" data-side="commit" aria-label="Paste a Copado commit file here" placeholder="Paste or drop a Copado commit file \u2013 the \u201cCopado Commit changes\u201d of a story"></textarea>') +
+      '<div class="mfoot">' + (c ? '' : '<button class="link" data-m="manual.commitPick">Choose a file\u2026</button>') +
+      '<span class="spacer"></span><button class="btn secondary small" data-m="manual.package"' + (c ? '' : ' disabled') + '>Generate package.xml</button><button class="btn secondary small" data-m="manual.validate">Validate against an org\u2026</button></div></div>' +
+      '</div></div>';
+  }
+  // pasting or dropping into a card: its text to the extension, which keeps it
+  function manualEvents() {
+    if (typeof document.querySelectorAll !== 'function') return;
+    const send = (side, text, name) => side === 'commit' ? mact('manual.commitSet', { text, name }) : mact('manual.set', { side, text, name });
+    for (const t of document.querySelectorAll('.mpaste')) {
+      t.addEventListener('paste', e => { const text = e.clipboardData && e.clipboardData.getData('text'); if (text) { e.preventDefault(); send(t.dataset.side, text, null); } });
+      t.addEventListener('input', () => { if (t.value.trim().length > 20) send(t.dataset.side, t.value, null); });
+    }
+    for (const c of document.querySelectorAll('[data-drop]')) {
+      c.addEventListener('dragover', e => { e.preventDefault(); c.classList.add('over'); });
+      c.addEventListener('dragleave', () => c.classList.remove('over'));
+      c.addEventListener('drop', e => {
+        e.preventDefault(); c.classList.remove('over');
+        const side = c.dataset.drop, dt = e.dataTransfer;
+        const f = dt && dt.files && dt.files[0];
+        if (f && typeof FileReader !== 'undefined') { const r = new FileReader(); r.onload = () => send(side, String(r.result), f.name); r.readAsText(f); return; }
+        // from VS Code's Explorer: the file's address
+        const u = dt && (dt.getData('text/uri-list') || dt.getData('text/plain'));
+        if (u && side !== 'commit') mact('manual.dropUri', { side, uri: u.split(/\r?\n/)[0] });
+      });
+    }
+  }
+
   function render() {
     if (!data) { app.innerHTML = '<div class="empty">Loading\u2026</div>'; return; }
     // keep the caret where it was: a redraw replaces every element
     const a = document.activeElement, focus = a && a.id ? { id: a.id, pos: a.selectionStart } : null;
-    const body = ui.nav === 'Stories' ? storiesView() : promotions();
+    const body = ui.nav === 'Stories' ? storiesView() : ui.nav === 'Manual' ? manualView() : promotions();
     app.className = ui.busy ? 'is-busy' : '';
     app.innerHTML = topbar(ui.nav === 'Promotions' ? data.current : null) + body;
     const bind = (id, key, submit) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('input', () => { ui[key] = el.value; keep(); }); el.addEventListener('keydown', ev => { if (ev.key === 'Enter') submit(); }); };
-    bind('ref', 'ref', openRef); bind('sref', 'sref', openStory);
+    bind('ref', 'ref', openRef); bind('sref', 'sref', openStory); bind('href', 'href', openAny);
+    const cn = document.getElementById('cname'); if (cn) cn.addEventListener('input', () => { ui.compName = cn.value; render(); });
+    if (ui.nav === 'Manual') manualEvents();
     const f = document.getElementById('filter'); if (f) f.addEventListener('input', () => { ui.filter = f.value; render(); });
     const back = focus && document.getElementById(focus.id);
     if (back) { back.focus(); if (focus.pos != null && back.setSelectionRange) back.setSelectionRange(focus.pos, focus.pos); }
@@ -401,9 +520,15 @@
   }
   const openRef = () => { if (ui.ref.trim()) act('open', { ref: ui.ref.trim() }); };
   const openStory = () => { const v = ui.sref.trim(); if (v && okRef(v)) lact('story.open', { ref: v }); };
+  // Home's one box: a story opens its journey, anything else the promotion
+  const openAny = () => {
+    const v = ui.href.trim(); if (!v) return;
+    if (/^US-\d+$/i.test(v)) { ui.nav = 'Stories'; ui.sref = v; keep(); render(); return lact('story.open', { ref: v }); }
+    ui.nav = 'Promotions'; ui.ref = v; keep(); render(); act('open', { ref: v });
+  };
 
   app.addEventListener('click', ev => {
-    const t = ev.target.closest('[data-a],[data-sel],[data-tab],[data-tool],[data-choose],[data-nav],[data-l]');
+    const t = ev.target.closest('[data-a],[data-sel],[data-tab],[data-tool],[data-choose],[data-nav],[data-l],[data-m]');
     if (!t) return;
     ev.preventDefault();
     if (t.dataset.nav) {
@@ -411,6 +536,7 @@
       ui.nav = t.dataset.nav; keep(); return render();
     }
     if (t.dataset.tool) return vscode.postMessage({ type: 'tool', id: t.dataset.tool });
+    if (t.dataset.m) { if (!t.disabled) mact(t.dataset.m, { side: t.dataset.side }); return; }
     if (t.dataset.l) {
       const n = t.dataset.l;
       if (n === 'story.open') return t.dataset.ref ? lact(n, { ref: t.dataset.ref }) : openStory();
@@ -422,6 +548,7 @@
     const a = t.dataset.a, rel = ui.sel;
     if (a === 'precheck') { ui.tab = 'Pre-check'; keep(); render(); }
     if (a === 'open') return openRef();
+    if (a === 'homeOpen') return openAny();
     if (a === 'openRecent') return act('open', { ref: t.dataset.ref });
     if (a === 'uploadAsk') { ui.modal = true; return render(); }
     if (a === 'cancel') { ui.modal = false; return render(); }
@@ -429,6 +556,8 @@
     if (a === 'upload') { ui.modal = false; render(); return act('upload', { status: ui.setStatus, recreate: offerRecreate(data.current) && ui.setRecreate }); }
     if (a === 'toggleRecreate') { ui.setRecreate = !ui.setRecreate; return render(); }
     if (a === 'earlier') { ui.earlier = !ui.earlier; return render(); }
+    if (a === 'compFilter') { ui.compFilter = t.dataset.v; return render(); }
+    if (a === 'compFold') { ui.compFold = Object.assign({}, ui.compFold, { [t.dataset.v]: !(ui.compFold || {})[t.dataset.v] }); return render(); }
     if (a === 'recreate') return act('recreate', { value: t.dataset.value === '1' });
     if (a === 'revise') { if (t.dataset.rel) { ui.sel = t.dataset.rel; ui.tab = 'Files'; keep(); render(); } return act('revise', { rel: t.dataset.rel || rel }); }
     if (a === 'choose') {
@@ -443,7 +572,14 @@
 
   window.addEventListener('message', ev => {
     const m = ev.data || {};
-    if (m.type === 'state') { data = m.data; render(); }
+    if (m.type === 'state') {
+      // a promotion just opened - from Home, a search, a recent one: shown on Promotions
+      const was = data && data.current ? data.current.promotion.id : null;
+      data = m.data;
+      const now = data.current ? data.current.promotion.id : null;
+      if (now && now !== was && ui.nav !== 'Promotions') { ui.nav = 'Promotions'; keep(); }
+      render();
+    }
     if (m.type === 'busy') { ui.busy = m.on; render(); }
     if (m.type === 'nav' && NAVS.includes(m.nav)) { ui.nav = m.nav; ui.tab = 'Files'; keep(); render(); }
   });

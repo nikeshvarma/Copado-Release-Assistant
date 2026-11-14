@@ -6,7 +6,8 @@
   const api = acquireVsCodeApi();
   const $ = id => document.getElementById(id);
   const S = { seq: 0, shown: 0, saved: null, mode: 'order', marks: null, conflicts: [], zones: { left: [], right: [] }, widgets: [], deco: { left: null, right: null }, lastRight: null, held: false,
-    hide: false, expanded: [], hiddenRuns: [] };
+    hide: false, expanded: [], hiddenRuns: [], dups: [], typed: new Set(), xml: null, dupRemoved: null };
+  S.widgets = { left: [], right: [] };
   // identical lines folded away: this many stay around every change, and a run shorter than RUN stays
   const CONTEXT = 3, RUN = 4;
   let L, R, monaco;
@@ -71,9 +72,9 @@
       drawJoins();
     });
     sync(L, R); sync(R, L);
-    R.onDidChangeModelContent(() => { dirty(); typed(); });
+    R.onDidChangeModelContent(e => { typedSince(e.changes); dirty(); typed(); });
     clipboard(L, true); clipboard(R, false);
-    R.onDidChangeCursorPosition(e => openAt('right', e.position.lineNumber - 1));
+    R.onDidChangeCursorPosition(e => { openAt('right', e.position.lineNumber - 1); where(); });
     L.onDidChangeCursorPosition(e => openAt('left', e.position.lineNumber - 1));
     for (const ed of [L, R]) {
       // a click on a row between lines - a change's header, struck-through lines - puts you on the line after it
@@ -92,6 +93,8 @@
     }
     R.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => save(false));
     R.addCommand(monaco.KeyCode.F7, () => go(1));
+    R.addCommand(monaco.KeyCode.F8, () => nextProblem(1));
+    R.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F8, () => nextProblem(-1));
     R.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, () => go(-1));
     L.addCommand(monaco.KeyCode.F7, () => go(1));
     L.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, () => go(-1));
@@ -177,23 +180,15 @@
     timer = setTimeout(() => { S.seq++; api.postMessage({ type: 'text', seq: S.seq, text: R.getValue() }); }, 250);
   }
   function dirty() {
-    if (S.applyOnly) return;
+    if (S.applyOnly || S.manual) return status();
     const d = S.saved != null && R.getValue() !== S.saved;
-    $('save').classList.toggle('pri', d);
+    S.unsaved = d;
     api.postMessage({ type: 'dirty', dirty: d });
+    status();
   }
 
   // ---- drawing the pieces ----
-  const WORDS = {
-    removed: ['\u21b6', 'Removed', 'Restore'], dropped: ['\u21b6', 'Left out from ' + 'THEIRS', 'Add it back'],
-    feature: ['+', 'From ' + 'THEIRS', 'Undo'], own: ['\u270e', 'Your edit', 'Undo'],
-    'changed-feature': ['\u0394', 'Changed by ' + 'THEIRS', 'Use target'], 'changed-own': ['\u270e', 'Your edit', 'Use target'],
-    // what the feature branch has otherwise, though your resolution does not take it
-    kept: ['\u2212', 'Not in ' + 'THEIRS' + ' \u00b7 still here', 'Remove'], differs: ['\u2260', 'THEIRS' + ' has another value', 'USEFEATURE'],
-    notin: ['\u21b6', 'Not in ' + 'THEIRS', 'Restore']
-  };
   const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
-  const say = (k, i) => { const w = WORDS[k][i].replace('USEFEATURE', 'Use ' + (/feature/i.test(S.theirs || '') ? 'feature' : 'incoming')); return (w.startsWith('THEIRS') ? cap(S.theirs || 'the incoming file') + w.slice(6) : w.replace('THEIRS', S.theirs || 'the incoming file')); };
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   function zoneNode(cls, html) { const d = document.createElement('div'); d.className = 'zone ' + cls; d.innerHTML = html || ''; return d; }
@@ -205,16 +200,64 @@
     return d;
   }
 
+  // icons: drawn, one size and one weight everywhere - rows, toolbar, the hidden-lines bar
+  const SVG = d => '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+  const ICON = {
+    undo: SVG('<path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8H7"/>'),
+    x: SVG('<path d="m4 4 8 8M12 4l-8 8"/>'),
+    swap: SVG('<path d="M2.5 5h10l-2.5-2.5M13.5 11h-10L6 13.5"/>'),
+    up: SVG('<path d="m4 10 4-4 4 4"/>'), down: SVG('<path d="m4 6 4 4 4-4"/>'),
+    more: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><circle cx="3.5" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.5" cy="8" r="1.4"/></svg>',
+    // arrows opening away from a line: the hidden-lines row, in the line-number column
+    expand: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M6 4l2-2 2 2M8 14v-4M6 12l2 2 2-2M3.5 8h9"/></svg>',
+    eye: SVG('<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
+    check: SVG('<path d="m3 8.5 3 3 7-7"/>'),
+    chev: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4"/></svg>'
+  };
+  const GLYPH = { '\u21b6': 'undo', '\u2715': 'x', '\u21c4': 'swap' };
+
+  // the rows between lines: one word in the colour of the change, and icon buttons whose names are their tooltips
+  const side = () => /feature/i.test(S.theirs || '') ? 'feature' : 'incoming';
+  const ROW = k => ({
+    feature: ['feat', 'Added', [['\u21b6', 'Undo']]], own: ['own', 'Added by you', [['\u21b6', 'Undo']]],
+    'changed-feature': ['feat', 'Changed', [['\u21b6', 'Use target']]], 'changed-own': ['own', 'Edited', [['\u21b6', 'Use target']]],
+    removed: ['rem', 'Removed', [['\u21b6', 'Restore']]], notin: ['rem', 'Not in ' + side(), [['\u21b6', 'Restore']]],
+    dupRemoved: ['dupr', 'Duplicate removed', [['\u21b6', 'Put it back']]], dropped: ['rem', 'Left out', [['\u21b6', 'Add it back']]],
+    kept: ['keep', 'Kept \u00b7 not in ' + side(), [['\u2715', 'Remove']]], differs: ['keep', cap(side()) + ' differs', [['\u21c4', 'Use ' + side()]]],
+    move: ['mv', 'Moved', [['\u21b6', 'Move back']]], conf: ['conf', 'Both changed', [['\u21b6', 'Use target'], ['\u21c4', 'Use ' + side()]]],
+    dup: ['dup', 'Duplicate', [['\u2715', 'Remove copy']]]
+  })[k];
+  const rowNode = (cls, word) => zoneNode('head ' + cls, '<span class="dotk"></span><b>' + esc(word) + '</b>');
+
   function draw(m) {
     S.marks = m;
     const lh = R.getOption(monaco.editor.EditorOption.lineHeight);
+    const HEAD = Math.max(22, lh + 3), FOLD = lh + 4;
     const items = { left: [], right: [] };
-    const zone = (side, after, lines, node, buttons, move) => items[side].push({ after, lines, node, buttons, move });
+    // a zone: lines, or a header row's pixels; buttons over it, or the whole of it a click
+    const zone = (sd, after, lines, node, buttons, move, opts) => items[sd].push(Object.assign({ after, lines, node, buttons, move }, opts || {}));
+    // a change's row on both sides: the word on your side, a wordless row on the target's, the same height
+    const rowsAt = new Map();
+    const row = (key, after, leftAfter, undos, word, move) => {
+      const [cls, w, btns] = ROW(key);
+      const buttons = btns.map((b, i) => [b[0], b[1], undos[i]]).filter(b => b[2]);
+      // only a duplicate joins a row already there - one for lines on your side (added, edited, kept), never a removed block's
+      const at = key === 'dup' && rowsAt.get(after);
+      if (at) {
+        // a second mark on the same lines - a duplicate of something you added: the same row, both actions
+        at.node.querySelector('b').insertAdjacentHTML('beforeend', ' <span class="also ' + cls + '">\u00b7 ' + esc(word || w) + '</span>');
+        at.buttons.push(...buttons.map(b => b.concat(cls)));
+        return;
+      }
+      const item = { after, lines: 0, node: rowNode(cls, word || w), buttons: buttons.map(b => b.concat(cls)), move, px: HEAD, cls };
+      items.right.push(item);
+      if (!move && !['removed', 'notin', 'dupRemoved', 'dropped'].includes(key)) rowsAt.set(after, item);
+      zone('left', leftAfter, 0, zoneNode('head ' + cls + ' l'), null, null, { px: HEAD });
+    };
     const ld = [], rd = [];
-    const whole = (arr, l0, l1, cls, ruler) => { if (l1 > l0) arr.push({ range: new monaco.Range(l0 + 1, 1, l1, 1), options: { isWholeLine: true, className: cls, linesDecorationsClassName: cls + '-g', overviewRuler: ruler ? { color: ruler, position: monaco.editor.OverviewRulerLane.Full } : undefined } }); };
+    const whole = (arr, l0, l1, cls, ruler, glyph) => { if (l1 > l0) arr.push({ range: new monaco.Range(l0 + 1, 1, l1, 1), options: { isWholeLine: true, className: cls, linesDecorationsClassName: cls + '-g', glyphMarginClassName: glyph || undefined, overviewRuler: ruler ? { color: ruler, position: monaco.editor.OverviewRulerLane.Full } : undefined } }); };
     const ORANGE = 'rgba(232,145,45,.9)', RED = 'rgba(241,76,76,.7)', GREEN = 'rgba(137,209,133,.8)', BLUE = 'rgba(55,148,255,.8)', PURPLE = 'rgba(177,128,215,.9)', YELLOW = 'rgba(204,167,0,.9)';
 
-    // moves start where a piece starts; their header comes first there
     // a right-hand line's place on the left: line for line inside an unchanged piece, the piece's start otherwise
     const holding = b => m.pieces.find(p => p.b0 <= b && b < p.b1);
     const leftOf = b => { const p = holding(b); return p ? (p.kind === 'same' ? p.a0 + (b - p.b0) : p.a0) : (m.pieces.length ? m.pieces[m.pieces.length - 1].a1 : 0); };
@@ -226,41 +269,26 @@
       if (key) (movesAt.get(key) || movesAt.set(key, []).get(key)).push(mv);
     }
     const moveRow = mv => {
-      const label = mv.label + ' \u00b7 ' + ord(mv.from) + ' \u2192 ' + ord(mv.to) + (mv.inside ? '' : ' \u00b7 nothing inside changed');
-      const [r, l] = header('move', '\u2195', 'Moved: ' + label, [['Move back', mv.undo]]);
-      zone('right', mv.b0, 1, r, [['Move back', mv.undo]], mv); zone('left', leftOf(mv.b0), 1, l);
+      row('move', mv.b0, leftOf(mv.b0), [mv.undo], null, mv);
       whole(rd, mv.b0, mv.b1, 'mv', PURPLE); whole(ld, leftOf(mv.b0), leftOf(mv.b1 - 1) + 1, 'mv');
-    };
-    const header = (cls, icon, text, buttons, sideText) => {
-      const html = '<span class="ic">' + icon + '</span><b>' + esc(text) + '</b>' + (sideText ? '<span class="dim"> \u00b7 ' + esc(sideText) + '</span>' : '');
-      return [zoneNode('head ' + cls, html), zoneNode('head ' + cls + ' l', '<span class="ic">' + icon + '</span>' + esc(text.split(':')[0]))];
     };
     for (const p of m.pieces) {
       for (const mv of (movesAt.get(p) || [])) moveRow(mv);
       if (p.kind === 'same') {
-        // moves that start partway through an unchanged run: their rows in line order
         for (const mv of m.moves) if (mv.b0 > p.b0 && mv.b0 < p.b1) moveRow(mv);
         continue;
       }
       const lc = p.a1 - p.a0, rc = p.b1 - p.b0;
-      const name = p.label + (p.context ? ' \u00b7 ' + p.context : '');
-      const word = p.kind === 'removed' && p.notInFeature ? 'notin' : p.kind;
-      const [icon, title] = [say(word, 0), say(word, 1)];
-      const action = [[say(word, 2), p.undo]];
-      const [rh, lh2] = header(p.kind, icon, title + ': ' + name, action);
-      zone('right', p.b0, 1, rh, action); zone('left', p.a0, 1, lh2);
+      const key = p.kind === 'removed' ? (p.dupRemoved ? 'dupRemoved' : p.notInFeature ? 'notin' : 'removed') : p.kind;
+      row(key, p.b0, p.a0, [p.undo]);
       if (p.kind === 'removed' || p.kind === 'dropped') {
         // no lines on your side: the target's (or the feature's) lines, struck through, where they were
         const ghost = p.ghost || [];
-        zone('right', p.b0, ghost.length, ghostNode(ghost, p.kind));
-        if (p.kind === 'removed') whole(ld, p.a0, p.a1, 'del', RED); else zone('left', p.a0, ghost.length, zoneNode('pad'));
+        zone('right', p.b0, ghost.length, ghostNode(ghost, p.dupRemoved ? 'dupr' : p.kind));
+        if (p.kind === 'removed') whole(ld, p.a0, p.a1, p.dupRemoved ? 'dupl-l' : 'del', p.dupRemoved ? null : RED); else zone('left', p.a0, ghost.length, zoneNode('pad'));
         continue;
       }
-      if (p.kind === 'kept' || p.kind === 'differs') {
-        // the target's, as you have it: nothing to shade on the left; orange on your side
-        whole(rd, p.b0, p.b1, 'keep', ORANGE);
-        continue;
-      }
+      if (p.kind === 'kept' || p.kind === 'differs') { whole(rd, p.b0, p.b1, 'keep', ORANGE); continue; }
       if (lc) whole(ld, p.a0, p.a1, 'del', RED);
       whole(rd, p.b0, p.b1, /feature/.test(p.kind) ? 'feat' : 'own', /feature/.test(p.kind) ? GREEN : BLUE);
       if (rc > lc) zone('left', p.a1, rc - lc, zoneNode('pad'));
@@ -270,60 +298,92 @@
     for (const c of S.conflicts) {
       if (c.line == null) continue;
       whole(rd, c.line, c.line + 1, 'conf', YELLOW);
-      const text = 'Both changed ' + c.tag + ' \u00b7 target: ' + clip(c.base) + ' \u00b7 ' + (S.theirs || 'incoming') + ': ' + clip(c.incoming);
-      const buttons = c.multiline ? [] : [['Use target', { conflict: c, use: 'base' }], ['Use ' + (S.short || 'feature'), { conflict: c, use: 'incoming' }]];
-      const [r, l] = header('conf', '!', text, buttons);
-      zone('right', c.line, 1, r, buttons); zone('left', leftOf(c.line), 1, l);
+      row('conf', c.line, leftOf(c.line), c.multiline ? [] : [{ conflict: c, use: 'base' }, { conflict: c, use: 'incoming' }]);
     }
+    // a duplicate in your resolution - one you added: marked on its lines, and removed with one click
+    const lines = R.getModel().getLinesContent();
+    S.dups = m.dups || [];
+    for (const d of S.dups) {
+      row('dup', d.b0, leftOf(d.b0), [[{ b0: d.b0, b1: d.b1, expect: lines.slice(d.b0, d.b1), insert: '' }]], 'Duplicate of line ' + d.sameAs);
+      whole(rd, d.b0, d.b1, 'dupl', YELLOW, 'dup-glyph');
+    }
+    monaco.editor.setModelMarkers(R.getModel(), 'cmr-dups', S.dups.map(d => {
+      const first = Math.max(1, (lines[d.b0] || '').search(/\S/) + 1);
+      // its first line underlined - the tint and the margin mark the rest
+      return { severity: monaco.MarkerSeverity.Warning, message: 'A duplicate of line ' + d.sameAs, startLineNumber: d.b0 + 1, startColumn: first, endLineNumber: d.b0 + 1, endColumn: (lines[d.b0] || '').length + 1 };
+    }));
+    monaco.editor.setModelMarkers(R.getModel(), 'cmr-xml', []);
+    S.typed.clear(); if (S.deco.typed) S.deco.typed.set([]);
 
     // identical lines folded away - the same lines on both sides, so the panes stay level
     S.hiddenRuns = S.hide ? identicalRuns(m) : [];
     for (const run of S.hiddenRuns) {
-      const n = run.b1 - run.b0, text = '\u22ef ' + n + ' identical line' + (n === 1 ? '' : 's');
-      const show = [['Show', () => { S.expanded.push([run.b0, run.b1]); draw(S.marks); }]];
-      // after the run's last line: Monaco hides a row whose next line is hidden, so the row goes at the run's end -
-      // where it shows, in its place, since the lines before it take no room
-      zone('right', run.b1, 1, zoneNode('fold', '<span class="ic">\u22ef</span>' + esc(text.slice(2))), show);
-      zone('left', run.a1, 1, zoneNode('fold', '<span class="ic">\u22ef</span>' + esc(text.slice(2))));
+      const n = run.b1 - run.b0, text = n + ' hidden line' + (n === 1 ? '' : 's');
+      const open = () => { S.expanded.push([run.b0, run.b1]); draw(S.marks); };
+      // after the run's last line: Monaco hides a row whose next line is hidden
+      for (const [sd, after] of [['right', run.b1], ['left', run.a1]]) {
+        const margin = document.createElement('div');
+        margin.className = 'fold-m';
+        // Monaco's margin zones have no width of their own: the icon is placed in pixels, under the line numbers
+        const li = (sd === 'left' ? L : R).getLayoutInfo();
+        // Monaco sizes a margin zone itself: the icon is placed inside it, exactly over the line-number column
+        margin.innerHTML = '<span class="fx" style="left:' + li.lineNumbersLeft + 'px;width:' + li.lineNumbersWidth + 'px;height:' + FOLD + 'px">' + ICON.expand + '</span>';
+        zone(sd, after, 0, zoneNode('fold', '<span class="ft">' + esc(text) + '</span><span class="rule"></span>'), null, null, { click: open, title: 'Show these ' + n + ' lines', px: FOLD, margin });
+      }
     }
     L.setHiddenAreas(S.hiddenRuns.map(r => new monaco.Range(r.a0 + 1, 1, r.a1, 1)));
     R.setHiddenAreas(S.hiddenRuns.map(r => new monaco.Range(r.b0 + 1, 1, r.b1, 1)));
 
     // the zones: replaced as a whole, in order, the same rows on both sides
-    for (const side of ['left', 'right']) {
-      const ed = side === 'left' ? L : R;
+    for (const sd of ['left', 'right']) {
+      const ed = sd === 'left' ? L : R;
       ed.changeViewZones(acc => {
-        for (const id of S.zones[side]) acc.removeZone(id);
-        S.zones[side] = items[side].map((it, i) => acc.addZone({
-          afterLineNumber: it.after, heightInLines: it.lines, domNode: it.node, ordinal: i,
-          onDomNodeTop: it.buttons ? top => place(it, top) : undefined
-        }));
+        for (const id of S.zones[sd]) acc.removeZone(id);
+        S.zones[sd] = items[sd].map((it, i) => acc.addZone(Object.assign({ afterLineNumber: it.after, domNode: it.node, ordinal: i, marginDomNode: it.margin || undefined,
+          onDomNodeTop: (it.buttons && it.buttons.length) || it.click ? top => place(it, top) : undefined }, it.px ? { heightInPx: it.px } : { heightInLines: it.lines })));
+      });
+      // what is clickable sits over the zones (a zone itself takes no clicks): buttons, or a whole row
+      for (const w of S.widgets[sd]) ed.removeOverlayWidget(w);
+      S.widgets[sd] = [];
+      items[sd].filter(it => (it.buttons && it.buttons.length) || it.click).forEach((it, i) => {
+        const node = document.createElement('div');
+        node.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+        if (it.click) {
+          node.className = 'rowclick'; node.title = it.title || '';
+          node.style.height = (it.px || it.lines * lh) + 'px';
+          node.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); it.click(); });
+          const hov = on => { it.node.classList.toggle('hov', on); if (it.margin) it.margin.classList.toggle('hov', on); };
+          node.addEventListener('mouseenter', () => hov(true)); node.addEventListener('mouseleave', () => hov(false));
+          if (it.margin) {
+            it.margin.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+            it.margin.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); it.click(); });
+            it.margin.addEventListener('mouseenter', () => hov(true)); it.margin.addEventListener('mouseleave', () => hov(false));
+          }
+        } else {
+          node.className = 'acts'; node.style.height = (it.px || lh) + 'px';
+          for (const [icon, title, undo, cls] of it.buttons) {
+            const b = document.createElement('button');
+            b.className = 'ib ' + (cls || it.cls || ''); b.innerHTML = (ICON[GLYPH[icon]] || ICON.undo) + '<span>' + esc(title) + '</span>'; b.title = title;
+            b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+            b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); act(undo); });
+            node.appendChild(b);
+          }
+        }
+        const w = { getId: () => 'cmr.' + sd + '.' + i, getDomNode: () => node, getPosition: () => null };
+        it.widget = node;
+        ed.addOverlayWidget(w);
+        S.widgets[sd].push(w);
       });
     }
-    // the buttons sit over the zones (a zone itself takes no clicks)
-    for (const w of S.widgets) R.removeOverlayWidget(w);
-    S.widgets = [];
-    items.right.filter(it => it.buttons && it.buttons.length).forEach((it, i) => {
-      const node = document.createElement('div');
-      node.className = 'acts';
-      node.style.height = lh + 'px';
-      for (const [label, undo] of it.buttons) {
-        const b = document.createElement('button');
-        b.textContent = label;
-        b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
-        b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); if (typeof undo === 'function') undo(); else act(undo); });
-        node.appendChild(b);
-      }
-      const w = { getId: () => 'cmr.act.' + i, getDomNode: () => node, getPosition: () => null };
-      it.widget = node;
-      R.addOverlayWidget(w);
-      S.widgets.push(w);
-    });
     S.deco.left = S.deco.left ? (S.deco.left.set(ld), S.deco.left) : L.createDecorationsCollection(ld);
     S.deco.right = S.deco.right ? (S.deco.right.set(rd), S.deco.right) : R.createDecorationsCollection(rd);
     summary(m);
     drawJoins();
+    where();
+    // the expand icon sits where the line numbers are, in each pane
+    for (const ed of [L, R]) { const li = ed.getLayoutInfo(); const st = ed.getContainerDomNode().style; st.setProperty('--fold-w', li.contentLeft + 'px'); st.setProperty('--fold-pr', Math.max(0, li.contentLeft - (li.lineNumbersLeft + li.lineNumbersWidth)) + 'px'); }
   }
+
   /**
    * The runs of identical lines to fold: inside an unchanged piece that is line for line the same on both
    * sides, away from every change, move and conflict by CONTEXT lines, at least RUN long, and not one you
@@ -362,8 +422,6 @@
     if (it.widget) { it.widget.style.top = top + 'px'; it.widget.style.display = ''; }
     if (it.move) { it.move.top = top; drawJoins(); }
   }
-  const clip = t => { const s = String(t == null ? '' : t).replace(/\s+/g, ' '); return s.length > 40 ? s.slice(0, 39) + '\u2026' : s; };
-  const ord = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
 
   // a short purple join between the panes where a block moved
   function drawJoins() {
@@ -386,11 +444,7 @@
       ['conf', S.conflicts.length, S.conflicts.length === 1 ? 'conflict' : 'conflicts']]
       .filter(x => x[1]).map(x => '<span class="chip ' + x[0] + '" title="' + x[1] + ' ' + x[2] + '">' + x[1] + ' ' + x[2] + '</span>');
     $('chips').innerHTML = chips.length ? chips.join('') : '<span class="chip">the same as the target</span>';
-    $('mode').textContent = S.mode === 'order' ? '\u21c5 Literal order' : '\u21c5 In your order';
-    const folded = S.hiddenRuns.reduce((n, r) => n + r.b1 - r.b0, 0);
-    $('hide').textContent = S.hide ? '\u2261 Show identical' : '\u2261 Hide identical';
-    $('hide').setAttribute('aria-pressed', String(S.hide));
-    $('hide').title = S.hide ? (folded ? folded + ' identical lines hidden \u2013 show them' : 'Show identical lines') : 'Hide lines that are the same on both sides, keeping ' + CONTEXT + ' around each change';
+    status();
     $('lefthead').innerHTML = '<b>' + esc(S.labels.target) + '</b> \u00b7 ' + (S.mode === 'order' ? 'in your order' : 'as it is') + ' \u00b7 read-only';
   }
 
@@ -454,11 +508,66 @@
   }
 
   // a promotion's merge saves as your resolution; a plain merge is applied into the target file, once, as before
+  // a promotion's merge saves as your resolution (Ctrl+S) or saves and closes; one from the Manual tab is
+  // copied, or saved as a file from the \u22ef menu; a branch's is applied into the file, once
   function save(close) {
+    if (S.manual) return api.postMessage({ type: 'copyResult', text: R.getValue() });
     if (S.applyOnly && !close) return note('Apply and close writes it into ' + S.file + ' \u2013 nothing is written before that.');
     api.postMessage({ type: 'save', close: !!close, text: R.getValue() });
   }
-  function note(text, warn) { const n = $('note'); n.textContent = text; n.className = warn ? 'warn' : ''; clearTimeout(note.t); note.t = setTimeout(() => { n.textContent = ''; }, 6000); }
+  function note(text, warn) { const n = $('note'); n.textContent = text || ''; n.className = warn ? 'warn' : ''; clearTimeout(note.t); note.t = setTimeout(() => { n.textContent = ''; }, 8000); }
+
+  // ---- the status bar: saved or not, the marks live or paused, duplicates ----
+  function status() {
+    const saved = $('stSaved');
+    if (S.manual) saved.textContent = '';
+    else if (S.applyOnly) saved.textContent = 'Not applied yet';
+    else saved.innerHTML = S.unsaved ? '<span class="dirty">\u25cf Not saved</span>' : '\u2713 Saved as your resolution';
+    $('stMarks').innerHTML = S.held
+      ? '<span class="paused">\u25cb Marks paused \u2013 not valid XML' + (S.xml ? ' at line ' + S.xml.line : '') + '</span>'
+      : '<span class="ok">\u25cf Marks live</span>';
+    const removed = S.dupRemoved && S.startNow ? S.dupRemoved[S.startNow] || 0 : 0;
+    $('stDups').innerHTML = (removed ? '<span class="dupt">' + removed + ' duplicate' + (removed === 1 ? '' : 's') + ' removed when the merge was prepared</span>' : '') +
+      (S.dups.length ? '<span class="warnt">\u26a0 ' + S.dups.length + ' duplicate' + (S.dups.length === 1 ? '' : 's') + '</span>' : '');
+  }
+
+  // ---- where the cursor is among the changes: "2 of 7" between the arrows ----
+  function where() {
+    const list = stops(), el = $('pos');
+    if (!list.length) { el.textContent = 'No changes'; return; }
+    const here = R.getPosition() ? R.getPosition().lineNumber - 1 : 0;
+    const i = list.filter(l => l <= here).length;
+    el.textContent = Math.max(1, i) + ' of ' + list.length;
+  }
+
+  // ---- F8: the next problem - a duplicate, or where the XML stops being valid ----
+  function nextProblem(dir) {
+    const list = S.dups.map(d => d.b0).concat(S.xml ? [S.xml.line - 1] : []).sort((a, b) => a - b);
+    if (!list.length) return note('No problems.');
+    const here = R.getPosition().lineNumber - 1;
+    const to = dir > 0 ? (list.find(l => l > here) ?? list[0]) : ([...list].reverse().find(l => l < here) ?? list[list.length - 1]);
+    R.revealLineInCenter(to + 1); R.setPosition({ lineNumber: to + 1, column: 1 }); R.focus();
+  }
+
+  // ---- while the XML is not valid: where it breaks underlined, and what you type kept in view ----
+  function held(xml) {
+    S.held = true; S.xml = xml || null;
+    const model = R.getModel();
+    monaco.editor.setModelMarkers(model, 'cmr-xml', xml ? [{ severity: monaco.MarkerSeverity.Error, message: xml.message, startLineNumber: xml.line, startColumn: xml.column,
+      endLineNumber: xml.line, endColumn: Math.max(xml.column + 1, model.getLineMaxColumn(Math.min(xml.line, model.getLineCount()))) }] : []);
+    showTyped();
+    status();
+  }
+  // the lines you changed since the marks were last good - shown dotted only while the XML is not valid,
+  // so the keystroke that broke it is among them
+  function typedSince(changes) {
+    for (const c of changes) for (let l = c.range.startLineNumber; l <= c.range.startLineNumber + (c.text.match(/\n/g) || []).length; l++) S.typed.add(l);
+    if (S.held) showTyped();
+  }
+  function showTyped() {
+    const ds = [...S.typed].map(l => ({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, linesDecorationsClassName: 'typed-g' } }));
+    S.deco.typed = S.deco.typed ? (S.deco.typed.set(ds), S.deco.typed) : R.createDecorationsCollection(ds);
+  }
 
   // ---- messages from the extension ----
   window.addEventListener('message', e => {
@@ -467,8 +576,9 @@
       S.labels = m.labels; S.theirs = m.theirs; S.short = m.short; S.mode = m.mode || 'order'; S.conflicts = m.conflicts || [];
       S.hide = !!m.hideIdentical;
       S.saved = m.savedText != null ? m.savedText : null;
-      S.applyOnly = !!m.applyOnly; S.file = m.file;
-      if (S.applyOnly) { $('save').hidden = true; $('saveClose').textContent = 'Apply and close'; $('saveClose').title = 'Write it into ' + m.file + ' and close'; $('saveClose').classList.add('pri'); }
+      S.applyOnly = !!m.applyOnly; S.file = m.file; S.manual = !!m.manual; S.dupRemoved = m.dupRemoved || null;
+      if (S.manual) { $('saveClose').innerHTML = ICON.check + '<span>Copy result</span>'; $('saveClose').title = 'Copy the result, to paste into Copado (Ctrl+S) \u2013 or \u22ef \u203a Save as file\u2026'; }
+      else if (S.applyOnly) { $('saveClose').innerHTML = ICON.check + '<span>Apply &amp; Close</span>'; $('saveClose').title = 'Write it into ' + m.file + ' and close'; }
       $('title').textContent = m.title;
       starts(m);
       $('righthead').innerHTML = '<b>' + esc(m.labels.merged || 'Your resolution') + '</b> \u00b7 <span class="ok">editable</span>';
@@ -482,8 +592,8 @@
     } else if (m.type === 'marks') {
       if (m.seq !== S.seq) return;                       // you have typed since: the newer answer is on its way
       if (m.conflicts) S.conflicts = m.conflicts;
-      if (m.hold) { S.held = true; $('held').hidden = false; return; }
-      S.held = false; $('held').hidden = true;
+      if (m.hold) return held(m.xmlError);
+      S.held = false; S.xml = null;
       if (m.mode) S.mode = m.mode;
       if (L.getValue() !== m.marks.left) { const top = R.getScrollTop(); L.getModel().setValue(m.marks.left); L.setScrollTop(top); }
       draw(m.marks);
@@ -494,43 +604,74 @@
     else if (m.type === 'reveal') reveal(m.line);
     else if (m.type === 'apply') act(m.undo);
   });
+  const START_NAMES = () => ({ saved: 'Your saved resolution', feature: cap(S.theirs || 'the incoming file'), target: S.labels.target || 'The target', merged: 'Merged (both)' });
   function starts(m) {
-    const sel = $('startFrom');
     S.starts = m.starts || {};
-    const names = { saved: 'Your saved resolution', feature: cap(S.theirs || 'the incoming file'), target: S.labels.target || 'The target', merged: 'Merged (both)' };
     if (m.savedText != null) S.starts.saved = m.savedText;
     const order = ['saved', 'feature', 'target', 'merged'].filter(k => S.starts[k] != null);
-    if (!order.length) { sel.parentElement.hidden = true; return; }
-    sel.innerHTML = order.map(k => '<option value="' + k + '">' + esc(names[k]) + '</option>').join('');
-    sel.value = m.start && S.starts[m.start] != null ? m.start : order[0];
-    S.startNow = sel.value;
-    sel.addEventListener('change', () => {
-      const text = S.starts[sel.value];
-      if (text == null) return;
-      const model = R.getModel();
-      R.pushUndoStop();
-      model.pushEditOperations(R.getSelections(), [{ range: model.getFullModelRange(), text }], () => null);
-      R.pushUndoStop();
-      note('Started again from ' + names[sel.value].replace(/^The /, 'the ') + ' \u2013 Ctrl+Z goes back to what you had.');
-      S.startNow = sel.value;
-      R.focus();
-    });
+    S.startOrder = order;
+    S.startNow = m.start && S.starts[m.start] != null ? m.start : order[0] || null;
+  }
+  // a start, in one step that Ctrl+Z undoes
+  function startFrom(k) {
+    const text = S.starts[k];
+    if (text == null || k === S.startNow) return;
+    const model = R.getModel();
+    R.pushUndoStop();
+    model.pushEditOperations(R.getSelections(), [{ range: model.getFullModelRange(), text }], () => null);
+    R.pushUndoStop();
+    note('Started again from ' + START_NAMES()[k].replace(/^The /, 'the ') + ' \u2013 Ctrl+Z goes back to what you had.');
+    S.startNow = k;
+    status();
+    R.focus();
+  }
+
+  // ---- the toolbar's two menus: View, and the rest ----
+  function menuOf(id, items) {
+    const m = $(id);
+    m.innerHTML = items.map((it, i) => !it ? '<div class="sep"></div>' : it.head ? '<div class="mh">' + esc(it.head) + '</div>'
+      : '<div class="mi' + (it.bad ? ' bad' : '') + '" role="menuitem' + (it.check != null ? 'checkbox" aria-checked="' + !!it.check : '') + '" data-i="' + i + '"><span class="rk">' + (it.check ? '\u2713' : it.radio ? '\u25cf' : it.radio === false ? '\u25cb' : '') + '</span>' + esc(it.label) + '</div>').join('');
+    m.onmousedown = e => e.preventDefault();
+    m.onclick = e => { const d = e.target.closest('.mi'); if (!d) return; closeMenus(); items[+d.dataset.i].run(); };
+  }
+  function viewItems() {
+    const names = START_NAMES();
+    return (S.startOrder && S.startOrder.length > 1 ? [{ head: 'Start from' }].concat(S.startOrder.map(k => ({ label: names[k], radio: k === S.startNow, run: () => startFrom(k) }))).concat([null]) : [])
+      .concat([{ label: 'Hide identical lines', check: S.hide, run: () => {
+        S.hide = !S.hide; S.expanded = [];
+        if (S.hide) toFirstChange();
+        if (S.marks) draw(S.marks);
+        api.postMessage({ type: 'pref', hideIdentical: S.hide });
+      } }, { label: 'Target in literal order', check: S.mode === 'literal', run: () => { S.mode = S.mode === 'order' ? 'literal' : 'order'; S.seq++; api.postMessage({ type: 'mode', mode: S.mode, seq: S.seq, text: R.getValue() }); } }]);
+  }
+  function moreItems() {
+    return [{ label: 'Keyboard shortcuts', run: () => { $('help').hidden = false; } }]
+      .concat(S.manual ? [{ label: 'Save as file\u2026', run: () => api.postMessage({ type: 'saveAs', text: R.getValue() }) }, { label: 'Swap the two sides', run: () => api.postMessage({ type: 'swap', text: R.getValue() }) }] : [])
+      .concat([{ label: 'Copy merge report', run: () => api.postMessage({ type: 'report' }) }, null, { label: 'Discard this merge\u2026', bad: true, run: () => api.postMessage({ type: 'discard' }) }]);
+  }
+  function closeMenus() { for (const id of ['viewMenu', 'moreMenu']) $(id).hidden = true; $('viewBtn').setAttribute('aria-expanded', 'false'); $('moreBtn').setAttribute('aria-expanded', 'false'); }
+  function toggleMenu(id, btn, items) {
+    const was = !$(id).hidden;
+    closeMenus();
+    if (was) return;
+    menuOf(id, items());
+    $(id).hidden = false;
+    $(btn).setAttribute('aria-expanded', 'true');
   }
   function reveal(line) { R.revealLineInCenter(line + 1); R.setPosition({ lineNumber: line + 1, column: 1 }); R.focus(); }
 
   // ---- the toolbar ----
-  $('save').addEventListener('click', () => save(false));
   $('saveClose').addEventListener('click', () => save(true));
-  $('discard').addEventListener('click', () => api.postMessage({ type: 'discard' }));
+  $('viewBtn').addEventListener('click', () => toggleMenu('viewMenu', 'viewBtn', viewItems));
+  $('moreBtn').addEventListener('click', () => toggleMenu('moreMenu', 'moreBtn', moreItems));
+  document.addEventListener('mousedown', e => { if (!e.target.closest('.mwrap')) closeMenus(); }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); }, true);
   $('next').addEventListener('click', () => go(1));
   $('prev').addEventListener('click', () => go(-1));
-  $('hide').addEventListener('click', () => {
-    S.hide = !S.hide; S.expanded = [];
-    if (S.hide) toFirstChange();
-    if (S.marks) draw(S.marks);
-    api.postMessage({ type: 'pref', hideIdentical: S.hide });
-  });
-  $('mode').addEventListener('click', () => { S.mode = S.mode === 'order' ? 'literal' : 'order'; S.seq++; api.postMessage({ type: 'mode', mode: S.mode, seq: S.seq, text: R.getValue() }); });
+  $('prev').innerHTML = ICON.up; $('next').innerHTML = ICON.down; $('moreBtn').innerHTML = ICON.more;
+  $('viewBtn').innerHTML = ICON.eye + '<span>View</span>' + ICON.chev;
+  const saveLabel = t => { $('saveClose').innerHTML = ICON.check + '<span>' + esc(t) + '</span>'; };
+  saveLabel('Save & Close');
   window.addEventListener('resize', drawJoins);
   // the shortcuts: VS Code's own, with Cmd in place of Ctrl on a Mac
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -539,10 +680,10 @@
     ['Cut, copy, paste', 'Ctrl+X / Ctrl+C / Ctrl+V'], ['Select all', 'Ctrl+A'], ['Undo, redo', 'Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z'],
     ['Find, replace', 'Ctrl+F / Ctrl+H'], ['Go to line', 'Ctrl+G'], ['Move a line', 'Alt+\u2191 / Alt+\u2193'], ['Copy a line', 'Shift+Alt+\u2191 / Shift+Alt+\u2193'],
     ['Delete a line', 'Ctrl+Shift+K'], ['Comment out', 'Ctrl+/'], ['Indent, outdent', 'Tab / Shift+Tab'], ['Select the next match', 'Ctrl+D'],
-    ['Another cursor', 'Alt+click'], ['Next, previous change', 'F7 / Shift+F7'], ['Save', 'Ctrl+S']
+    ['Another cursor', 'Alt+click'], ['Next, previous change', 'F7 / Shift+F7'], ['Next, previous problem', 'F8 / Shift+F8'], ['Save', 'Ctrl+S']
   ].map(r => '<tr><td>' + r[0] + '</td><td>' + k(r[1]) + '</td></tr>').join('') + '</table>';
-  $('keys').addEventListener('click', () => { const h = $('help'); h.hidden = !h.hidden; $('keys').setAttribute('aria-expanded', String(!h.hidden)); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('help').hidden) { $('help').hidden = true; $('keys').setAttribute('aria-expanded', 'false'); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('help').hidden) $('help').hidden = true; });
+  document.addEventListener('mousedown', e => { if (!$('help').hidden && !e.target.closest('#help')) $('help').hidden = true; }, true);
 
   // ---- Monaco ----
   require.config({ paths: { vs: document.body.dataset.vs } });
