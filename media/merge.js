@@ -5,7 +5,10 @@
   'use strict';
   const api = acquireVsCodeApi();
   const $ = id => document.getElementById(id);
-  const S = { seq: 0, shown: 0, saved: null, mode: 'order', marks: null, conflicts: [], zones: { left: [], right: [] }, widgets: [], deco: { left: null, right: null }, lastRight: null, held: false };
+  const S = { seq: 0, shown: 0, saved: null, mode: 'order', marks: null, conflicts: [], zones: { left: [], right: [] }, widgets: [], deco: { left: null, right: null }, lastRight: null, held: false,
+    hide: false, expanded: [], hiddenRuns: [] };
+  // identical lines folded away: this many stay around every change, and a run shorter than RUN stays
+  const CONTEXT = 3, RUN = 4;
   let L, R, monaco;
 
   // ---- colours and fonts from VS Code's theme ----
@@ -70,6 +73,8 @@
     sync(L, R); sync(R, L);
     R.onDidChangeModelContent(() => { dirty(); typed(); });
     clipboard(L, true); clipboard(R, false);
+    R.onDidChangeCursorPosition(e => openAt('right', e.position.lineNumber - 1));
+    L.onDidChangeCursorPosition(e => openAt('left', e.position.lineNumber - 1));
     for (const ed of [L, R]) {
       // a click on a row between lines - a change's header, struck-through lines - puts you on the line after it
       ed.onMouseDown(e => {
@@ -271,6 +276,19 @@
       zone('right', c.line, 1, r, buttons); zone('left', leftOf(c.line), 1, l);
     }
 
+    // identical lines folded away - the same lines on both sides, so the panes stay level
+    S.hiddenRuns = S.hide ? identicalRuns(m) : [];
+    for (const run of S.hiddenRuns) {
+      const n = run.b1 - run.b0, text = '\u22ef ' + n + ' identical line' + (n === 1 ? '' : 's');
+      const show = [['Show', () => { S.expanded.push([run.b0, run.b1]); draw(S.marks); }]];
+      // after the run's last line: Monaco hides a row whose next line is hidden, so the row goes at the run's end -
+      // where it shows, in its place, since the lines before it take no room
+      zone('right', run.b1, 1, zoneNode('fold', '<span class="ic">\u22ef</span>' + esc(text.slice(2))), show);
+      zone('left', run.a1, 1, zoneNode('fold', '<span class="ic">\u22ef</span>' + esc(text.slice(2))));
+    }
+    L.setHiddenAreas(S.hiddenRuns.map(r => new monaco.Range(r.a0 + 1, 1, r.a1, 1)));
+    R.setHiddenAreas(S.hiddenRuns.map(r => new monaco.Range(r.b0 + 1, 1, r.b1, 1)));
+
     // the zones: replaced as a whole, in order, the same rows on both sides
     for (const side of ['left', 'right']) {
       const ed = side === 'left' ? L : R;
@@ -293,7 +311,7 @@
         const b = document.createElement('button');
         b.textContent = label;
         b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
-        b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); act(undo); });
+        b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); if (typeof undo === 'function') undo(); else act(undo); });
         node.appendChild(b);
       }
       const w = { getId: () => 'cmr.act.' + i, getDomNode: () => node, getPosition: () => null };
@@ -305,6 +323,40 @@
     S.deco.right = S.deco.right ? (S.deco.right.set(rd), S.deco.right) : R.createDecorationsCollection(rd);
     summary(m);
     drawJoins();
+  }
+  /**
+   * The runs of identical lines to fold: inside an unchanged piece that is line for line the same on both
+   * sides, away from every change, move and conflict by CONTEXT lines, at least RUN long, and not one you
+   * opened. In your resolution's lines [b0, b1) and the target's [a0, a1).
+   */
+  function identicalRuns(m) {
+    const total = R.getModel().getLineCount();
+    const keep = new Uint8Array(total + 1);
+    const near = (b0, b1) => { for (let i = Math.max(0, b0 - CONTEXT); i < Math.min(total, b1 + CONTEXT); i++) keep[i] = 1; };
+    for (const p of m.pieces) if (p.kind !== 'same') near(p.b0, p.b1);
+    for (const mv of m.moves) near(mv.b0, mv.b1);
+    for (const c of S.conflicts) if (c.line != null) near(c.line, c.line + 1);
+    // what you opened stays open, and so does the run your cursor is in
+    const here = R.getPosition() ? R.getPosition().lineNumber - 1 : -1;
+    const opened = (b0, b1) => (here >= b0 && here < b1) || S.expanded.some(([x0, x1]) => b0 < x1 && x0 < b1);
+    const runs = [];
+    for (const p of m.pieces) {
+      if (p.kind !== 'same' || p.a1 - p.a0 !== p.b1 - p.b0) continue;
+      let i = p.b0;
+      while (i < p.b1) {
+        if (keep[i]) { i++; continue; }
+        let j = i;
+        while (j < p.b1 && !keep[j]) j++;
+        if (j - i >= RUN && !opened(i, j)) runs.push({ b0: i, b1: j, a0: p.a0 + (i - p.b0), a1: p.a0 + (j - p.b0) });
+        i = j;
+      }
+    }
+    return runs;
+  }
+  // the cursor in a folded run - Ctrl+F, Ctrl+G, a click - opens it
+  function openAt(side, line) {
+    const run = S.hiddenRuns.find(r => side === 'right' ? line >= r.b0 && line < r.b1 : line >= r.a0 && line < r.a1);
+    if (run) { S.expanded.push([run.b0, run.b1]); draw(S.marks); }
   }
   function place(it, top) {
     if (it.widget) { it.widget.style.top = top + 'px'; it.widget.style.display = ''; }
@@ -332,9 +384,13 @@
     const chips = [['mv', c.moved, 'moved'], ['feat', (c.feature || 0), 'from ' + (S.short || 'the feature')], ['own', c.own, c.own === 1 ? 'your edit' : 'your edits'],
       ['del', (c.removed || 0) + (c.dropped || 0), 'removed'], ['keep', (c.kept || 0) + (c.differs || 0), 'not taken from ' + (S.short || 'the feature')],
       ['conf', S.conflicts.length, S.conflicts.length === 1 ? 'conflict' : 'conflicts']]
-      .filter(x => x[1]).map(x => '<span class="chip ' + x[0] + '">' + x[1] + ' ' + x[2] + '</span>');
+      .filter(x => x[1]).map(x => '<span class="chip ' + x[0] + '" title="' + x[1] + ' ' + x[2] + '">' + x[1] + ' ' + x[2] + '</span>');
     $('chips').innerHTML = chips.length ? chips.join('') : '<span class="chip">the same as the target</span>';
     $('mode').textContent = S.mode === 'order' ? '\u21c5 Literal order' : '\u21c5 In your order';
+    const folded = S.hiddenRuns.reduce((n, r) => n + r.b1 - r.b0, 0);
+    $('hide').textContent = S.hide ? '\u2261 Show identical' : '\u2261 Hide identical';
+    $('hide').setAttribute('aria-pressed', String(S.hide));
+    $('hide').title = S.hide ? (folded ? folded + ' identical lines hidden \u2013 show them' : 'Show identical lines') : 'Hide lines that are the same on both sides, keeping ' + CONTEXT + ' around each change';
     $('lefthead').innerHTML = '<b>' + esc(S.labels.target) + '</b> \u00b7 ' + (S.mode === 'order' ? 'in your order' : 'as it is') + ' \u00b7 read-only';
   }
 
@@ -377,6 +433,15 @@
     const s = S.marks.pieces.filter(p => p.kind !== 'same').map(p => p.b0).concat(S.marks.moves.map(m => m.b0)).concat(S.conflicts.map(c => c.line));
     return [...new Set(s)].sort((a, b) => a - b);
   }
+  // the cursor on the first change - so folding starts from there, not from line 1
+  function toFirstChange() {
+    const list = stops();
+    const here = R.getPosition() ? R.getPosition().lineNumber - 1 : 0;
+    if (!list.length || list.some(l => Math.abs(l - here) <= CONTEXT)) return;
+    const line = Math.min(list[0] + 1, R.getModel().getLineCount());
+    R.setPosition({ lineNumber: line, column: 1 });
+    R.revealLineInCenter(line);
+  }
   function go(dir) {
     const list = stops();
     if (!list.length) return;
@@ -400,6 +465,7 @@
     const m = e.data || {};
     if (m.type === 'init') {
       S.labels = m.labels; S.theirs = m.theirs; S.short = m.short; S.mode = m.mode || 'order'; S.conflicts = m.conflicts || [];
+      S.hide = !!m.hideIdentical;
       S.saved = m.savedText != null ? m.savedText : null;
       S.applyOnly = !!m.applyOnly; S.file = m.file;
       if (S.applyOnly) { $('save').hidden = true; $('saveClose').textContent = 'Apply and close'; $('saveClose').title = 'Write it into ' + m.file + ' and close'; $('saveClose').classList.add('pri'); }
@@ -408,6 +474,7 @@
       $('righthead').innerHTML = '<b>' + esc(m.labels.merged || 'Your resolution') + '</b> \u00b7 <span class="ok">editable</span>';
       L.setModel(monaco.editor.createModel(m.marks.left, 'xml'));
       R.setModel(monaco.editor.createModel(m.text, 'xml'));
+      if (S.hide) { S.marks = m.marks; toFirstChange(); }
       draw(m.marks);
       dirty();
       R.focus();
@@ -457,6 +524,12 @@
   $('discard').addEventListener('click', () => api.postMessage({ type: 'discard' }));
   $('next').addEventListener('click', () => go(1));
   $('prev').addEventListener('click', () => go(-1));
+  $('hide').addEventListener('click', () => {
+    S.hide = !S.hide; S.expanded = [];
+    if (S.hide) toFirstChange();
+    if (S.marks) draw(S.marks);
+    api.postMessage({ type: 'pref', hideIdentical: S.hide });
+  });
   $('mode').addEventListener('click', () => { S.mode = S.mode === 'order' ? 'literal' : 'order'; S.seq++; api.postMessage({ type: 'mode', mode: S.mode, seq: S.seq, text: R.getValue() }); });
   window.addEventListener('resize', drawJoins);
   // the shortcuts: VS Code's own, with Cmd in place of Ctrl on a Mac

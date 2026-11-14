@@ -208,6 +208,68 @@ ok('horizontal scrolling in step, as vertical; and the editor\u2019s own keys: m
   });
 });
 
+ok('Hide identical: runs of identical lines folded on both sides, the panes level, context kept around each change; Show and the cursor open a run; remembered', async () => {
+  // a long page: forty fields, two of them changed far apart
+  const many = n => Array.from({ length: n }, (_, i) => blk(i === 9 || i === 32 ? 'required' : 'readonly', 'F' + i + '__c', 'F' + i + '_cField')).join('');
+  const LT = page(Array.from({ length: 40 }, (_, i) => blk('readonly', 'F' + i + '__c', 'F' + i + '_cField')).join('')), LM = page(many(40));
+  await run(Object.assign({}, base, { target: LT, incoming: LT, text: LM }), async (p, h) => {
+    const folds = () => p.evaluate(() => ({
+      right: [...document.querySelectorAll('#right .zone.fold')].map(z => z.textContent),
+      left: document.querySelectorAll('#left .zone.fold').length,
+      button: document.getElementById('hide').textContent
+    }));
+    const level = id => p.evaluate(id => { const y = s => { const l = [...document.querySelectorAll(s + ' .view-line')].find(v => v.textContent.includes(id)); return l ? Math.round(l.getBoundingClientRect().top) : null; }; return [y('#left'), y('#right')]; }, id);
+    assert.deepStrictEqual((await folds()).right, [], 'off to start with');
+    await p.click('#hide');
+    await eventually(async () => {
+      const f = await folds();
+      assert.ok(f.right.length >= 2 && f.right.length === f.left, 'folded on both sides: ' + JSON.stringify(f));
+      // every row actually shown, in its place - not only in the page
+      const shown = await p.evaluate(() => ['#left', '#right'].map(s => [...document.querySelectorAll(s + ' .zone.fold')].filter(z => { const r = z.getBoundingClientRect(); return r.height > 0 && z.parentElement && getComputedStyle(z.parentElement).display !== 'none'; }).length));
+      assert.deepStrictEqual(shown, [f.left, f.right.length], 'every fold row shown');
+      assert.ok(f.right.every(t => /^\u22ef\d+ identical lines$/.test(t)), JSON.stringify(f.right));
+      assert.strictEqual(f.button, '\u2261 Show identical');
+    });
+    await eventually(() => assert.ok(h.sent.some(m => m.type === 'pref' && m.hideIdentical === true), 'remembered'));
+    // the first change, its rows and its context, level in both panes
+    await eventually(async () => {
+      const a = await look(p);
+      assert.ok(a.rows.some(r => /uiBehavior: readonly \u2192 required/.test(r)), JSON.stringify(a.rows));
+      const lv = await level('RecordF9_cField');
+      assert.ok(lv[0] != null && lv[0] === lv[1], 'the changed field level in both panes: ' + lv);
+    });
+    const hidden = (await folds()).right.reduce((n, t) => n + +/\d+/.exec(t)[0], 0);
+    assert.ok(hidden > 300, hidden + ' lines folded of ' + LM.split('\n').length);
+    // F7 to the second change: visible
+    await p.click('#right .view-lines'); await p.keyboard.press('F7'); await p.keyboard.press('F7');
+    await eventually(async () => { const lv = await level('RecordF32_cField'); assert.ok(lv[0] != null && lv[0] === lv[1], 'second change level: ' + lv); });
+    // Show opens one run
+    const before = (await folds()).right.length;
+    await click(p, 'Show');
+    await eventually(async () => assert.strictEqual((await folds()).right.length, before - 1, 'one run opened'));
+    // the cursor onto a folded line opens its run: Ctrl+G to a line near the end, inside the last run
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+g'); await p.waitForTimeout(300);
+    await p.keyboard.type(String(LM.split('\n').length - 6)); await p.keyboard.press('Enter');
+    await eventually(async () => assert.strictEqual((await folds()).right.length, before - 2, 'Ctrl+G opened the last run'));
+    // and a find match inside a folded run opens it
+    const left = (await folds()).right.length;
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+f'); await p.waitForTimeout(300);
+    await p.keyboard.type('RecordF20_cField'); await p.keyboard.press('Enter'); await p.keyboard.press('Escape');
+    await eventually(async () => assert.strictEqual((await folds()).right.length, left - 1, 'Ctrl+F opened the run holding the match'));
+    // off again: nothing folded
+    await p.click('#hide');
+    await eventually(async () => assert.deepStrictEqual((await folds()).right, []));
+    await eventually(() => assert.ok(h.sent.some(m => m.type === 'pref' && m.hideIdentical === false)));
+    assert.deepStrictEqual(h.errors, []);
+    await shot(p, 'merge-editor-hidden.png');
+  });
+  // opened with it on: folded from the start, from the first change
+  await run(Object.assign({}, base, { target: LT, incoming: LT, text: LM, hideIdentical: true }), async (p, h) => {
+    await eventually(async () => assert.ok((await p.evaluate(() => document.querySelectorAll('#right .zone.fold').length)) >= 2));
+    await shot(p, 'merge-editor-hide-identical.png');
+  });
+});
+
 ok('the light theme', async () => {
   const mine = page(REG + APP + TEAM('required'));
   await run(Object.assign({}, base, { text: mine }), async (p, h) => {

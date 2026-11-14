@@ -2,7 +2,7 @@
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
   "description": "Copado release work for Salesforce metadata: resolve promotion conflicts, validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
-  "version": "3.5.5",
+  "version": "3.6.0",
   "publisher": "nikeshvarma",
   "license": "MIT",
   "icon": "media/logo.png",
@@ -851,6 +851,12 @@
             "default": "auto",
             "markdownDescription": "Where your resolution starts when you open a merge. Whatever the start, the merge editor marks what the other branch has - including what the feature branch does not have - and you switch with **Start from** in the merge editor.",
             "order": 3
+          },
+          "cmr.merge.hideIdentical": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "In the merge editor, fold away runs of lines that are the same on both sides, keeping 3 lines around each change. **Hide identical** in its toolbar switches it, and the choice is kept here.",
+            "order": 4
           },
           "cmr.merge.removeDuplicates": {
             "type": "boolean",

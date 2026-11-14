@@ -2,7 +2,7 @@
 
 **Copado release work for Salesforce metadata, inside VS Code.** Resolve a promotion's merge conflicts without losing anything, validate a user story against an org before Copado does, find branch conflicts — with every change shown and every decision yours.
 
-`v3.5.5` · by **Nikesh Varma**
+`v3.6.0` · by **Nikesh Varma**
 
 ![How it works: a user story, its package.xml, a check-only validation, fixes](media/readme/how-it-works.png)
 
@@ -11,7 +11,7 @@ Start with **Copado: Open Release Assistant** — the page for promotions and us
 ## Install
 
 ```bash
-code --install-extension copado-release-assistant-3.5.5.vsix --force
+code --install-extension copado-release-assistant-3.6.0.vsix --force
 ```
 
 Open your Salesforce project folder. The extension finds the project by its `sfdx-project.json` — the project of the file you have open, the open folder, or the single project inside it; with several, set `cmr.project.path`. Paths with spaces are fine. Validation needs the **Salesforce CLI** (`sf`) with your orgs already logged in — the extension never sees or stores a password. Branch conflicts need **git 2.38+**.
@@ -57,6 +57,10 @@ Everything is kept in `.copado/promotions/<promotion>/` by real file name, so cl
 | yellow ! | both branches changed it | **Use target** · **Use feature** |
 
 Every button changes whole elements, in one step that **Ctrl+Z** undoes, and only if the lines are still what was marked. The left side is the target **in your order**, so a block you moved sits level with itself; **Literal order** shows the target as it is. While the XML is not valid as you type, the marks pause and say so.
+
+**Hide identical** folds away the lines that are the same on both sides, keeping three around every change, move and conflict — a row *⋯ 223 identical lines* with **Show** stands in for each run, in both panes alike. Going to a line inside one (Ctrl+G, a find match, a click) opens it. The choice is kept for the next merge (`cmr.merge.hideIdentical`).
+
+![The merge editor with identical lines hidden](media/readme/merge-editor-hidden.png)
 
 ### Nothing merged behind your back
 

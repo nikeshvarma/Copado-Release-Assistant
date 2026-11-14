@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.0
+
+- **Hide identical** in the merge editor: runs of lines that are the same on both sides fold away, keeping three lines around every change, move and conflict. A row "⋯ 223 identical lines" with **Show** stands in for each run, in both panes alike, so they stay level; going to a line inside one - Ctrl+G, a find match, a click - opens it. The choice is kept for the next merge (`cmr.merge.hideIdentical`).
+- The merge editor's toolbar stays on one line at any width: the title and the summary give way, the buttons do not; previous and next change are ↑ and ↓ (Shift+F7, F7).
+
 ## 3.5.5
 
 - **Releases from CI.** Bump the version, add its changelog section, push to main: the whole test workflow runs, and if it passes the `.vsix` is built, the tag is made and the GitHub release is published with the notes and the `.vsix` (`.github/workflows/release.yml`). A tag pushed by hand releases the same way, if it matches the version. No change to what the extension does.
