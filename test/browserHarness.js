@@ -27,7 +27,7 @@ async function run(o, script, opts) {
   await p.exposeFunction('__toHost', async m => {
     sent.push(m);
     const reply = r => p.evaluate(r => window.postMessage(r, '*'), r);
-    if (m.type === 'ready') await reply({ type: 'init', title: 'Merge \u00b7 ' + o.file, labels: o.labels, theirs: o.theirs, short: o.short, mode: 'order', text, savedText: o.savedText || null, starts: o.starts || null, start: o.start || null, marks: MP.marksFor(o, text, 'order'), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
+    if (m.type === 'ready') await reply({ type: 'init', title: 'Merge \u00b7 ' + o.file, labels: o.labels, theirs: o.theirs, short: o.short, mode: 'order', text, savedText: o.savedText || null, starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, marks: MP.marksFor(o, text, 'order'), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
     // VS Code's clipboard, as the extension answers it
     else if (m.type === 'clipboard') state.clip = m.text;
     else if (m.type === 'paste') {

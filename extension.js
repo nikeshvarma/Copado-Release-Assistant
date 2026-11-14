@@ -771,6 +771,8 @@ function openMergePanel(startText, so) {
     savedText: so.startFrom != null ? String(so.startFrom) : null,
     applyOnly: !s.applyOnSave,
     starts: s.starts, start: s.startKind,
+    hideIdentical: vscode.workspace.getConfiguration('cmr').get('merge.hideIdentical', false),
+    onPref: p => vscode.workspace.getConfiguration('cmr').update('merge.hideIdentical', !!p.hideIdentical, vscode.ConfigurationTarget.Global),
     conflictsFor,
     onText: text => { if (session === s) s.panelText = text; },
     save: async (text, close) => {

@@ -2061,6 +2061,29 @@ module.exports = function register(ok, section, h) {
     assert.ok(!/\t/.test(rel + tst), 'YAML indented with spaces');
   });
 
+  section('3.6.0: Hide identical');
+
+  ok('Hide identical: the setting reaches the merge editor, and the toolbar\u2019s choice is kept in it for the next merge', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra hide '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const mv = await realMergeView(root, { 'cmr.merge.editor': 'panel', 'cmr.merge.hideIdentical': true });
+      const { vs } = mv;
+      await mv.deps().startSession(vs.Uri.file(put('t.flexipage-meta.xml', HT)), vs.Uri.file(put('f.flexipage-meta.xml', HF)), null,
+        { applyToUri: vs.Uri.file(put('r.flexipage-meta.xml', '')), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch' });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      assert.strictEqual(w.last('init').hideIdentical, true, 'the setting reaches the editor');
+      assert.ok(/id="hide"/.test(w.panel.webview.html), 'the toolbar button');
+      await w.send({ type: 'pref', hideIdentical: false });
+      assert.strictEqual(vs.config['cmr.merge.hideIdentical'], false, 'kept for the next merge');
+      w.panel.dispose();
+      const pkg = require('../package.json');
+      const all = Object.assign({}, ...pkg.contributes.configuration.map(c => c.properties));
+      assert.deepStrictEqual([all['cmr.merge.hideIdentical'].type, all['cmr.merge.hideIdentical'].default], ['boolean', false]);
+    } finally { rmTree(root); }
+  });
+
   section('3.0: what is shipped');
 
   ok('the package: every command registered and contributed, every setting read, the Command Palette short, nothing removed left behind', () => {

@@ -12,9 +12,13 @@ body.vscode-light { --orange-text: #b35c00; --red-text: #c72e2e; --blue-text: #0
 html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 body { display: flex; flex-direction: column; background: var(--vscode-editor-background); color: var(--vscode-foreground); font: var(--vscode-font-size, 13px) var(--vscode-font-family, sans-serif); }
 
-.top { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); flex: 0 0 auto; flex-wrap: wrap; }
-.top .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.top { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); flex: 0 0 auto; flex-wrap: nowrap; min-width: 0; }
+/* one line at any width: the title and the summary give way, the buttons do not */
+.top .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 60px; flex: 0 1 auto; }
+.chips { display: flex; gap: 6px; flex-wrap: nowrap; overflow: hidden; min-width: 0; flex: 0 1 auto; }
+.chip { white-space: nowrap; }
+.top > button, .top > label { flex: 0 0 auto; }
+.top [hidden] { display: none !important; }
 .chip { font-size: 11.5px; padding: 1px 8px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .chip.mv { background: rgba(177,128,215,.22); color: var(--purple-text); }
 .chip.feat { background: rgba(137,209,133,.2); color: var(--green-strong); }
@@ -85,6 +89,8 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .zone.ghost.dropped { background: rgba(155,185,85,.06); }
 .zone.ghost .gl { white-space: pre; text-decoration: line-through; text-decoration-color: rgba(241,76,76,.6); color: var(--red-text); opacity: .85; }
 .zone.ghost.dropped .gl { text-decoration-color: rgba(137,209,133,.6); color: var(--green-strong); }
+.zone.fold { display: flex; align-items: center; gap: 6px; padding-left: 8px; font: 11.5px var(--vscode-font-family, sans-serif); color: var(--vscode-descriptionForeground); background: var(--vscode-editorGutter-background, rgba(128,128,128,.06)); border-top: 1px dashed rgba(128,128,128,.35); border-bottom: 1px dashed rgba(128,128,128,.35); box-sizing: border-box; }
+.zone.fold .ic { width: 14px; text-align: center; }
 .zone.pad { background: repeating-linear-gradient(-45deg, transparent 0 6px, rgba(128,128,128,.12) 6px 7px); }
 .acts { position: absolute; right: 22px; display: flex; align-items: center; gap: 5px; z-index: 5; }
 .acts button { padding: 0 8px; font-size: 11px; height: calc(100% - 4px); }

@@ -15,6 +15,7 @@
  *     savedText,                          // what is saved as your resolution, if anything
  *     applyOnly,                          // a plain merge: applied into the target once, not saved as you go
  *     starts: { merged, feature, target }, start   // where your resolution can start, and where it did
+ *     hideIdentical, onPref(prefs)        // identical lines folded away; the choice, remembered
  *     conflictsFor(text),                 // what both branches changed, found in this text
  *     onText(text), save(text, close) -> { ok, message, warn }, discard(), onClose()
  *   }) -> { panel, reveal(line), apply(undo), dispose() }
@@ -35,8 +36,8 @@ function html(webview, media) {
     '<body data-vs="' + attr(u('monaco/vs')) + '">' +
     '<div class="top"><span class="title" id="title"></span><span class="chips" id="chips"></span><span id="held" hidden>\u26a0 marks paused \u2013 not valid XML right now</span><span class="sp"></span><span id="note" role="status"></span>' +
     '<label class="start" title="Where your resolution starts - switching replaces the right pane in one step that Ctrl+Z undoes">Start from <select id="startFrom"></select></label>' +
-    '<button id="prev" title="Previous change (Shift+F7)">\u2191</button><button id="next" title="Next change (F7)">\u2193 Next change</button>' +
-    '<button id="mode" title="Show the target in your order, or as it is"></button><button id="keys" title="Keyboard shortcuts" aria-expanded="false">\u2328</button><button id="discard">Discard</button>' +
+    '<button id="prev" title="Previous change (Shift+F7)" aria-label="Previous change">\u2191</button><button id="next" title="Next change (F7)" aria-label="Next change">\u2193</button>' +
+    '<button id="hide" aria-pressed="false"></button><button id="mode" title="Show the target in your order, or as it is"></button><button id="keys" title="Keyboard shortcuts" aria-expanded="false">\u2328</button><button id="discard">Discard</button>' +
     '<button id="save" title="Save as your resolution (Ctrl+S) \u2013 the merge stays open">\u2713 Save</button><button id="saveClose">Save and close</button></div>' +
     '<div id="help" hidden role="dialog" aria-label="Keyboard shortcuts"></div>' +
     '<div id="menu" hidden role="menu"></div>' +
@@ -71,7 +72,7 @@ function open(vscode, extensionUri, o) {
     try {
       if (m.type === 'ready') {
         post({ type: 'init', title, file: o.file, applyOnly: !!o.applyOnly, labels: o.labels, theirs: o.theirs, short: o.short, mode, text, savedText: o.savedText != null ? o.savedText : null,
-          starts: o.starts || null, start: o.start || null,
+          starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical,
           marks: marksFor(o, text, mode), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
       } else if (m.type === 'text' || m.type === 'mode') {
         if (m.type === 'mode') mode = m.mode === 'literal' ? 'literal' : 'order';
@@ -91,6 +92,9 @@ function open(vscode, extensionUri, o) {
         post({ type: 'pasted', id: m.id, text: await vscode.env.clipboard.readText() });
       } else if (m.type === 'discard') {
         if (o.discard) await o.discard();
+      } else if (m.type === 'pref') {
+        // remembered for the next merge (cmr.merge.hideIdentical)
+        if (o.onPref) await o.onPref({ hideIdentical: !!m.hideIdentical });
       } else if (m.type === 'dirty') {
         panel.title = (m.dirty ? '\u25cf ' : '') + title;
       }
