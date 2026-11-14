@@ -3,14 +3,23 @@ name: test
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit:
+    # the unit tests: no dependencies to install
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [18, 20]
+        node: [18, 20, 22]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +28,38 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: git config --global user.email "ci@example.com" && git config --global user.name "CI"
       - run: npm test
+
+  checks:
+    # no unused code; the extension activates; the .vsix builds, holds what it must, and activates from itself
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run check
+      - run: npm run package
+      - run: npm run package:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: dist/*.vsix
+          if-no-files-found: error
+
+  browser:
+    # the merge editor's page with the real Monaco, in Chromium
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save playwright@1.63.0
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+        env:
+          # here the checks must run: a missing browser fails instead of skipping
+          CI_REQUIRE_BROWSER: '1'
 
   vscode:
     # the extension inside a real VS Code

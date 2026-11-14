@@ -100,7 +100,7 @@ async function uploadResolution(api, item, resolvedText) {
   if (!fresh) throw new Error('the conflict attachment is gone from the promotion');
   const parsed = parseConflictName(fresh.Name);
   if (!parsed) throw new Error('the attachment is now named "' + fresh.Name + '" - not a conflict file');
-  if (parsed.resolved) throw new Error('it was already resolved in Copado (' + (fresh.LastModifiedDate || '') + ') - not overwriting that resolution');
+  if (parsed.resolved) throw new Error('it was already resolved in Copado (' + (fresh.LastModifiedDate || '') + ') - use Edit again to change that resolution');
   if (item.modified && fresh.LastModifiedDate && fresh.LastModifiedDate !== item.modified) throw new Error('it changed in Copado since it was fetched - fetch it again');
   const name = 'RESOLVED ' + fresh.Name;
   const body = Buffer.from(resolvedText, 'utf8');
@@ -130,6 +130,66 @@ async function unresolvedCount(api, promotionId) {
  * nothing is left unresolved, the status still says merge conflict, and the
  * org's Status field has such a value. Returns { from, to } or { skipped }.
  */
+const sha = text => require('crypto').createHash('sha256').update(Buffer.isBuffer(text) ? text : Buffer.from(String(text), 'utf8')).digest('hex');
+
+/**
+ * Replaces a resolution already in Copado - yours, or one made in Copado's
+ * editor - after a validation showed it needs another change. Only the body
+ * changes; the "RESOLVED ..." name stays. item.expectSha is the content you
+ * started editing from: if the attachment holds anything else now, someone
+ * changed it in Copado meanwhile and nothing is overwritten. Read back like
+ * an upload; previousBody is kept for undo.
+ */
+async function reviseResolution(api, item, resolvedText) {
+  if (hasMarkers(resolvedText)) throw new Error('the resolution still has conflict markers');
+  const fresh = (await api.query("SELECT Id, Name, LastModifiedDate FROM Attachment WHERE Id = '" + clean(item.id) + "'"))[0];
+  if (!fresh) throw new Error('the conflict attachment is gone from the promotion');
+  const parsed = parseConflictName(fresh.Name);
+  if (!parsed || !parsed.resolved) throw new Error('the attachment is now named "' + fresh.Name + '" - not a resolution to replace');
+  const current = Buffer.from(await api.download('Attachment', fresh.Id));
+  if (item.expectSha && sha(current) !== item.expectSha) throw new Error('its resolution changed in Copado since you started editing it - use Edit again to start from the new one');
+  const body = Buffer.from(resolvedText, 'utf8');
+  await api.patch('Attachment', fresh.Id, { Body: body.toString('base64') });
+  const after = (await api.query("SELECT Id, Name, BodyLength FROM Attachment WHERE Id = '" + clean(fresh.Id) + "'"))[0];
+  const stored = await api.download('Attachment', fresh.Id);
+  if (!after || after.Name !== fresh.Name) throw new Error('read back: the attachment name is "' + (after && after.Name) + '", not "' + fresh.Name + '"');
+  if (!Buffer.from(stored).equals(body)) throw new Error('read back: the stored content differs from the resolution (' + stored.length + ' bytes stored, ' + body.length + ' sent)');
+  return { id: fresh.Id, name: fresh.Name, previousName: fresh.Name, previousBody: current.toString('utf8'), bytes: body.length, revised: true };
+}
+
+/**
+ * Copado's "Re-create promotion branch" checkbox on the promotion, whichever
+ * name this Copado version gives it: the setting when set, else a checkbox
+ * whose name or label says re-create (or rebuild) and branch. Returns
+ * { field, label } or null.
+ */
+async function recreateBranchField(api, override) {
+  const fields = (await api.describe('copado__Promotion__c')) || [];
+  if (override) { const f = fields.find(x => x.name.toLowerCase() === String(override).toLowerCase()); return f ? { field: f.name, label: f.label || f.name } : null; }
+  const said = f => (f.name + ' ' + (f.label || '')).replace(/[_-]+/g, ' ');
+  const hit = fields.find(f => (!f.type || f.type === 'boolean') && /\b(re ?create|recreate|rebuild)\b.*\bbranch\b/i.test(said(f)));
+  return hit ? { field: hit.name, label: hit.label || hit.name } : null;
+}
+
+/** Ticks or unticks a checkbox on the promotion, and reads it back. */
+async function setPromotionFlag(api, promotionId, field, value) {
+  if (!/^[A-Za-z0-9_]+$/.test(field)) throw new Error('not a field name: ' + field);
+  const before = (await api.query('SELECT Id, ' + field + " FROM copado__Promotion__c WHERE Id = '" + clean(promotionId) + "'"))[0];
+  if (!before) throw new Error('the promotion is gone');
+  if (!!before[field] === !!value) return { from: !!before[field], to: !!value, unchanged: true };
+  await api.patch('copado__Promotion__c', before.Id, { [field]: !!value });
+  const after = (await api.query('SELECT ' + field + " FROM copado__Promotion__c WHERE Id = '" + clean(promotionId) + "'"))[0];
+  if (!after || !!after[field] !== !!value) throw new Error('read back: ' + field + ' is ' + (after && after[field]));
+  return { from: !!before[field], to: !!value };
+}
+
+/** The checkbox's value now. */
+async function promotionFlag(api, promotionId, field) {
+  if (!/^[A-Za-z0-9_]+$/.test(field)) return null;
+  const r = (await api.query('SELECT Id, ' + field + " FROM copado__Promotion__c WHERE Id = '" + clean(promotionId) + "'"))[0];
+  return r ? !!r[field] : null;
+}
+
 async function markConflictsResolved(api, promotionId, opts) {
   const o = opts || {};
   if ((await unresolvedCount(api, promotionId)) > 0) return { skipped: 'files are still unresolved' };
@@ -156,4 +216,5 @@ async function restoreStatus(api, promotionId, change) {
   return true;
 }
 
-module.exports = { parseConflictName, splitConflicts, hasMarkers, promotionConflicts, uploadResolution, restoreAttachment, unresolvedCount, markConflictsResolved, restoreStatus };
+module.exports = { parseConflictName, splitConflicts, hasMarkers, promotionConflicts, uploadResolution, reviseResolution, restoreAttachment, unresolvedCount, markConflictsResolved, restoreStatus,
+  recreateBranchField, setPromotionFlag, promotionFlag, sha };

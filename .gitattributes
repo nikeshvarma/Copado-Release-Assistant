@@ -1,0 +1,11 @@
+# The same bytes on every platform: tests compare text exactly, and Windows checkouts would otherwise turn
+# line endings into CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.key -text
+*.crt -text
+
+# Monaco Editor (MIT, Microsoft), the merge editor's editor - shipped as is: not ours to diff or count
+media/monaco/** -diff linguist-vendored

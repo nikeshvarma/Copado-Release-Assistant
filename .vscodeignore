@@ -4,3 +4,6 @@ test/**
 .vscodeignore
 CONTRIBUTING.md
 **/*.map
+scripts/**
+dist/**
+.gitattributes

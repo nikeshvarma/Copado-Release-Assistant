@@ -202,7 +202,8 @@ const TYPES = {
     strict: false,
     collections: {
       flexiPageRegions: { key: ['name'], sortable: false },
-      'flexiPageRegions/itemInstances': { noDedupe: true },
+      // an item is the component or field it holds: matched by its identifier, so a changed component is merged, not added twice
+      'flexiPageRegions/itemInstances': { key: ['componentInstance/identifier', 'fieldInstance/identifier'], sortable: false },
       componentInstances: { noDedupe: true },
       componentInstanceProperties: { key: ['name'], sortable: false },
       quickActionInstances: { noDedupe: true },

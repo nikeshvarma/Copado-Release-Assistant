@@ -1,8 +1,8 @@
 {
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
-  "description": "Copado release work for Salesforce metadata: generate package.xml from Copado commit JSON, retrieve and validate against an org in source format with live CLI progress and suggested fixes, merge branch conflicts with the git merge-base, and catch duplicate and deploy-breaking metadata.",
-  "version": "2.6.0",
+  "description": "Copado release work for Salesforce metadata: resolve promotion conflicts, validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
+  "version": "3.5.4",
   "publisher": "nikeshvarma",
   "license": "MIT",
   "icon": "media/logo.png",
@@ -37,6 +37,12 @@
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "cmr.page.open",
+        "title": "Open Release Assistant",
+        "category": "Copado",
+        "icon": "$(home)"
+      },
       {
         "command": "cmr.resolve",
         "title": "Resolve Metadata Conflict (two files)",
@@ -291,23 +297,6 @@
         "category": "Copado"
       },
       {
-        "command": "cmr.selective.import",
-        "title": "Import Selective Commit Files",
-        "category": "Copado",
-        "icon": "$(cloud-download)"
-      },
-      {
-        "command": "cmr.selective.undo",
-        "title": "Undo Last Selective Import",
-        "category": "Copado"
-      },
-      {
-        "command": "cmr.selective.download",
-        "title": "Download Selective Commit Files from Copado",
-        "category": "Copado",
-        "icon": "$(cloud-download)"
-      },
-      {
         "command": "cmr.policy.create",
         "title": "Create Team Policy File (copado-policy.json)",
         "category": "Copado"
@@ -325,100 +314,38 @@
         "icon": "$(rocket)"
       },
       {
-        "command": "cmr.copado.resolvePromotion",
-        "title": "Resolve Promotion Conflicts from Copado",
-        "category": "Copado",
-        "icon": "$(git-merge)"
-      },
-      {
-        "command": "cmr.copado.copyResolution",
-        "title": "Copy Promotion Resolution",
-        "category": "Copado",
-        "icon": "$(copy)"
-      },
-      {
-        "command": "cmr.copado.undoUpload",
-        "title": "Undo Last Copado Upload",
-        "category": "Copado",
-        "icon": "$(discard)"
-      },
-      {
         "command": "cmr.promotion.open",
         "title": "Open Promotion from Copado",
         "category": "Copado",
         "icon": "$(cloud-download)"
       },
       {
-        "command": "cmr.promotion.refresh",
-        "title": "Refresh Promotion from Copado",
+        "command": "cmr.repo.connect",
+        "title": "Connect Repository",
         "category": "Copado",
-        "icon": "$(refresh)"
+        "icon": "$(plug)"
       },
       {
-        "command": "cmr.promotion.review",
-        "title": "Review",
-        "category": "Copado",
-        "icon": "$(git-merge)"
+        "command": "cmr.repo.forget",
+        "title": "Remove Repository Token",
+        "category": "Copado"
       },
       {
-        "command": "cmr.promotion.accept",
-        "title": "Accept Resolution",
+        "command": "cmr.repo.validateStory",
+        "title": "Validate User Story from Its Feature Branch",
         "category": "Copado",
-        "icon": "$(check)"
+        "icon": "$(git-branch)"
       },
       {
-        "command": "cmr.promotion.compare",
-        "title": "Compare Sides",
-        "category": "Copado",
-        "icon": "$(diff)"
-      },
-      {
-        "command": "cmr.promotion.reset",
-        "title": "Reset to the Automatic Result",
+        "command": "cmr.mergeTakeTarget",
+        "title": "Undo This Change",
         "category": "Copado",
         "icon": "$(discard)"
       },
       {
-        "command": "cmr.promotion.copy",
-        "title": "Copy Resolution",
-        "category": "Copado",
-        "icon": "$(copy)"
-      },
-      {
-        "command": "cmr.promotion.uploadAll",
-        "title": "Upload All Resolved to Copado",
-        "category": "Copado",
-        "icon": "$(cloud-upload)"
-      },
-      {
-        "command": "cmr.promotion.undoUpload",
-        "title": "Undo Last Upload to Copado",
-        "category": "Copado",
-        "icon": "$(history)"
-      },
-      {
-        "command": "cmr.promotion.precheck",
-        "title": "Pre-check: Validate Resolved Files Before Uploading",
-        "category": "Copado",
-        "icon": "$(beaker)"
-      },
-      {
-        "command": "cmr.promotion.undoPrecheck",
-        "title": "Undo Pre-check Files",
-        "category": "Copado",
-        "icon": "$(history)"
-      },
-      {
-        "command": "cmr.promotion.openInCopado",
-        "title": "Open Promotion in Copado",
-        "category": "Copado",
-        "icon": "$(link-external)"
-      },
-      {
-        "command": "cmr.promotion.close",
-        "title": "Close Promotion and Delete Its Local Files",
-        "category": "Copado",
-        "icon": "$(close)"
+        "command": "cmr.mergeReveal",
+        "title": "Go to the Change",
+        "category": "Copado"
       }
     ],
     "menus": {
@@ -497,51 +424,79 @@
       ],
       "commandPalette": [
         {
-          "command": "cmr.applyMerge",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.cancelMerge",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.showTargetVsMerged",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.showIncomingVsMerged",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.showTargetVsIncoming",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.listConflicts",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.nextConflict",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.prevConflict",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.useAllTarget",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.useAllIncoming",
-          "when": "cmr.activeMerge"
+          "command": "cmr.useAsTarget",
+          "when": "false"
         },
         {
           "command": "cmr.mergeIntoTarget",
           "when": "false"
         },
         {
-          "command": "cmr.useAsTarget",
+          "command": "cmr.compare",
+          "when": "false"
+        },
+        {
+          "command": "cmr.applyMerge",
+          "when": "false"
+        },
+        {
+          "command": "cmr.cancelMerge",
+          "when": "false"
+        },
+        {
+          "command": "cmr.showTargetVsMerged",
+          "when": "false"
+        },
+        {
+          "command": "cmr.showIncomingVsMerged",
+          "when": "false"
+        },
+        {
+          "command": "cmr.showTargetVsIncoming",
+          "when": "false"
+        },
+        {
+          "command": "cmr.listConflicts",
+          "when": "false"
+        },
+        {
+          "command": "cmr.nextConflict",
+          "when": "false"
+        },
+        {
+          "command": "cmr.prevConflict",
+          "when": "false"
+        },
+        {
+          "command": "cmr.useAllTarget",
+          "when": "false"
+        },
+        {
+          "command": "cmr.useAllIncoming",
+          "when": "false"
+        },
+        {
+          "command": "cmr.checkDuplicates",
+          "when": "false"
+        },
+        {
+          "command": "cmr.removeDuplicates",
+          "when": "false"
+        },
+        {
+          "command": "cmr.format",
+          "when": "false"
+        },
+        {
+          "command": "cmr.showOrder",
+          "when": "false"
+        },
+        {
+          "command": "cmr.copyReport",
+          "when": "false"
+        },
+        {
+          "command": "cmr.swapDirection",
           "when": "false"
         },
         {
@@ -550,6 +505,14 @@
         },
         {
           "command": "cmr.revealLine",
+          "when": "false"
+        },
+        {
+          "command": "cmr.showReport",
+          "when": "false"
+        },
+        {
+          "command": "cmr.refreshPanel",
           "when": "false"
         },
         {
@@ -569,23 +532,11 @@
           "when": "false"
         },
         {
-          "command": "cmr.refreshPanel",
+          "command": "cmr.dropEntry",
           "when": "false"
         },
         {
-          "command": "cmr.copyReport",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.swapDirection",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.showReport",
-          "when": "cmr.activeMerge"
-        },
-        {
-          "command": "cmr.dropEntry",
+          "command": "cmr.package.fromCommit",
           "when": "false"
         },
         {
@@ -601,6 +552,14 @@
           "when": "false"
         },
         {
+          "command": "cmr.validate.run",
+          "when": "false"
+        },
+        {
+          "command": "cmr.validate.rerun",
+          "when": "false"
+        },
+        {
           "command": "cmr.validate.applyFix",
           "when": "false"
         },
@@ -609,43 +568,31 @@
           "when": "false"
         },
         {
-          "command": "cmr.validate.rerun",
-          "when": "cmr.hasValidation"
-        },
-        {
           "command": "cmr.validate.copyErrors",
-          "when": "cmr.hasValidation"
+          "when": "false"
         },
         {
           "command": "cmr.validate.clear",
-          "when": "cmr.hasValidation"
-        },
-        {
-          "command": "cmr.copado.resolvePromotion",
           "when": "false"
         },
         {
-          "command": "cmr.copado.copyResolution",
+          "command": "cmr.quickMerge.run",
           "when": "false"
         },
         {
-          "command": "cmr.copado.undoUpload",
+          "command": "cmr.quickMerge.toggleAuto",
           "when": "false"
         },
         {
-          "command": "cmr.promotion.review",
+          "command": "cmr.quickMerge.toggleButton",
           "when": "false"
         },
         {
-          "command": "cmr.promotion.accept",
+          "command": "cmr.mergeTakeTarget",
           "when": "false"
         },
         {
-          "command": "cmr.promotion.compare",
-          "when": "false"
-        },
-        {
-          "command": "cmr.promotion.reset",
+          "command": "cmr.mergeReveal",
           "when": "false"
         }
       ],
@@ -731,44 +678,19 @@
           "group": "1_more@9"
         },
         {
-          "command": "cmr.promotion.refresh",
-          "when": "view == cmrPromotionView",
-          "group": "navigation@1"
+          "command": "cmr.page.open",
+          "when": "view == cmrMergePanel",
+          "group": "navigation@0"
         },
         {
-          "command": "cmr.promotion.uploadAll",
-          "when": "view == cmrPromotionView",
-          "group": "navigation@2"
+          "command": "cmr.page.open",
+          "when": "view == cmrBranchView",
+          "group": "navigation@0"
         },
         {
-          "command": "cmr.promotion.precheck",
-          "when": "view == cmrPromotionView",
-          "group": "navigation@3"
-        },
-        {
-          "command": "cmr.promotion.openInCopado",
-          "when": "view == cmrPromotionView",
-          "group": "navigation@4"
-        },
-        {
-          "command": "cmr.promotion.open",
-          "when": "view == cmrPromotionView",
-          "group": "1_open@1"
-        },
-        {
-          "command": "cmr.promotion.undoUpload",
-          "when": "view == cmrPromotionView",
-          "group": "2_undo@1"
-        },
-        {
-          "command": "cmr.promotion.undoPrecheck",
-          "when": "view == cmrPromotionView",
-          "group": "2_undo@2"
-        },
-        {
-          "command": "cmr.promotion.close",
-          "when": "view == cmrPromotionView",
-          "group": "3_close@1"
+          "command": "cmr.page.open",
+          "when": "view == cmrDeployView",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
@@ -823,29 +745,9 @@
           "group": "inline@1"
         },
         {
-          "command": "cmr.promotion.review",
-          "when": "view == cmrPromotionView && viewItem =~ /^promoFile\\.(review|code|error|auto|resolved)$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "cmr.promotion.accept",
-          "when": "view == cmrPromotionView && viewItem =~ /^promoFile\\.(review|auto)$/",
-          "group": "inline@2"
-        },
-        {
-          "command": "cmr.promotion.compare",
-          "when": "view == cmrPromotionView && viewItem =~ /^promoFile/",
-          "group": "inline@3"
-        },
-        {
-          "command": "cmr.promotion.reset",
-          "when": "view == cmrPromotionView && viewItem =~ /^promoFile\\.(review|code|resolved|error)$/",
-          "group": "1_edit@1"
-        },
-        {
-          "command": "cmr.promotion.copy",
-          "when": "view == cmrPromotionView && viewItem =~ /^promoFile/",
-          "group": "1_edit@2"
+          "command": "cmr.mergeTakeTarget",
+          "when": "view == cmrMergePanel && viewItem == cmrLiveChange",
+          "group": "inline"
         }
       ]
     },
@@ -917,6 +819,38 @@
               "The target's value is used, and you can switch to the incoming one."
             ],
             "description": "Which value a real conflict starts with, before you review it."
+          },
+          "cmr.merge.editor": {
+            "type": "string",
+            "enum": [
+              "panel",
+              "vscode"
+            ],
+            "enumDescriptions": [
+              "The extension's own merge editor: the target and your resolution lined up element by element, moves in purple, what you removed struck through, and a button on every change.",
+              "VS Code's diff view, with the marks drawn in it."
+            ],
+            "default": "panel",
+            "description": "Where you review and edit a merge.",
+            "order": 2
+          },
+          "cmr.merge.startFrom": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "feature",
+              "target",
+              "merged"
+            ],
+            "enumDescriptions": [
+              "The merged result for permission sets, profiles, labels, translations and objects - files often retrieved in part, where an entry the feature branch lacks is not a removal; the feature branch's file for everything else (pages, layouts, flows...), so its removals count.",
+              "The feature branch's file as it is.",
+              "The target branch's file as it is.",
+              "Both branches combined: nothing of the target is dropped."
+            ],
+            "default": "auto",
+            "markdownDescription": "Where your resolution starts when you open a merge. Whatever the start, the merge editor marks what the other branch has - including what the feature branch does not have - and you switch with **Start from** in the merge editor.",
+            "order": 3
           },
           "cmr.merge.removeDuplicates": {
             "type": "boolean",
@@ -1140,7 +1074,7 @@
                 "ignore"
               ]
             },
-            "markdownDescription": "How each Copado action becomes part of the package. `deploy` - in package.xml and retrieved. `selective` - in package.xml but never retrieved, for Copado **selective commits**: Copado commits only the selected changes and keeps that version, while the org has the whole file, so the project's version is deployed as it is. `retrieve` - retrieved only. `destructive` - deleted. `ignore` - left out."
+            "markdownDescription": "How each Copado action becomes part of the package. `deploy` - in package.xml. `selective` - in package.xml, for Copado **selective commits**: validations from a branch deploy the committed version; from the project, its version is deployed as it is. `retrieve` - left out of package.xml (Copado only retrieves these). `destructive` - deleted. `ignore` - left out."
           },
           "cmr.package.warnStandardFields": {
             "type": "boolean",
@@ -1157,55 +1091,96 @@
         }
       },
       {
-        "title": "Selective commits",
+        "title": "Copado",
         "properties": {
-          "cmr.selective.folder": {
-            "type": "string",
-            "default": "conflict/selective",
-            "order": 1,
-            "markdownDescription": "Folder in the project where you download Copado's selective-commit files. Each file is named after its `selectiveCommitHash` and holds the XML Copado committed."
-          },
-          "cmr.selective.autoImport": {
-            "type": "boolean",
-            "default": true,
-            "order": 2,
-            "markdownDescription": "Before a validation, copy each downloaded selective-commit file into the project, so the validation deploys exactly what Copado committed."
-          },
-          "cmr.selective.confirm": {
-            "type": "boolean",
-            "default": true,
-            "order": 3,
-            "markdownDescription": "Ask before replacing project files with selective-commit files, with an option to see the differences first."
-          },
           "cmr.copado.org": {
             "type": "string",
             "default": "",
-            "order": 4,
+            "order": 1,
             "scope": "machine-overridable",
-            "markdownDescription": "Alias or username of the **Copado org** - the Salesforce org where Copado runs - logged in with the Salesforce CLI (`sf org login web --alias copado`). With it set, **Download Selective Commit Files from Copado** fetches each committed version by its file id, and a missing download can be fetched from the validation prompt."
+            "markdownDescription": "Alias or username of the **Copado org** - the Salesforce org where Copado runs - logged in with the Salesforce CLI (`sf org login web --alias copado`). Everything the extension reads from Copado - promotions, stories, the pipeline, releases, deployments - comes from here."
           },
           "cmr.copado.environmentOrgs": {
             "type": "object",
             "default": {},
-            "order": 5,
+            "order": 2,
             "additionalProperties": {
               "type": "string"
             },
-            "markdownDescription": "Which Salesforce CLI org stands for each Copado environment, by environment name - for example `{ \"Dev Sandbox\": \"dev\" }`. **Prepare User Story from Copado** fills this in when it cannot match an environment by its org credential\u2019s username."
+            "markdownDescription": "Which Salesforce CLI login stands for each Copado environment, by environment name - for example `{ \"QA\": \"qa\" }`. Validations for a stage run as this login, and the page shows it. Filled in the first time an environment cannot be matched by its org credential’s username."
           },
           "cmr.promotion.keepDays": {
             "type": "number",
             "default": 30,
             "minimum": 0,
-            "order": 6,
+            "order": 4,
             "markdownDescription": "Days to keep a finished promotion's local files - every conflict uploaded or resolved in Copado - after it was last refreshed. `0` keeps them until you close the promotion."
+          },
+          "cmr.copado.watchSeconds": {
+            "type": "number",
+            "default": 15,
+            "minimum": 5,
+            "maximum": 300,
+            "order": 4,
+            "markdownDescription": "While Copado deploys a promotion, how often (in seconds) the Deployment tab reads its job records again. Read-only; it stops when the job finishes or the page closes."
+          },
+          "cmr.copado.recreateBranchField": {
+            "type": "string",
+            "default": "",
+            "order": 5,
+            "scope": "resource",
+            "markdownDescription": "The API name of Copado’s **Re-create promotion branch** checkbox on the promotion. Empty finds it by itself - a checkbox whose name or label says re-create (or rebuild) and branch. Set it only if your Copado version calls it something else."
+          },
+          "cmr.promotion.autoResolve": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "markdownDescription": "Resolve automatically the conflict files that need no decision - the sides agree, or only one side changed - so they are ready to upload without you. **Off** (the default): nothing is resolved without you; a clean merge is offered as a suggestion that you review and accept, and code keeps every conflict block for you to decide."
           }
         },
         "order": 6
       },
       {
+        "title": "Repository",
+        "properties": {
+          "cmr.repo.url": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "scope": "machine-overridable",
+            "markdownDescription": "The address of the repository Copado commits to. **Leave empty to take it from Copado’s Git Repository record**: the first validation from a branch asks only for the read-only token. Azure DevOps, GitHub, GitLab and Bitbucket Cloud; the token is kept in VS Code’s encrypted secret storage."
+          },
+          "cmr.repo.provider": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "azure",
+              "github",
+              "gitlab",
+              "bitbucket"
+            ],
+            "default": "auto",
+            "order": 2,
+            "markdownDescription": "Which host the address belongs to. `auto` recognises dev.azure.com, *.visualstudio.com, github.com, gitlab.com and bitbucket.org; pick it for a self-hosted Azure DevOps Server, GitHub Enterprise or GitLab."
+          },
+          "cmr.repo.featureBranch": {
+            "type": "string",
+            "default": "feature/{story}",
+            "order": 3,
+            "markdownDescription": "The branch a user story’s commits are on, with `{story}` for its number - Copado’s convention is `feature/{story}`. When a Copado record of the story names its branch, that name is used instead."
+          },
+          "cmr.repo.promotionBranch": {
+            "type": "string",
+            "default": "promotion/{promotion}",
+            "order": 4,
+            "markdownDescription": "The branch Copado builds for a promotion, with `{promotion}` for its name (for example `P12345`). **Validate promotion branch** reads the promotion’s components from it."
+          }
+        },
+        "order": 7
+      },
+      {
         "title": "Git branches",
-        "order": 7,
+        "order": 8,
         "properties": {
           "cmr.git.targetBranch": {
             "type": "string",
@@ -1253,19 +1228,13 @@
       },
       {
         "title": "Org validation",
-        "order": 8,
+        "order": 9,
         "properties": {
           "cmr.sf.path": {
             "type": "string",
             "default": "sf",
             "order": 1,
             "description": "The Salesforce CLI executable. Orgs come from what you have authorised with it - no credentials are stored by this extension."
-          },
-          "cmr.org.source": {
-            "type": "string",
-            "default": "",
-            "order": 2,
-            "description": "Alias or username of the org to retrieve from. Empty asks each time."
           },
           "cmr.org.target": {
             "type": "string",
@@ -1278,22 +1247,6 @@
             "default": true,
             "order": 4,
             "description": "Show the org pickers each time, with the settings above pre-selected."
-          },
-          "cmr.validate.source": {
-            "type": "string",
-            "enum": [
-              "ask",
-              "retrieve",
-              "workspace"
-            ],
-            "default": "ask",
-            "order": 5,
-            "enumDescriptions": [
-              "Ask each time.",
-              "Retrieve the package into this project with sf project retrieve start (overwriting the matching files in your package directory), then validate the project.",
-              "Validate this project as it is, without retrieving - for example after resolving branch conflicts or applying fixes."
-            ],
-            "description": "What a validation does first. Re-validate never retrieves, so it cannot overwrite fixes you have applied."
           },
           "cmr.validate.testLevel": {
             "type": "string",
@@ -1423,9 +1376,63 @@
               ]
             },
             "markdownDescription": "Lowest test level per org pattern, for example `{ \"production\": \"RunLocalTests\" }`. A lower choice is raised automatically, and the output says so."
+          },
+          "cmr.guard.environments": {
+            "type": "object",
+            "default": {},
+            "order": 5,
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "minimumTestLevel": {
+                  "type": "string",
+                  "enum": [
+                    "NoTestRun",
+                    "RunSpecifiedTests",
+                    "RunLocalTests",
+                    "RunAllTestsInOrg"
+                  ]
+                },
+                "requiredTargetUser": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "coverage": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                }
+              }
+            },
+            "markdownDescription": "Rules per Copado environment, by its name - for example `{ \"UAT\": { \"minimumTestLevel\": \"RunLocalTests\", \"coverage\": 85 }, \"Production\": { \"requiredTargetUser\": \"release.user@*\" } }`. `requiredTargetUser` is the login a validation for that stage must use (`*` is a wildcard); `coverage` the lowest per-class coverage for the Apex in the package. A `copado-policy.json` with an `environments` block replaces this."
           }
         },
-        "order": 9
+        "order": 10
+      },
+      {
+        "title": "Network",
+        "order": 11,
+        "properties": {
+          "cmr.http.proxy": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "scope": "machine",
+            "markdownDescription": "Proxy for the Copado org and the Git host, such as `http://proxy.example.com:8080` or `http://user:password@proxy:8080`. Empty uses VS Code’s **Http: Proxy**, then `HTTPS_PROXY`. `NO_PROXY` is honoured; this machine (`localhost`) is never proxied."
+          },
+          "cmr.http.caFile": {
+            "type": "string",
+            "default": "",
+            "order": 2,
+            "scope": "machine",
+            "markdownDescription": "A PEM file of extra certificates to trust, for a proxy that inspects TLS with its own certificate. VS Code’s **Http: Proxy Strict SSL** also applies through a proxy."
+          }
+        }
       }
     ],
     "viewsContainers": {
@@ -1440,50 +1447,50 @@
     "views": {
       "cmrContainer": [
         {
-          "id": "cmrPromotionView",
-          "name": "Promotion",
+          "id": "cmrStart",
+          "name": "Release Assistant",
           "icon": "media/merge.svg",
-          "contextualTitle": "Copado"
+          "contextualTitle": "Copado",
+          "when": "!cmr.activeMerge && !cmr.hasPackage && !cmr.hasValidation && !cmr.hasBranchCheck"
         },
         {
           "id": "cmrMergePanel",
           "name": "Merge",
           "icon": "media/merge.svg",
-          "contextualTitle": "Copado"
-        },
-        {
-          "id": "cmrBranchView",
-          "name": "Branch Conflicts",
-          "icon": "media/merge.svg",
-          "contextualTitle": "Copado"
+          "contextualTitle": "Copado",
+          "when": "cmr.activeMerge"
         },
         {
           "id": "cmrDeployView",
           "name": "Deploy Check",
           "icon": "media/merge.svg",
-          "contextualTitle": "Copado"
+          "contextualTitle": "Copado",
+          "when": "cmr.hasPackage || cmr.hasValidation"
+        },
+        {
+          "id": "cmrBranchView",
+          "name": "Branch Conflicts",
+          "icon": "media/merge.svg",
+          "contextualTitle": "Copado",
+          "when": "cmr.hasBranchCheck"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "cmrBranchView",
-        "contents": "Find what conflicts between your branches without touching your working tree.\n[Check Branch Conflicts](command:cmr.git.check)\nBranches come from settings: [change them](command:cmr.openSettings)"
-      },
-      {
-        "view": "cmrDeployView",
-        "contents": "Build a package.xml from a Copado commit, then validate it against an org - check-only, nothing is deployed.\n[Generate package.xml](command:cmr.package.fromCommit)\n[Validate Deployment](command:cmr.validate.run)"
-      },
-      {
-        "view": "cmrPromotionView",
-        "contents": "Resolve a Copado promotion's merge conflicts here: every conflicted file is fetched at once, the ones that need no decision are resolved automatically, and the rest are listed for review.\n[Open Promotion from Copado](command:cmr.promotion.open)\nNeeds the Copado org in settings: [Copado org](command:workbench.action.openSettings?%22cmr.copado.org%22)"
+        "view": "cmrStart",
+        "contents": "Resolve a Copado promotion, follow a story through the pipeline and check deployments - all on one page.\n[Open Release Assistant](command:cmr.page.open)\nAlso: [validate a deployment](command:cmr.validate.run), [build a package.xml from a commit](command:cmr.package.fromCommit), [check branch conflicts](command:cmr.git.check)."
       }
     ]
   },
   "scripts": {
     "test": "node test/smoke.js",
-    "package": "npx @vscode/vsce package",
-    "test:vscode": "node test/integration/runTest.js"
+    "test:browser": "node test/browser.js",
+    "test:vscode": "node test/integration/runTest.js",
+    "check": "node scripts/check-unused.js && node scripts/check-activation.js",
+    "package": "node scripts/package.js",
+    "package:check": "node scripts/check-package.js",
+    "package:vsce": "npx @vscode/vsce package"
   },
   "author": {
     "name": "Nikesh Varma"
@@ -1495,7 +1502,10 @@
       "restrictedConfigurations": [
         "cmr.sf.path",
         "cmr.copado.org",
-        "cmr.project.path"
+        "cmr.project.path",
+        "cmr.repo.url",
+        "cmr.http.proxy",
+        "cmr.http.caFile"
       ]
     },
     "virtualWorkspaces": false

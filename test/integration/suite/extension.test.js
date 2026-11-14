@@ -30,7 +30,8 @@ test('the settings VS Code sees are the ones declared', async () => {
   const cfg = vscode.workspace.getConfiguration();
   const missing = props.filter(k => cfg.inspect(k) === undefined);
   assert.deepStrictEqual(missing, []);
-  assert.strictEqual(vscode.workspace.getConfiguration('cmr').get('selective.folder'), 'conflict/selective');
+  assert.strictEqual(vscode.workspace.getConfiguration('cmr').get('repo.promotionBranch'), 'promotion/{promotion}');
+  assert.strictEqual(vscode.workspace.getConfiguration('cmr').get('selective.folder'), undefined, 'removed in 3.0');
 });
 
 test('Format Document writes a permission set in Salesforce order', async () => {
@@ -57,12 +58,39 @@ test('duplicate entries are reported as problems', async () => {
   await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
 });
 
-test('quick merge opens the merge of feature.xml into resolution.xml', async () => {
-  // the merge asks nothing for a clean pair; it opens a diff with the merged file on the right
+// the merge editor: the extension's own panel (a webview tab), and the merged file it starts from
+const editorTabs = () => vscode.window.tabGroups.all.flatMap(g => g.tabs).filter(t => t.input instanceof vscode.TabInputWebview && /cmrMergeEditor/.test(t.input.viewType));
+const mergedFile = () => {
+  const dir = path.join(root(), '.copado', 'merge');
+  const s = fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => /^s-/.test(n)) : [];
+  const f = s.length ? path.join(dir, s[s.length - 1], 'MERGED__resolution.xml') : null;
+  return f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
+};
+
+test('quick merge opens the merge editor on feature.xml merged into resolution.xml; Cancel merge closes it', async () => {
   await vscode.commands.executeCommand('cmr.quickMerge.run');
-  const merged = await until(() => vscode.window.visibleTextEditors.find(e => /MERGED__resolution\.xml$/.test(e.document.fileName)), 'the merged view', 30000);
-  const text = merged.document.getText();
+  const tab = await until(() => editorTabs()[0], 'the merge editor', 30000);
+  assert.ok(/Merge \u00b7 resolution\.xml/.test(tab.label), tab.label);
+  // a permission set starts from the merged result: both files' entries
+  const text = await until(mergedFile, 'the merged file');
   assert.ok(text.includes('From_Feature_Class'), 'the incoming entry was added');
   assert.ok(text.includes('Resolution_Only_Class'), 'the target kept everything');
   await vscode.commands.executeCommand('cmr.cancelMerge');
+  await until(() => !editorTabs().length, 'the merge editor to close');
+});
+
+test('with cmr.merge.editor set to "vscode", quick merge opens VS Code\u2019s diff view with the merged file on the right', async () => {
+  const cmr = vscode.workspace.getConfiguration('cmr');
+  await cmr.update('merge.editor', 'vscode', vscode.ConfigurationTarget.Workspace);
+  try {
+    await vscode.commands.executeCommand('cmr.quickMerge.run');
+    const merged = await until(() => vscode.window.visibleTextEditors.find(e => /MERGED__resolution\.xml$/.test(e.document.fileName)), 'the merged view', 30000);
+    const text = merged.document.getText();
+    assert.ok(text.includes('From_Feature_Class'), 'the incoming entry was added');
+    assert.ok(text.includes('Resolution_Only_Class'), 'the target kept everything');
+    assert.strictEqual(editorTabs().length, 0, 'no merge editor');
+    await vscode.commands.executeCommand('cmr.cancelMerge');
+  } finally {
+    await cmr.update('merge.editor', undefined, vscode.ConfigurationTarget.Workspace);
+  }
 });

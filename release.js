@@ -4,11 +4,15 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const manifest = require('./src/manifest');
-const selective = require('./src/selective');
 const policies = require('./src/guard');
+const lifecycle = require('./src/lifecycle');
+const history = require('./src/history');
+const httpx = require('./src/http');
 const inspectLib = require('./src/copadoInspect');
 const promotionLib = require('./src/promotion');
 const { createClient } = require('./src/copadoClient');
+const repoHost = require('./src/repoHost');
+const branchCheck = require('./src/branchCheck');
 const { redact } = require('./src/redact');
 const gitops = require('./src/gitops');
 const sfcli = require('./src/sfcli');
@@ -17,6 +21,7 @@ const X = require('./src/xmlParser');
 const { projectFolder, forCli } = require('./src/paths');
 
 let deps;
+let secrets = null;
 let ctx;
 let output;
 let deployDiagnostics;
@@ -33,6 +38,7 @@ const state = {
 
 function activate(context, d) {
   deps = d;
+  secrets = context.secrets;
   ctx = context;
   output = d.output;
   deployDiagnostics = vscode.languages.createDiagnosticCollection('copadoDeploy');
@@ -42,10 +48,14 @@ function activate(context, d) {
   deployProvider = provider(deployRoots, deployChildren);
   branchTree = vscode.window.createTreeView('cmrBranchView', { treeDataProvider: branchProvider, showCollapseAll: true });
   deployTree = vscode.window.createTreeView('cmrDeployView', { treeDataProvider: deployProvider, showCollapseAll: true });
+  // when no section has anything to show, the sidebar is one button to the page (its welcome content)
+  context.subscriptions.push(vscode.window.createTreeView('cmrStart', { treeDataProvider: { getChildren: () => [], getTreeItem: x => x } }));
   context.subscriptions.push(branchTree, deployTree);
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
     if (e.affectsConfiguration('cmr.sf.path')) { cliCache.version = null; cliCache.orgs = null; }
+    if (e.affectsConfiguration('cmr.http') || e.affectsConfiguration('http.proxy') || e.affectsConfiguration('http.proxyStrictSSL')) configureNetwork();
   }));
+  configureNetwork();
   refreshMessages();
 
   const cmd = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, guard(fn)));
@@ -59,13 +69,18 @@ function activate(context, d) {
   cmd('cmr.validate.applyFix', cmdApplyFix);
   cmd('cmr.validate.openFailure', cmdOpenFailure);
   cmd('cmr.validate.copyErrors', cmdCopyErrors);
-  cmd('cmr.selective.import', () => importSelective(state.pkg, false));
-  cmd('cmr.selective.undo', cmdUndoSelective);
-  cmd('cmr.selective.download', () => downloadSelective(state.pkg, false));
   cmd('cmr.policy.create', cmdCreatePolicy);
   cmd('cmr.copado.inspect', cmdInspectStory);
   cmd('cmr.copado.prepare', cmdPrepareStory);
-  require('./promotionUi').activate(context, { output, deps, rc, cmd, requireTrust, projectRoot, apiVersion, copadoApi, cmdPackage, cmdValidate, orgForEnvironment, orgList, sfcli });
+  cmd('cmr.repo.connect', cmdConnectRepo);
+  cmd('cmr.repo.forget', cmdForgetRepo);
+  cmd('cmr.repo.validateStory', () => validateFromBranch());
+  const helpers = { output, deps, rc, cmd, requireTrust, projectRoot, apiVersion, copadoApi, cmdValidate, runBranchCheck, orgForEnvironment, orgList, sfcli, needCopado,
+    credentialsFor, validatePromotionBranch, validateFromBranch, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
+  exported.helpers = helpers;
+  require('./promotionUi').activate(context, helpers);
+  require('./lifecycleUi').activate(context, helpers);
+  require('./releasePage').activate(context, require('./promotionUi'), require('./lifecycleUi'), cmd);
   cmd('cmr.validate.clear', () => {
     state.validation = null;
     deployDiagnostics.clear();
@@ -104,10 +119,8 @@ function rc() {
     metadataOnly: c.get('git.metadataOnly', false),
     confirmBranches: c.get('git.confirmBranches', true),
     sfPath: c.get('sf.path', 'sf') || 'sf',
-    sourceOrg: c.get('org.source', ''),
     targetOrg: c.get('org.target', ''),
     confirmOrgs: c.get('org.confirm', true),
-    validateSource: c.get('validate.source', 'ask'),
     testLevel: c.get('validate.testLevel', 'ask'),
     testLevelWithoutApex: c.get('validate.testLevelWithoutApex', 'NoTestRun'),
     testPattern: c.get('validate.testClassPattern', 'Test$'),
@@ -116,14 +129,15 @@ function rc() {
     warnOnProduction: c.get('validate.warnOnProduction', true),
     revealOutput: c.get('validate.revealOutput', true),
     progressInterval: Math.max(0, Number(c.get('validate.progressInterval', 0)) || 0),
-    selFolder: c.get('selective.folder', 'conflict/selective'),
     copadoOrg: c.get('copado.org', ''),
+    repoUrl: c.get('repo.url', ''),
+    repoProvider: c.get('repo.provider', 'auto'),
+    featureBranch: c.get('repo.featureBranch', 'feature/{story}'),
     environmentOrgs: c.get('copado.environmentOrgs', {}),
     maskIdentities: c.get('output.maskIdentities', false),
     guard: { allowedTargetOrgs: c.get('guard.allowedTargetOrgs', []), blockedTargetOrgs: c.get('guard.blockedTargetOrgs', []),
-      allowProduction: c.get('guard.allowProduction', true), minimumTestLevel: c.get('guard.minimumTestLevel', {}) },
-    selAuto: c.get('selective.autoImport', true),
-    selConfirm: c.get('selective.confirm', true),
+      allowProduction: c.get('guard.allowProduction', true), minimumTestLevel: c.get('guard.minimumTestLevel', {}), environments: c.get('guard.environments', {}) },
+    promotionBranch: c.get('repo.promotionBranch', 'promotion/{promotion}'),
     skipSourceTracking: c.get('validate.skipSourceTracking', true)
   };
 }
@@ -178,8 +192,6 @@ async function generatePackage(files) {
   const version = await apiVersion();
   const result = manifest.build(rows, { actions: c.actions, warnStandardFields: c.warnStandardFields, testPattern: c.testPattern });
   const pkg = { result, version, sources: files, folder: null, files: {}, changed: false };
-  pkg.selectiveImported = new Set();
-  refreshSelective(pkg);
   await writePackageFiles(pkg);
   state.pkg = pkg;
 
@@ -190,8 +202,7 @@ async function generatePackage(files) {
   output.appendLine('Written to ' + vscode.workspace.asRelativePath(pkg.folder));
   output.show(true);
 
-  refreshAll();
-  vscode.commands.executeCommand('cmrDeployView.focus');
+  reveal('cmrDeployView');
   if (c.openAfterGenerate) await vscode.window.showTextDocument(pkg.files.deploy, { preview: false });
 
   const warnings = result.notes.filter(n => n.severity === 'warning').length;
@@ -223,133 +234,7 @@ async function writePackageFiles(pkg) {
   pkg.files.destructive = r.destructive.size
     ? await write(folder, 'destructiveChanges.xml', manifest.toPackageXml(r.destructive, pkg.version))
     : null;
-  // the retrieve list is a working file, so it lives in the extension's folder; it differs from
-  // package.xml when there are retrieve-only items, or selective commits that must not be retrieved
-  pkg.files.retrieve = r.retrieveOnly.size || (r.selective && r.selective.size)
-    ? await write((await deps.storageDir()).fsPath, 'package-retrieve.xml', manifest.toPackageXml(r.retrieve, pkg.version))
-    : pkg.files.deploy;
-}
-
-/* ---------------------------------------------------------- selective commits */
-
-function selectiveSetup(pkg) {
-  const c = rc();
-  const root = projectOrFolder();
-  let dirs = ['force-app'];
-  try { dirs = require('./src/paths').packageDirsOf(fs.readFileSync(path.join(root, 'sfdx-project.json'), 'utf8')); } catch (e) { /* default */ }
-  const folder = path.join(root, require('./src/paths').insideProject(c.selFolder, 'conflict/selective'));
-  const note = pkg.result.notes.find(n => n.id === 'selective-commit');
-  return { c, root, dirs, folder, items: note ? note.components : [] };
-}
-
-/**
- * Re-reads the drop folder and turns what it finds into pre-flight notes, one
- * per selective commit, so the Package row always says what will happen.
- */
-function refreshSelective(pkg) {
-  if (!pkg || !pkg.result.selective || !pkg.result.selective.size) return;
-  const o = selectiveSetup(pkg);
-  const p = selective.plan(o);
-  pkg.selectivePlan = p;
-  const rel = f => path.relative(o.root, f).split(path.sep).join('/');
-  const label = it => it.type + ' ' + it.name;
-  const notes = [];
-  for (const it of p.items) {
-    const done = pkg.selectiveImported && pkg.selectiveImported.has(it.type + '|' + it.name);
-    if (it.status === 'missing' && done) notes.push(['info', label(it) + ': the committed version from Copado is in the project.']);
-    else if (it.status === 'ready') notes.push(['info', label(it) + ': the committed version is ready to import from ' + path.basename(it.source) + '.']);
-    else if (it.status === 'missing') notes.push(['warning', label(it) + ': no download in ' + rel(o.folder) + '. ' + (fs.existsSync(it.target)
-      ? 'Validation would use the project\u2019s current version.' : 'It is not in the project either.') +
-      ' Download Copado file ' + (it.copadoFile || 'for it') + ' into ' + rel(o.folder) + '.']);
-    else if (it.status === 'duplicate') notes.push(['warning', label(it) + ': ' + it.files.length + ' downloads (' + it.files.map(f => path.basename(f)).join(', ') + '). Keep only the right one.']);
-    else if (it.status === 'mismatch') notes.push(['warning', label(it) + ': the downloaded file is a <' + (it.found || '?') + '>, not a <' + it.type + '>. It will not be imported.']);
-    else if (it.status === 'split') notes.push(['warning', label(it) + ': the downloaded CustomObject holds fields and other parts that source format keeps in separate files. It will not be imported.']);
-    else if (it.status === 'unsupported') notes.push(['info', label(it) + ': this type is not imported automatically - put its committed version in the project yourself.']);
-  }
-  for (const x of p.extra) {
-    notes.push(['info', path.basename(x.file) + (x.id ? ' (' + x.id.type + ' ' + x.id.name + ')' : '') + ' is in ' + rel(o.folder) + ' but belongs to no selective commit in this package.']);
-  }
-  pkg.result.notes = pkg.result.notes.filter(n => n.id !== 'selective-status')
-    .concat(notes.map(([severity, message]) => ({ severity, id: 'selective-status', message })));
-  watchSelective(o.folder);
-}
-
-let selectiveWatcher = null;
-let selectiveWatched = '';
-function watchSelective(folder) {
-  if (selectiveWatched === folder) return;
-  if (selectiveWatcher) selectiveWatcher.dispose();
-  selectiveWatched = folder;
-  selectiveWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(folder), '*'));
-  const again = () => { if (state.pkg) { refreshSelective(state.pkg); refreshAll(); } };
-  selectiveWatcher.onDidCreate(again); selectiveWatcher.onDidChange(again); selectiveWatcher.onDidDelete(again);
-}
-
-/**
- * Copies the committed versions into the project. From a validation it returns
- * 'stop' when you decline, so nothing is validated by surprise.
- */
-async function importSelective(pkg, fromValidation) {
-  if (!pkg || !pkg.result.selective || !pkg.result.selective.size) {
-    if (!fromValidation) vscode.window.showInformationMessage('The current package has no selective commits.');
-    return 'none';
-  }
-  pkg.selectiveImported = pkg.selectiveImported || new Set();
-  refreshSelective(pkg);
-  const o = selectiveSetup(pkg);
-  if (fromValidation && !o.c.selAuto) return 'skipped';
-  const items = pkg.selectivePlan.items;
-  const ready = items.filter(i => i.status === 'ready');
-  const missing = items.filter(i => i.status === 'missing' && !pkg.selectiveImported.has(i.type + '|' + i.name));
-  const rel = f => path.relative(o.root, f).split(path.sep).join('/');
-
-  const dirty = vscode.workspace.textDocuments.filter(d => d.isDirty && ready.some(i => path.resolve(i.target).toLowerCase() === path.resolve(d.uri.fsPath).toLowerCase()));
-  if (dirty.length) {
-    vscode.window.showWarningMessage('Save or revert ' + dirty.map(d => path.basename(d.fileName)).join(', ') + ' first - the selective import would replace ' + (dirty.length === 1 ? 'it' : 'them') + '.', { modal: true });
-    return 'stop';
-  }
-  if (ready.length) {
-    if (o.c.selConfirm) {
-      const buttons = ['Import', 'Show diffs'].concat(fromValidation ? ['Validate without importing'] : []);
-      const pick = await vscode.window.showInformationMessage(
-        'Import ' + ready.length + ' selective commit' + (ready.length === 1 ? '' : 's') + ' into the project?',
-        { modal: true, detail: ready.map(i => i.type + ' ' + i.name + '  \u2192  ' + rel(i.target)).join('\n') +
-          '\n\nThe current files are backed up; "Copado: Undo Last Selective Import" restores them.' }, ...buttons);
-      if (pick === 'Show diffs') {
-        for (const i of ready) {
-          const left = fs.existsSync(i.target) ? vscode.Uri.file(i.target) : vscode.Uri.parse('untitled:' + path.basename(i.target));
-          await vscode.commands.executeCommand('vscode.diff', left, vscode.Uri.file(i.source), path.basename(i.target) + ' \u2194 committed version');
-        }
-        vscode.window.showInformationMessage('Review the differences, then import or validate again.');
-        return 'stop';
-      }
-      if (pick === 'Validate without importing') return 'skipped';
-      if (pick !== 'Import') return 'stop';
-    }
-    const storage = (await deps.storageDir()).fsPath;
-    const record = selective.apply(items, { root: o.root, storage });
-    for (const it of record.items) {
-      pkg.selectiveImported.add(it.type + '|' + it.name);
-      output.appendLine('  selective: ' + it.type + ' ' + it.name + ' \u2190 ' + path.basename(it.download) + '  \u2192  ' + rel(it.target));
-    }
-    refreshSelective(pkg);
-    refreshAll();
-    if (!fromValidation) vscode.window.showInformationMessage(record.items.length + ' selective commit' + (record.items.length === 1 ? '' : 's') + ' imported. Source Control shows the changes.');
-  } else if (!fromValidation) {
-    vscode.window.showInformationMessage('Nothing to import - no matching downloads in ' + rel(o.folder) + '. The Package row in Deploy Check says what each selective commit needs.');
-  }
-  if (fromValidation && missing.length) {
-    const go = await vscode.window.showWarningMessage(
-      missing.length + ' selective commit' + (missing.length === 1 ? ' has' : 's have') + ' no download in ' + rel(o.folder) + '.',
-      { modal: true, detail: missing.map(i => i.type + ' ' + i.name + (i.copadoFile ? '  (Copado file ' + i.copadoFile + ')' : '')).join('\n') +
-        '\n\nValidate with the project\u2019s current version instead?' }, ...(o.c.copadoOrg ? ['Download from Copado'] : []), 'Validate anyway');
-    if (go === 'Download from Copado') {
-      if (!(await downloadSelective(pkg, true))) return 'stop';
-      return importSelective(pkg, true);
-    }
-    if (go !== 'Validate anyway') return 'stop';
-  }
-  return 'imported';
+  pkg.files.retrieve = pkg.files.deploy;
 }
 
 /** Org and git commands only run in a folder VS Code trusts. */
@@ -365,7 +250,7 @@ function requireTrust(what) {
  * project root if there is one, otherwise the guard settings. A blocked target
  * stops the run; a test level below the policy's minimum is raised.
  */
-async function applyPolicy(c, root, params) {
+async function applyPolicy(c, root, params, pkg, quiet) {
   let fileText = null;
   try { fileText = fs.readFileSync(path.join(root, 'copado-policy.json'), 'utf8'); } catch (e) { /* no policy file */ }
   const { policy, source, error } = policies.resolvePolicy(fileText, c.guard);
@@ -375,8 +260,14 @@ async function applyPolicy(c, root, params) {
   const known = orgs.find(o => o.alias === params.targetOrg || o.username === params.targetOrg);
   // an org the CLI cannot describe is treated as production - the stricter reading
   const org = { alias: known ? known.alias : params.targetOrg, username: known ? known.username : params.targetOrg, isSandbox: known ? known.isSandbox : false };
-  const r = policies.check(policy, org, params.testLevel);
+  params.username = known ? known.username : (/@/.test(params.targetOrg) ? params.targetOrg : null);
+  const r = policies.check(policy, org, params.testLevel, { environment: params.environment, username: params.username, hasApex: !!(pkg && pkg.result.hasApex) });
+  params.coverageRule = r.coverage != null ? r.coverage : null;
+  if (r.environmentRule && !quiet) output.appendLine('policy: the ' + params.environment + ' stage rules from ' + source + ' apply' +
+    (r.environmentRule.requiredTargetUser.length ? ' - validate as ' + r.environmentRule.requiredTargetUser.join(' or ') : '') +
+    (r.environmentRule.minimumTestLevel ? ' - tests at least ' + r.environmentRule.minimumTestLevel : '') + (r.coverage != null ? ' - coverage ' + r.coverage + '%' : ''));
   if (!r.allowed) {
+    emit({ step: 'error', message: 'Not checked: ' + r.reason + '.' });
     const pick = await vscode.window.showErrorMessage('Validation blocked: ' + r.reason + '.', { modal: true, detail: 'Rule from ' + source + '.' }, 'Open policy');
     if (pick === 'Open policy') {
       if (source === 'copado-policy.json') vscode.window.showTextDocument(vscode.Uri.file(path.join(root, 'copado-policy.json')));
@@ -384,7 +275,7 @@ async function applyPolicy(c, root, params) {
     }
     return false;
   }
-  if (r.raisedFrom) {
+  if (r.raisedFrom && !quiet) {
     let level = r.testLevel;
     if (level === 'RunSpecifiedTests' && !(params.tests || []).length) level = 'RunLocalTests';   // specified tests need test classes
     output.appendLine('policy: tests raised from ' + r.raisedFrom + ' to ' + level + ' for ' + params.targetOrg + ' (rule "' + r.rule + '" in ' + source + ')');
@@ -406,58 +297,10 @@ async function cmdCreatePolicy() {
     allowProduction: g.allowProduction,
     minimumTestLevel: Object.keys(g.minimumTestLevel).length ? g.minimumTestLevel : { production: 'RunLocalTests' }
   };
+  if (Object.keys(g.environments || {}).length) body.environments = g.environments;
   fs.writeFileSync(file, JSON.stringify(body, null, 2) + '\n');
   await vscode.window.showTextDocument(vscode.Uri.file(file));
   vscode.window.showInformationMessage('copado-policy.json created. Adjust it, then commit it - it applies to everyone who opens this project.');
-}
-
-/**
- * Fetches the committed version of each selective commit still waiting for a
- * download, straight from the Copado org, into the drop folder. Returns true
- * if anything was downloaded.
- */
-async function downloadSelective(pkg, fromValidation) {
-  requireTrust('Downloading from Copado runs the Salesforce CLI');
-  if (!pkg || !pkg.result.selective || !pkg.result.selective.size) {
-    if (!fromValidation) vscode.window.showInformationMessage('The current package has no selective commits.');
-    return false;
-  }
-  const c = rc();
-  if (!c.copadoOrg) {
-    const p = await vscode.window.showInformationMessage('Set the Copado org first - the alias of the org where Copado runs, logged in with the Salesforce CLI.', 'Open settings');
-    if (p) vscode.commands.executeCommand('workbench.action.openSettings', 'cmr.copado.org');
-    return false;
-  }
-  refreshSelective(pkg);
-  const o = selectiveSetup(pkg);
-  const wanted = pkg.selectivePlan.items.filter(i => i.status === 'missing' && i.copadoFile && !(pkg.selectiveImported && pkg.selectiveImported.has(i.type + '|' + i.name)));
-  if (!wanted.length) {
-    if (!fromValidation) vscode.window.showInformationMessage('Nothing to download - every selective commit already has its file, or has no Copado file id.');
-    return false;
-  }
-  fs.mkdirSync(o.folder, { recursive: true });
-  const done = [], failed = [];
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Downloading from Copado (' + c.copadoOrg + ')' }, async progress => {
-    for (const it of wanted) {
-      progress.report({ message: it.type + ' ' + it.name });
-      try {
-        const body = await sfcli.selectiveFileGet(c.sfPath, c.copadoOrg, it.copadoFile, pkg.version, o.root);
-        // the name Copado gives it: its hash, with "/" made file-safe
-        const name = it.hash.replace(/\//g, '_') + '.xml';
-        fs.writeFileSync(path.join(o.folder, name), body);
-        done.push(it);
-        output.appendLine('  copado: ' + it.type + ' ' + it.name + ' \u2190 file ' + it.copadoFile + '  \u2192  ' + name);
-      } catch (e) {
-        failed.push(it.type + ' ' + it.name + ': ' + e.message);
-        output.appendLine('  copado: ' + it.type + ' ' + it.name + ' failed - ' + e.message);
-      }
-    }
-  });
-  refreshSelective(pkg);
-  refreshAll();
-  if (failed.length) vscode.window.showWarningMessage('Downloaded ' + done.length + ' of ' + wanted.length + ' from Copado.', { modal: fromValidation, detail: failed.join('\n') });
-  else if (!fromValidation) vscode.window.showInformationMessage('Downloaded ' + done.length + ' selective commit file' + (done.length === 1 ? '' : 's') + ' from Copado into ' + path.basename(o.folder) + '. Import them, or validate.');
-  return done.length > 0;
 }
 
 /**
@@ -484,8 +327,8 @@ async function cmdInspectStory() {
   const root = projectOrFolder();
   const api = copadoApi(c, root, (await apiVersion()) || '62.0');
   let result;
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Inspecting ' + input + ' in Copado (' + c.copadoOrg + ')', cancellable: false }, async progress => {
-    progress.report({ message: 'reading the story, its commits, promotions and files' });
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Looking up ' + input + ' in Copado', cancellable: false }, async progress => {
+    progress.report({ message: 'Reading the story and everything attached to it' });
     let localOrgs = [];
     try { localOrgs = await orgList(c, root); } catch (e) { /* no matching then */ }
     result = await inspectLib.inspect(ref, api, { localOrgs });
@@ -503,6 +346,7 @@ async function cmdInspectStory() {
 /** Read-only access to the Copado org through the Salesforce CLI. */
 const clients = new Map();
 function copadoApi(c, root, version) {
+  if (deps.copadoApi) return deps.copadoApi(c, root, version);   // the tests' stand-in Copado org
   const key = c.copadoOrg + '|' + version + '|' + root;
   if (!clients.has(key)) {
     const folder = require('./src/paths').insideProject(vscode.workspace.getConfiguration('cmr').get('storage.folder', '.copado'), '.copado');
@@ -512,30 +356,33 @@ function copadoApi(c, root, version) {
   return clients.get(key);
 }
 
+/** True when the Copado org is set; otherwise says how to set it. */
+function needCopado(c) {
+  if (c.copadoOrg) return true;
+  vscode.window.showInformationMessage('Set the Copado org first - the alias of the org where Copado runs, logged in with the Salesforce CLI.', 'Open settings')
+    .then(p => { if (p) vscode.commands.executeCommand('workbench.action.openSettings', 'cmr.copado.org'); });
+  return false;
+}
+
 /**
- * Phase 1: everything for one user story, straight from Copado - its commit
- * file becomes the package, its selective-commit files go to the drop folder,
- * and its environment and the next one in the pipeline are matched to your CLI
- * logins - then the usual validation, with both orgs preselected.
+ * Everything for one user story, straight from Copado: its commit file
+ * becomes the package (with the usual pre-flight checks), and it is validated
+ * from its feature branch against the next environment in the pipeline.
  */
 async function cmdPrepareStory() {
   requireTrust('Preparing a story runs the Salesforce CLI');
   const c = rc();
-  if (!c.copadoOrg) {
-    const p = await vscode.window.showInformationMessage('Set the Copado org first - the alias of the org where Copado runs, logged in with the Salesforce CLI.', 'Open settings');
-    if (p) vscode.commands.executeCommand('workbench.action.openSettings', 'cmr.copado.org');
-    return;
-  }
+  if (!needCopado(c)) return;
   const input = await vscode.window.showInputBox({ title: 'Prepare a user story from Copado', prompt: 'User story number or record id', placeHolder: 'US-0012345',
     ignoreFocusOut: true, validateInput: v => inspectLib.parseStoryRef(v) ? null : 'A story number such as US-0012345 or 12345, or a record id' });
   if (!input) return;
   const root = projectRoot();
   const api = copadoApi(c, root, (await apiVersion()) || '62.0');
-  let localOrgs = [];
   let r;
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Preparing ' + input + ' from Copado (' + c.copadoOrg + ')' }, async progress => {
-    progress.report({ message: 'finding the story, its commit file and selective-commit files' });
-    try { localOrgs = await orgList(c, root); } catch (e) { /* asked for below */ }
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Getting ' + input + ' ready' }, async progress => {
+    progress.report({ message: 'Finding what the story changed' });
+    let localOrgs = [];
+    try { localOrgs = await orgList(c, root); } catch (e) { /* matched later */ }
     r = await inspectLib.inspect(inspectLib.parseStoryRef(input), api, { localOrgs, keepContent: true, only: ['User Story'], peekLimit: 100 });
   });
   const story = r.story;
@@ -543,7 +390,6 @@ async function cmdPrepareStory() {
   if (!commits.length) {
     throw new Error('No Copado commit file on ' + story.name + '. Commit the story in Copado first - "Copado: Inspect User Story in Copado" shows what the story holds.');
   }
-  // the commit file, kept with the story; the selective files, into the drop folder
   const storyDir = vscode.Uri.joinPath(await deps.storageDir('stories'), story.name);
   await vscode.workspace.fs.createDirectory(storyDir);
   const uris = [];
@@ -552,26 +398,13 @@ async function cmdPrepareStory() {
     await vscode.workspace.fs.writeFile(uri, f.content);
     uris.push(uri);
   }
-  const selectiveFiles = r.files.filter(f => f.content && f.what.kind === 'selective');
-  if (selectiveFiles.length) {
-    const folder = path.join(root, require('./src/paths').insideProject(c.selFolder, 'conflict/selective'));
-    fs.mkdirSync(folder, { recursive: true });
-    for (const f of selectiveFiles) fs.writeFileSync(path.join(folder, String(f.name).replace(/[\\/:*?"<>|]/g, '_')), f.content);
-  }
-  output.appendLine('copado: ' + story.name + ' - ' + commits.length + ' commit file' + (commits.length === 1 ? '' : 's') + ', ' + selectiveFiles.length + ' selective-commit file' + (selectiveFiles.length === 1 ? '' : 's') + ' from Copado');
-
-  // the package, from the commit file - pre-flight checks and the selective plan as usual
+  output.appendLine('copado: ' + story.name + ' - ' + commits.length + ' commit file' + (commits.length === 1 ? '' : 's') + ' from Copado');
   await cmdPackage(uris[0], uris);
   if (!state.pkg) return;
-
-  // the orgs: the story's environment, and where the pipeline sends it next
-  const source = await orgForEnvironment(c, r, story.environmentId, story.environment, localOrgs, 'source - where the story was built');
-  const target = story.next ? await orgForEnvironment(c, r, story.next.id, story.next.name, localOrgs, 'target - the next environment in the pipeline') : null;
-  const go = await vscode.window.showInformationMessage(
-    story.name + ' is prepared: ' + state.pkg.result.counts.deploy + ' components to deploy' + (selectiveFiles.length ? ', ' + selectiveFiles.length + ' selective-commit files ready to import' : '') + '.',
-    { detail: (story.title ? story.title + '\n' : '') + 'Validate: ' + (source || 'choose') + '  \u2192  ' + (target || 'choose') + (story.next ? '' : '\n(No next environment found in the pipeline.)') },
-    'Validate now');
-  if (go === 'Validate now') await cmdValidate({ sourceOrg: source, targetOrg: target });
+  const go = await vscode.window.showInformationMessage(story.name + ' is prepared: ' + state.pkg.result.counts.deploy + ' components to deploy.',
+    { detail: (story.title ? story.title + '\n' : '') + 'Validate from its feature branch against ' + (story.next ? story.next.name + ', the next environment in the pipeline.' : 'an org you choose (no next environment found in the pipeline).') },
+    'Validate from feature branch');
+  if (go === 'Validate from feature branch') await validateFromBranch(story.name);
 }
 
 /**
@@ -583,8 +416,8 @@ async function orgForEnvironment(c, r, envId, envName, localOrgs, role) {
   if (!envName) return null;
   const remembered = c.environmentOrgs && c.environmentOrgs[envName];
   if (remembered) return remembered;
-  const cred = r.credentials.find(x => x.environmentId === envId || x.environment === envName);
-  if (cred && cred.localAlias) return cred.localAlias;
+  const cred = (r.credentials || []).find(x => x.localAlias && (x.environmentId === envId || x.environment === envName));
+  if (cred) return cred.localAlias;
   if (!localOrgs.length) {
     vscode.window.showWarningMessage('No Salesforce CLI login for the Copado environment ' + envName + '. Log in with: sf org login web --alias <name>');
     return null;
@@ -598,15 +431,250 @@ async function orgForEnvironment(c, r, envId, envName, localOrgs, role) {
   return value;
 }
 
-async function cmdUndoSelective() {
-  const storage = (await deps.storageDir()).fsPath;
-  const record = selective.undo(storage);
-  if (!record) { vscode.window.showInformationMessage('There is no selective import to undo.'); return; }
-  if (state.pkg && state.pkg.selectiveImported) for (const it of record.items) state.pkg.selectiveImported.delete(it.type + '|' + it.name);
-  if (state.pkg) refreshSelective(state.pkg);
-  refreshAll();
-  vscode.window.showInformationMessage('Undid the selective import of ' + record.items.length + ' file' + (record.items.length === 1 ? '' : 's') + ': the project files are restored and the downloads are back in the drop folder.');
+/** The Copado environment a CLI org stands for, from cmr.copado.environmentOrgs. */
+function environmentOf(c, org) {
+  const hit = Object.entries(c.environmentOrgs || {}).find(([, v]) => v && org && String(v).toLowerCase() === String(org).toLowerCase());
+  return hit ? hit[0] : null;
 }
+
+/** The org credentials of some environments, each matched to a CLI login by username. */
+async function credentialsFor(api, envIds, localOrgs) {
+  const ids = envIds.filter(Boolean);
+  if (!ids.length) return [];
+  const rows = await inspectLib.robustQuery(api, ['Name', 'copado__Username__c', 'copado__Environment__c', 'copado__Environment__r.Name'], 'copado__Org__c',
+    'copado__Environment__c IN (' + ids.map(i => "'" + String(i).replace(/[^A-Za-z0-9]/g, '') + "'").join(', ') + ')', 'LIMIT 200', []);
+  return rows.map(r => {
+    const user = r.copado__Username__c;
+    const local = (localOrgs || []).find(l => user && l.username && l.username.toLowerCase() === String(user).toLowerCase());
+    return { name: r.Name, environment: (r.copado__Environment__r || {}).Name, environmentId: r.copado__Environment__c, username: user, localAlias: local ? (local.alias || local.username) : null };
+  });
+}
+
+/* ---------------------------------------------------------- the repository */
+
+const tokenKey = host => 'cmr.repoToken:' + host;
+
+/**
+ * Connects the repository: address, provider, token - and the same check as
+ * by hand. With an address from Copado's Git Repository record, only the
+ * token is asked for. Returns true when connected.
+ */
+async function cmdConnectRepo(prefill) {
+  const c = rc();
+  const known = prefill && prefill.url && repoHost.parseRepoUrl(prefill.url, c.repoProvider) ? prefill.url : null;
+  const url = known || await vscode.window.showInputBox({ title: 'Connect the repository Copado commits to', prompt: 'The repository\u2019s address - as in its clone link or Copado\u2019s Git Repository record',
+    value: (prefill && prefill.url) || c.repoUrl, placeHolder: 'https://dev.azure.com/org/project/_git/repo, https://github.com/owner/repo, https://gitlab.com/group/repo, https://bitbucket.org/workspace/repo',
+    ignoreFocusOut: true, validateInput: v => repoHost.parseRepoUrl(v, c.repoProvider) ? null : 'Not a recognised Azure DevOps, GitHub, GitLab or Bitbucket address - for a self-hosted server, set Repository \u203a Provider first' });
+  if (!url) return false;
+  const repo = repoHost.parseRepoUrl(url, c.repoProvider);
+  const hint = { azure: 'a personal access token with Code: Read', github: 'a fine-grained token with Contents: Read-only', gitlab: 'a personal or project access token with read_repository',
+    bitbucket: 'an API token with read:repository:bitbucket, as your-email:token - or a repository access token' }[repo.provider];
+  const token = await vscode.window.showInputBox({ title: 'Token for ' + repo.repo + ' on ' + repo.host + (known ? ' (the address is from ' + prefill.from + ')' : ''),
+    prompt: 'Read-only: ' + hint + '. Kept in VS Code\u2019s encrypted secret storage.', password: true, ignoreFocusOut: true });
+  if (!token) return false;
+  const res = await repoHost.createHost(repo, token.trim()).check();
+  if (!res.ok) { vscode.window.showErrorMessage('Not connected: ' + res.message + '.'); return false; }
+  await secrets.store(tokenKey(repo.host), token.trim());
+  await vscode.workspace.getConfiguration('cmr').update('repo.url', url.trim(), vscode.workspace.workspaceFolders ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
+  output.appendLine('repository: connected to ' + repo.provider + ' ' + repo.host + ' (' + repo.repo + ') - read-only' + (known ? ', address from ' + prefill.from : ''));
+  vscode.window.showInformationMessage('Connected to ' + repo.repo + ' on ' + repo.host + ': ' + res.message + '.');
+  return true;
+}
+
+async function cmdForgetRepo() {
+  const repo = repoHost.parseRepoUrl(rc().repoUrl, rc().repoProvider);
+  if (!repo) { vscode.window.showInformationMessage('No repository is connected.'); return; }
+  await secrets.delete(tokenKey(repo.host));
+  vscode.window.showInformationMessage('The token for ' + repo.host + ' is removed from this machine.');
+}
+
+/**
+ * The connected repository and its token. When none is connected, the
+ * address is read from Copado's Git Repository record of the pipeline, so only
+ * the token needs asking for. o: { api, pipelineId, toId, fromId, envId }.
+ */
+async function ensureRepo(o) {
+  const c = rc();
+  const parse = () => repoHost.parseRepoUrl(rc().repoUrl, rc().repoProvider);
+  let repo = parse();
+  let token = repo ? await secrets.get(tokenKey(repo.host)) : null;
+  if (repo && token) return { repo, token };
+  let fromCopado = repo ? { url: c.repoUrl, from: 'settings' } : null;
+  if (!repo && o && o.api) {
+    try {
+      const pid = o.pipelineId || await lifecycle.pipelineIdFor(o.api, o, []);
+      const pl = pid ? (await lifecycle.pipelines(o.api)).find(p => p.id === pid) : null;
+      const rec = pl && pl.repoId ? await lifecycle.repositoryUri(o.api, pl.repoId) : null;
+      const url = rec ? repoHost.fromCopadoUri(rec.uri) : null;
+      if (url) fromCopado = { url, from: 'Copado\u2019s Git Repository record ' + rec.name };
+      else if (rec) output.appendLine('repository: Copado\u2019s Git Repository record ' + rec.name + ' has the address "' + rec.uri + '", which is not one the connectors read');
+    } catch (e) { output.appendLine('repository: could not read its address from Copado - ' + e.message); }
+  }
+  const msg = fromCopado && fromCopado.from !== 'settings' ? 'Connect ' + fromCopado.url + ' - the address is from Copado, only a read-only token is needed.' : 'Connect the repository first - read-only, with a token.';
+  const p = await vscode.window.showInformationMessage(msg, 'Connect Repository');
+  if (p !== 'Connect Repository') return null;
+  if (!(await cmdConnectRepo(fromCopado))) return null;
+  repo = parse();
+  token = repo ? await secrets.get(tokenKey(repo.host)) : null;
+  return repo && token ? { repo, token } : null;
+}
+
+/**
+ * Validates a story from its feature branch: the commit file gives the
+ * components, the branch gives their files exactly as Copado committed them,
+ * in a separate check workspace - no retrieve, the project untouched. The
+ * branch is the one Copado's records name when they do, else the pattern.
+ */
+async function validateFromBranch(storyInput) {
+  requireTrust('Validating from the branch runs the Salesforce CLI');
+  const c = rc();
+  if (!needCopado(c)) return;
+  const input = storyInput || await vscode.window.showInputBox({ title: 'Validate a user story from its feature branch', prompt: 'User story number', placeHolder: 'US-0012345', ignoreFocusOut: true,
+    validateInput: v => inspectLib.parseStoryRef(v) ? null : 'A story number such as US-0012345' });
+  if (!input) return;
+  const root = projectRoot();
+  const version = (await apiVersion()) || '62.0';
+  const api = copadoApi(c, root, version);
+  let localOrgs = [];
+  let r, fb, hotfix = false;
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Getting the changes of ' + input + ' from Copado' }, async () => {
+    try { localOrgs = await orgList(c, root); } catch (e) { /* asked below */ }
+    r = await inspectLib.inspect(inspectLib.parseStoryRef(input), api, { localOrgs, keepContent: true, only: ['User Story'], peekLimit: 100 });
+    fb = await lifecycle.featureBranch(api, { id: r.story.id, name: r.story.name }, c.featureBranch);
+    if (r.story.pipelineId && r.story.baseBranch) {
+      try { hotfix = lifecycle.isHotfix(r.story, await lifecycle.pipeline(api, r.story.pipelineId)); } catch (e) { /* not a hotfix then */ }
+    }
+  });
+  const rows = [].concat(...r.files.filter(f => f.content && f.what.kind === 'commit-json').map(f => JSON.parse(f.content.toString('utf8'))));
+  if (!rows.length) throw new Error('No Copado commit file on ' + r.story.name + ' - commit the story in Copado first.');
+  output.appendLine('branch check: ' + r.story.name + (hotfix ? ' is a hotfix (based on the production branch)' : '') + ' - its branch is ' + fb.branch + ', from ' + fb.source);
+  const target = r.story.next ? await orgForEnvironment(c, r, r.story.next.id, r.story.next.name, localOrgs, 'target - validated against, nothing is deployed') : null;
+  await runBranchCheck({ rows, branches: [fb.branch], name: r.story.name, target, label: r.story.name + (hotfix ? ' (hotfix)' : ''), environment: r.story.next ? r.story.next.name : null,
+    api, pipelineId: r.story.pipelineId, envId: r.story.environmentId, meta: { source: hotfix ? 'hotfix branch' : 'feature branch', stories: [r.story.name] } });
+}
+
+/**
+ * Validates exactly what a promotion deploys: its components, read from the
+ * promotion branch Copado builds (promotion/{promotion}), check-only against
+ * its destination org. p: { id, name, to, toId, from, fromId, pipelineId }.
+ */
+async function validatePromotionBranch(p) {
+  requireTrust('Validating the promotion branch runs the Salesforce CLI');
+  const c = rc();
+  if (!needCopado(c)) return;
+  const root = projectRoot();
+  const api = copadoApi(c, root, (await apiVersion()) || '62.0');
+  const branch = String(c.promotionBranch || 'promotion/{promotion}').split('{promotion}').join(p.name);
+  let stories = [], comp, localOrgs = [];
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Getting the changes of ' + p.name + ' from Copado' }, async () => {
+    try { localOrgs = await orgList(c, root); } catch (e) { /* asked below */ }
+    stories = await lifecycle.promotionStories(api, p.id);
+    comp = await lifecycle.promotionComponents(api, p.id, stories);
+  });
+  if (!comp.rows.length) throw new Error('No component list for ' + p.name + ': Copado attaches "Copado Promotion changes" to a promotion, and none of its stories has a commit file.');
+  output.appendLine('promotion branch: ' + p.name + ' - ' + branch + ', ' + comp.rows.length + ' component row(s) from the ' + comp.source);
+  const creds = await credentialsFor(api, [p.toId], localOrgs);
+  const target = await orgForEnvironment(c, { credentials: creds }, p.toId, p.to, localOrgs, 'target - validated against, nothing is deployed');
+  await runBranchCheck({ rows: comp.rows, branches: [branch], name: p.name + '-branch', target, label: 'promotion branch of ' + p.name, environment: p.to,
+    api, pipelineId: p.pipelineId, toId: p.toId, fromId: p.fromId, requireBranch: true,
+    missingBranch: branch + ' is not in the repository yet - Copado creates it when the promotion merges its stories. The branch name comes from Repository \u203a Promotion branch (now "' + c.promotionBranch + '").',
+    meta: { source: 'promotion branch', promotion: p.name, stories: stories.map(s => s.name) } });
+}
+
+/**
+ * Builds a check workspace from one or more branches - each component from the
+ * first branch that has it - puts any given files on top, and validates it
+ * check-only. Shared by the story route, the promotion branch and the pre-check.
+ * o: { rows, branches, name, overlay: [{ rel, file }], target, label, environment, api, pipelineId, toId, requireBranch, missingBranch, meta }
+ */
+async function runBranchCheck(o) {
+  // the page follows the whole run - the files read from the branch too, not only the check with Salesforce
+  const prevHooks = runHooks, prevQuiet = runQuiet;
+  if (o.onEvent) { runHooks = o.onEvent; runQuiet = !!o.quiet; }
+  try { return await branchCheckOnce(o); }
+  finally { runHooks = prevHooks; runQuiet = prevQuiet; }
+}
+
+async function branchCheckOnce(o) {
+  const c = rc();
+  const root = projectRoot();
+  const version = (await apiVersion()) || '62.0';
+  const conn = await ensureRepo({ api: o.api || (c.copadoOrg ? copadoApi(c, root, version) : null), pipelineId: o.pipelineId, toId: o.toId, fromId: o.fromId, envId: o.envId });
+  if (!conn) return;
+  const { repo, token } = conn;
+  const host = repoHost.createHost(repo, token);
+  // the branch already holds the committed versions: selective commits deploy as they are; retrieve-only items are not deployed
+  const result = manifest.build(manifest.parseCommit(JSON.stringify(o.rows), 'commit'), { actions: Object.assign({}, c.actions, { SelectiveCommit: 'deploy', RetrieveOnly: 'ignore' }) });
+  const dir = path.join((await deps.storageDir('branch-check')).fsPath, o.name.replace(/[^\w.-]/g, '_'));
+  let fallback = null;
+  try { fallback = fs.readFileSync(path.join(root, 'sfdx-project.json'), 'utf8'); } catch (e) { /* default */ }
+  const written = [];
+  let remaining = result.deploy;
+  const absent = [];
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Getting the files from the repository' }, async progress => {
+    let first = true;
+    for (let i = 0; i < o.branches.length && remaining.size; i++) {
+      progress.report({ message: 'Reading ' + o.branches[i] });
+      emit({ step: 'files', state: 'running', message: 'Reading the files from ' + o.branches[i] });
+      let exists = true;
+      try { exists = await host.branchExists(o.branches[i]); } catch (e) { output.appendLine('branch check: could not look up ' + o.branches[i] + ' - ' + e.message); }
+      if (!exists) { absent.push(o.branches[i]); continue; }
+      const b = await branchCheck.buildWorkspace(host, o.branches[i], remaining, dir, { fallbackProject: fallback, keep: !first });
+      first = false;
+      written.push(...b.written);
+      const left = new Map();
+      for (const m of b.missing) { const k = m.indexOf(' '); const t = m.slice(0, k), n = m.slice(k + 1).replace(/ \(type not supported\)$/, ''); (left.get(t) || left.set(t, new Set()).get(t)).add(n); }
+      remaining = left;
+    }
+  });
+  if (absent.length) output.appendLine('branch check: not in ' + repo.repo + ': ' + absent.join(', '));
+  if (absent.length === o.branches.length) {
+    throw new Error(o.missingBranch || (absent.join(', ') + ' ' + (absent.length === 1 ? 'is' : 'are') + ' not in ' + repo.repo + '. Check Repository \u203a Feature branch (now "' + c.featureBranch + '").'));
+  }
+  if (o.requireBranch && absent.length) throw new Error(o.missingBranch || absent.join(', ') + ' is not in ' + repo.repo + '.');
+  // files to put on top - the pre-check's resolutions
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of o.overlay || []) {
+    const to = path.join(dir, ...f.rel.split('/'));
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(f.file, to);
+    const comp = require('./src/promotionWork').componentOf(f.rel);
+    if (comp && remaining.get(comp.type)) { remaining.get(comp.type).delete(comp.name); if (!remaining.get(comp.type).size) remaining.delete(comp.type); }
+  }
+  // files not resolved yet are left out of the check entirely - never taken from a branch in their place
+  const leftOut = [];
+  for (const rel of o.exclude || []) {
+    const comp = require('./src/promotionWork').componentOf(rel);
+    if (!comp) continue;
+    const set = result.deploy.get(comp.type);
+    if (set && set.delete(comp.name)) { leftOut.push(comp.type + ' ' + comp.name); if (!set.size) result.deploy.delete(comp.type); }
+    if (remaining.get(comp.type)) { remaining.get(comp.type).delete(comp.name); if (!remaining.get(comp.type).size) remaining.delete(comp.type); }
+  }
+  const missing = [...remaining].flatMap(([t, ns]) => [...ns].map(n => t + ' ' + n)).sort();
+  emit({ step: 'files', state: 'done', fromBranches: written.length, resolved: (o.overlay || []).length, leftOut, missing, branches: o.branches.filter(b => !absent.includes(b)),
+    message: written.length + ' file' + (written.length === 1 ? '' : 's') + ' from the branch' + ((o.overlay || []).length ? ', ' + o.overlay.length + ' resolved' : '') + (leftOut.length ? ', ' + leftOut.length + ' left out' : '') });
+  const used = o.branches.filter(b => !absent.includes(b));
+  output.appendLine('branch check: ' + o.label + ' - ' + written.length + ' file(s) from ' + repo.repo + ' (' + used.join(', ') + ')' +
+    ((o.overlay || []).length ? ', ' + o.overlay.length + ' resolved file(s) on top' : '') + (missing.length ? '; not on the branch: ' + missing.join(', ') : ''));
+  if (!written.length && !(o.overlay || []).length) throw new Error('Nothing of ' + o.label + ' was found on ' + used.join(', ') + '. Check Repository \u203a Feature branch (now "' + c.featureBranch + '").');
+  if (missing.length) {
+    const go = await vscode.window.showWarningMessage(missing.length + ' component(s) are not on ' + used.join(', ') + '.', { modal: true, detail: missing.join('\n') + '\n\nValidate the rest?' }, 'Validate the rest');
+    if (go !== 'Validate the rest') return;
+    for (const [t, ns] of remaining) { const set = result.deploy.get(t); if (set) { ns.forEach(n => set.delete(n)); if (!set.size) result.deploy.delete(t); } }
+  }
+  fs.mkdirSync(path.join(dir, 'manifest'), { recursive: true });
+  const deployFile = path.join(dir, 'manifest', 'package.xml');
+  fs.writeFileSync(deployFile, manifest.toPackageXml(result.deploy, version));
+  let destructive = null;
+  if (result.destructive.size) { destructive = path.join(dir, 'manifest', 'destructiveChanges.xml'); fs.writeFileSync(destructive, manifest.toPackageXml(result.destructive, version)); }
+  result.counts.deploy = [...result.deploy.values()].reduce((n, x) => n + x.size, 0);
+  if (!result.counts.deploy) throw new Error('The package for ' + o.label + ' is empty - nothing in it can be deployed. Check the commit or promotion change list.');
+  output.appendLine('branch check: package.xml with ' + result.counts.deploy + ' component(s) - ' + [...result.deploy].map(([t, n]) => t + ' ' + n.size).join(', '));
+  const pkg = { result, version, sources: [], folder: vscode.Uri.file(path.dirname(deployFile)), changed: false, workspace: dir,
+    files: { deploy: vscode.Uri.file(deployFile), retrieve: vscode.Uri.file(deployFile), destructive: destructive ? vscode.Uri.file(destructive) : null } };
+  await cmdValidate({ root: dir, pkg, mode: 'workspace', targetOrg: o.target, label: o.label, environment: o.environment, meta: Object.assign({ branches: used }, o.meta || {}), onEvent: o.onEvent, quiet: o.quiet });
+}
+
 
 async function apiVersion() {
   const c = rc();
@@ -660,21 +728,20 @@ async function cmdBranchCheck() {
   }
 
   const analysis = await vscode.window.withProgress({
-    location: vscode.ProgressLocation.Notification, title: 'Comparing ' + incoming + ' into ' + target, cancellable: false
+    location: vscode.ProgressLocation.Notification, title: 'Comparing ' + incoming + ' with ' + target, cancellable: false
   }, async progress => {
     if (c.fetchFirst) {
-      progress.report({ message: 'fetching ' + c.remote });
+      progress.report({ message: 'Getting the latest from the server' });
       try { await gitops.fetch(root, c.remote); } catch (e) { output.appendLine('Fetch skipped: ' + e.message); }
     }
-    progress.report({ message: 'computing the merge (read-only)' });
+    progress.report({ message: 'Working out what would conflict \u2013 nothing is changed' });
     return gitops.analyse(root, target, incoming, {
       remote: c.remote, includeBothChanged: c.includeBothChanged, metadataOnly: c.metadataOnly
     });
   });
 
   state.branch = { root, analysis, current: await gitops.currentBranch(root), resolved: new Set() };
-  refreshAll();
-  vscode.commands.executeCommand('cmrBranchView.focus');
+  reveal('cmrBranchView');
 
   const conflicts = analysis.files.filter(f => f.status === 'conflict').length;
   const both = analysis.files.length - conflicts;
@@ -761,33 +828,35 @@ function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 /* ============================================================ validation */
 
 async function cmdValidate(options) {
+  const o = options || {};
+  runHooks = o.onEvent || null;
+  runQuiet = !!o.quiet;
+  try { return await validateOnce(o); }
+  finally { runHooks = null; runQuiet = false; }
+}
+
+async function validateOnce(options) {
   requireTrust('Validation runs the Salesforce CLI in this folder');
   const c = rc();
-  const root = projectRoot();
+  const root = options.root || projectRoot();
   const rerun = options.rerun && state.validation;
+  if (rerun && !state.validation.pkg) {
+    vscode.window.showInformationMessage('Re-validate repeats a validation run from here - this result came from ' + (state.validation.params.label || 'Copado') + '.');
+    return;
+  }
   const params = rerun ? Object.assign({}, state.validation.params) : {};
   // re-validating checks the project as it is now - it never retrieves over your fixes
   if (rerun) params.mode = 'workspace';
-  if (!rerun && options.overlay) params.overlay = options.overlay;
+  if (!rerun) { params.root = options.root || null; params.label = options.label || null; params.environment = options.environment || null; params.meta = options.meta || null; }
 
   // The CLI is slow to start, so its checks begin now, in the background,
   // while you answer the first questions.
   const cliCheck = cliVersion(c);
   if (!rerun) orgList(c, root).catch(() => { /* reported when the picker needs it */ });
 
-  if (!rerun) {
-    params.mode = options.mode || c.validateSource;
-    if (params.mode === 'ask') {
-      const pick = await vscode.window.showQuickPick([
-        { label: '$(cloud-download) Retrieve into this project, then validate', detail: 'sf project retrieve start with the package - overwrites the matching files in your package directory - then validates the project.', mode: 'retrieve' },
-        { label: '$(file-code) Validate this project as it is', detail: 'No retrieve. For example after resolving branch conflicts or applying fixes.', mode: 'workspace' }
-      ], { placeHolder: 'What should be validated?', ignoreFocusOut: true });
-      if (!pick) return;
-      params.mode = pick.mode;
-    }
-  }
+  if (!rerun) params.mode = 'workspace';
 
-  const cli = await busy(cliCheck, 'Checking the Salesforce CLI\u2026');
+  const cli = await busy(cliCheck, 'Making sure the Salesforce CLI is ready');
   if (!cli) {
     const p = await vscode.window.showErrorMessage(
       'The Salesforce CLI was not found (' + c.sfPath + '). Install it, or set its path in settings.', 'Open settings');
@@ -795,7 +864,7 @@ async function cmdValidate(options) {
     return;
   }
 
-  let pkg = state.pkg;
+  let pkg = options.pkg || (rerun ? state.validation.pkg : null) || state.pkg;
   if (!pkg) {
     const choice = await vscode.window.showQuickPick([
       { label: '$(json) From Copado commit JSON', how: 'json' },
@@ -815,12 +884,11 @@ async function cmdValidate(options) {
 
   if (!rerun) {
     const load = refresh => orgList(c, root, refresh);
-    if (params.mode === 'retrieve') {
-      params.sourceOrg = await pickOrg(load, options.sourceOrg || c.sourceOrg, 'Source org - where the components are retrieved from', c.confirmOrgs);
-      if (!params.sourceOrg) return;
-    }
-    params.targetOrg = await pickOrg(load, options.targetOrg || c.targetOrg, 'Target org - validated against, nothing is deployed', c.confirmOrgs);
+    params.targetOrg = await pickOrg(load, options.targetOrg || c.targetOrg, 'Target org - validated against, nothing is deployed' + (params.environment ? ' (Copado environment ' + params.environment + ')' : ''), c.confirmOrgs);
     if (!params.targetOrg) return;
+    if (!params.environment) params.environment = environmentOf(c, params.targetOrg);
+    // a target the policy refuses is said before any question about tests
+    if (!(await applyPolicy(c, projectRoot(), Object.assign({}, params, { testLevel: 'RunAllTestsInOrg' }), pkg, true))) return;
     const orgs = await load(false);
     const t = orgs.find(o => o.username === params.targetOrg || o.alias === params.targetOrg);
     if (t && !t.isSandbox && c.warnOnProduction) {
@@ -835,19 +903,74 @@ async function cmdValidate(options) {
     params.tests = tests.tests;
   }
 
-  if (!(await applyPolicy(c, root, params))) return;
-  if (pkg.result.selective && pkg.result.selective.size && (await importSelective(pkg, true)) === 'stop') return;
+  // the team policy lives in the project, whichever workspace is validated
+  if (!(await applyPolicy(c, projectRoot(), params, pkg))) return;
   if (!(await saveBeforeValidating(root))) return;
-  const run = await vscode.window.withProgress({
-    location: vscode.ProgressLocation.Notification,
-    title: (params.mode === 'retrieve' ? 'Retrieving and validating against ' : 'Validating against ') + params.targetOrg, cancellable: true
-  }, (progress, token) => execute(pkg, params, progress, token));
-  if (!run) return;
+  announce({ running: true, label: params.label || 'the project', target: params.targetOrg, username: params.username, environment: params.environment, at: new Date().toISOString() });
+  let run;
+  try {
+    run = await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification, title: 'Validating against ' + (params.environment || params.targetOrg) + (params.testLevel === 'NoTestRun' ? '' : ', with tests'), cancellable: true
+    }, (progress, token) => execute(pkg, params, progress, token));
+  } catch (e) { announce(null); throw e; }
+  if (!run) { announce(null); return; }
 
-  state.validation = Object.assign(run, { params });
+  state.validation = Object.assign(run, { params, pkg });
+  coverageCheck(run, pkg, params);
   pkg.changed = false;
   publish(run);
+  await record(run, pkg, params);
+  const r = run.result, below = run.coverageCheck ? run.coverageCheck.below : [];
+  emit({ step: 'done', success: !!r.success && !below.length,
+    failures: run.failures.slice(0, 200).map(f => ({ type: f.type, fullName: f.fullName, problem: f.problem, line: f.line || null, file: f.fileUri ? path.relative(params.root || projectRoot(), f.fileUri.fsPath).split(path.sep).join('/') : null,
+      fixes: (f.suggestions || []).map(x => x.title) })),
+    tests: r.testFailures.slice(0, 100).map(t => ({ name: t.name || '', method: t.methodName || t.method || '', message: t.message || '' })),
+    coverage: below.map(x => ({ name: x.name, percent: x.percent })), coverageRule: run.coverageCheck ? run.coverageCheck.rule : null,
+    cliError: !r.success && !run.failures.length && !r.testFailures.length ? (cliError(run) || r.message || 'Salesforce could not run the check') : null });
 }
+
+/** The stage's coverage rule, checked against the Apex the package deploys. */
+function coverageCheck(run, pkg, params) {
+  if (params.coverageRule == null || !pkg.result.hasApex) return;
+  let pattern;
+  try { pattern = new RegExp(rc().testPattern || 'Test$', 'i'); } catch (e) { pattern = /Test$/i; }
+  const names = [...(pkg.result.deploy.get('ApexClass') || []), ...(pkg.result.deploy.get('ApexTrigger') || [])].filter(n => !pattern.test(n));
+  const stage = params.environment || params.targetOrg;
+  if (params.testLevel === 'NoTestRun') {
+    run.advice.push({ title: 'Coverage not measured for the ' + stage + ' stage’s ' + params.coverageRule + '%', detail: 'No tests ran, so coverage could not be checked.' });
+    return;
+  }
+  const r = policies.belowCoverage(run.result.coverage, params.coverageRule, names);
+  run.coverageCheck = Object.assign({ rule: params.coverageRule }, r);
+  if (r.below.length) run.advice.unshift({ title: 'Coverage below the ' + stage + ' stage’s ' + params.coverageRule + '%', detail: r.below.map(x => x.name + ' ' + x.percent + '%').join(', ') + '\nThe team policy asks for ' + params.coverageRule + '% per class at this stage.' });
+  if (r.unreported.length) run.advice.push({ title: 'No coverage reported for ' + r.unreported.length + ' class' + (r.unreported.length === 1 ? '' : 'es'), detail: r.unreported.join(', ') + '\nThe tests that ran did not touch them.' });
+}
+
+/** The run, kept in the project's validation history for the readiness report. */
+async function record(run, pkg, params) {
+  const r = run.result, m = params.meta || {};
+  try {
+    history.add((await deps.storageDir('history')).fsPath, {
+      label: params.label || 'the project', source: m.source || (params.root ? 'check workspace' : 'project'), branches: m.branches || [], stories: m.stories || [], promotion: m.promotion || null,
+      environment: params.environment || null, targetOrg: params.targetOrg, username: params.username || null, testLevel: params.testLevel, success: !!r.success && !(run.coverageCheck && run.coverageCheck.below.length),
+      cliSuccess: !!r.success, deployId: r.id || null, components: pkg.result.counts.deploy, componentErrors: run.failures.length, testFailures: r.testFailures.length,
+      coverage: (r.coverage || []).map(x => ({ name: x.name, percent: x.percent })), coverageRule: params.coverageRule, belowCoverage: run.coverageCheck ? run.coverageCheck.below : []
+    });
+  } catch (e) { output.appendLine('history: not recorded - ' + e.message); }
+}
+
+/* ---- a run the page follows step by step (the pre-check): its events, and no Output panel popping up */
+
+let runHooks = null, runQuiet = false;
+function emit(ev) { if (runHooks) { try { runHooks(Object.assign({ at: new Date().toISOString() }, ev)); } catch (e) { /* the listener */ } } }
+
+/* ---- what the page shows about the latest validation */
+
+const listeners = new Set();
+let latest = null;
+function announce(v) { latest = v; for (const f of listeners) { try { f(v); } catch (e) { /* a listener */ } } }
+function onValidation(fn) { listeners.add(fn); return { dispose: () => listeners.delete(fn) }; }
+function validationStatus() { return latest; }
 
 /**
  * Org picker that opens straight away. While the CLI is still listing orgs it
@@ -856,7 +979,7 @@ async function cmdValidate(options) {
  */
 async function pickOrg(load, preferred, placeHolder, confirm) {
   if (preferred && !confirm) {
-    const orgs = await busy(load(false), 'Loading orgs from the Salesforce CLI\u2026');
+    const orgs = await busy(load(false), 'Getting your Salesforce logins');
     const match = orgs.find(o => o.alias === preferred || o.username === preferred);
     if (match) return match.alias || match.username;
   }
@@ -971,37 +1094,22 @@ async function chooseTests(pkg) {
 
 async function execute(pkg, params, progress, token) {
   const c = rc();
-  const root = projectRoot();
+  const root = params.root || projectRoot();
   const project = deps.resolveProject();
   const log = l => output.appendLine('  ' + l);
-  if (c.revealOutput) output.show(true);
+  if (c.revealOutput && !runQuiet) output.show(true);
+  emit({ step: 'check', state: 'running', message: 'Validating against ' + (params.environment || params.targetOrg) + (params.testLevel === 'NoTestRun' ? '' : ', with tests'),
+    target: params.targetOrg, username: params.username || null, environment: params.environment || null, tests: params.testLevel !== 'NoTestRun' });
   output.appendLine('');
   output.appendLine('\u2550\u2550 Validation \u00b7 ' + new Date().toLocaleString() + ' ' + '\u2550'.repeat(20));
-  log((params.mode === 'retrieve' ? 'retrieve from ' + params.sourceOrg + ', then ' : '') +
-    'validate against ' + params.targetOrg + ', tests ' + params.testLevel +
+  log((params.label ? params.label + ': ' : '') + 'validate against ' + params.targetOrg + ', tests ' + params.testLevel +
     (params.tests && params.tests.length ? ' (' + params.tests.join(', ') + ')' : ''));
+  log('validating as ' + (params.username || 'the user ' + params.targetOrg + ' logs in as') + (params.environment ? ' - Copado environment ' + params.environment : '') +
+    (params.meta && params.meta.branches && params.meta.branches.length ? ' - from ' + params.meta.branches.join(', ') : ''));
   log('project ' + root + (project.source ? ' (' + project.source + ')' : ''));
   let dirs = ['force-app'];
   try { dirs = require('./src/paths').packageDirsOf(fs.readFileSync(path.join(root, 'sfdx-project.json'), 'utf8')); } catch (e) { /* default */ }
   log('source format, using the package director' + (dirs.length === 1 ? 'y ' : 'ies ') + dirs.join(', '));
-
-  let retrieved = null;
-  if (params.mode === 'retrieve' && !pkg.result.counts.retrieve) {
-    log('nothing to retrieve - every component is a selective commit, deployed from the project as it is');
-  } else if (params.mode === 'retrieve') {
-    const args = { manifest: forCli(pkg.files.retrieve.fsPath, root), org: params.sourceOrg, wait: c.waitMinutes };
-    const live = liveLog('retrieving from ' + params.sourceOrg, progress, sfcli.display(c.sfPath, sfcli.retrieveArgs(args)));
-    try {
-      retrieved = await sfcli.retrieve(c.sfPath, Object.assign(args, { cwd: root, token, onLine: live.onLine, onStatus: live.onStatus, progressIntervalMs: c.progressInterval * 1000, env: cliEnv(c) }));
-    } finally { live.done(); }
-    if (token.isCancellationRequested || !retrieved) return null;
-    log('retrieved ' + retrieved.files + ' file' + (retrieved.files === 1 ? '' : 's') + ' into the project in ' + live.elapsed() +
-      timeSplit(retrieved.orgWaitMs, live.ms()) + ' - Source Control shows what changed');
-    for (const w of retrieved.warnings) log('retrieve warning: ' + w.problem);
-  }
-
-  // a promotion pre-check puts the resolved files over what was just retrieved
-  if (params.mode === 'retrieve' && params.overlay) log(await params.overlay());
 
   const vargs = {
     org: params.targetOrg,
@@ -1011,7 +1119,7 @@ async function execute(pkg, params, progress, token) {
     tests: params.tests,
     wait: c.waitMinutes
   };
-  const live = liveLog(params.testLevel === 'NoTestRun' ? 'validating (check-only)' : 'validating with ' + params.testLevel,
+  const live = liveLog('Getting started',
     progress, sfcli.display(c.sfPath, sfcli.validateArgs(vargs)));
   let result;
   try {
@@ -1028,11 +1136,7 @@ async function execute(pkg, params, progress, token) {
       suggestions: fixes.suggest(f, { isRetrieveOnly }).map(s => Object.assign(s, { applied: false }))
     }));
   }
-  return {
-    result, failures, advice: fixes.testAdvice(result), ranAt: new Date(),
-    retrieveWarnings: retrieved ? retrieved.warnings : [],
-    retrievedFiles: retrieved ? retrieved.files : 0
-  };
+  return { result, failures, advice: fixes.testAdvice(result), ranAt: new Date() };
 }
 
 /**
@@ -1046,7 +1150,7 @@ function liveLog(label, progress, command) {
   let doing = '';
   output.appendLine('');
   output.appendLine('  \u25b6 ' + command);
-  const show = () => progress.report({ message: label + (doing ? ' \u00b7 ' + doing : '') + ' \u00b7 ' + elapsed(Date.now() - started) });
+  const show = () => progress.report({ message: (doing || label) + ' \u00b7 ' + elapsed(Date.now() - started) });
   // what the CLI is doing, in words: no spinner, no stage symbol, no timer of its own
   const note = text => {
     const t = String(text)
@@ -1055,7 +1159,12 @@ function liveLog(label, progress, command) {
       .replace(/\d+(?:\.\d+)?\s?(?:ms|s|m|h)\b/gi, '')
       .replace(/\s+/g, ' ').trim();
     if (!t || /^elapsed( time)?:?$/i.test(t) || /[\u2500\u2014\u2013-]{3,}/.test(t) || !/[A-Za-z]/.test(t)) return;
-    doing = t.slice(0, 70);
+    // the CLI's own words stay in the Output panel; the notification says what is happening, plainly
+    const plain = require('./src/plain').phase(t);
+    if (!plain || plain === doing) return;
+    if (plain === 'Getting started' && doing) return;   // never back to the start once under way
+    doing = plain;
+    emit({ step: 'check', phase: plain });
     show();
   };
   show();
@@ -1067,13 +1176,6 @@ function liveLog(label, progress, command) {
     elapsed: () => elapsed(Date.now() - started),
     ms: () => Date.now() - started
   };
-}
-
-/** Where the time went: the org's own processing, against everything else. */
-function timeSplit(orgMs, totalMs) {
-  if (orgMs == null || !totalMs) return '';
-  const local = Math.max(0, totalMs - orgMs);
-  return ' (' + elapsed(orgMs) + ' waiting on the org, ' + elapsed(local) + ' in the CLI on this machine)';
 }
 
 /** Environment for CLI runs: SourceMember polling off, unless the setting turns it back on. */
@@ -1147,17 +1249,21 @@ function publish(run) {
     for (const s of f.suggestions) output.appendLine('      -> ' + s.title);
   }
   for (const a of run.advice) output.appendLine('  ? ' + a.title + ': ' + a.detail.split('\n')[0]);
-  output.show(true);
+  if (!runQuiet) output.show(true);
+  const below = run.coverageCheck ? run.coverageCheck.below : [];
+  announce({ running: false, label: run.params.label || 'the project', target: run.params.targetOrg, username: run.params.username, environment: run.params.environment,
+    at: new Date().toISOString(), success: !!r.success && !below.length, errors: run.failures.length, tests: r.testFailures.length, below: below.length, copado: run.params.mode === 'copado' });
 
-  refreshAll();
-  vscode.commands.executeCommand('cmrDeployView.focus');
+  if (runQuiet) { refreshAll(); return; }
+  reveal('cmrDeployView');
   const errors = run.failures.length;
   const tests = r.testFailures.length;
-  if (r.success) vscode.window.showInformationMessage('Validated against ' + run.params.targetOrg + ' - it would deploy.');
+  if (r.success && below.length) vscode.window.showWarningMessage('Validated successfully against ' + run.params.targetOrg + ', but coverage is below the ' + (run.params.environment || run.params.targetOrg) + ' stage\u2019s ' + run.coverageCheck.rule + '%: ' + below.map(x => x.name + ' ' + x.percent + '%').join(', ') + '.');
+  else if (r.success) vscode.window.showInformationMessage('Validated successfully against ' + run.params.targetOrg + '.');
   else if (cliError(run)) vscode.window.showErrorMessage('Validation could not run: ' + cliError(run), 'Show output')
     .then(p => { if (p) output.show(true); });
-  else vscode.window.showWarningMessage('Validation failed: ' + errors + ' component error' + (errors === 1 ? '' : 's') +
-    (tests ? ', ' + tests + ' test failure' + (tests === 1 ? '' : 's') : '') + '. Fixes are in the Deploy Check panel.');
+  else vscode.window.showWarningMessage('Validation failed against ' + run.params.targetOrg + ': ' + errors + ' component error' + (errors === 1 ? '' : 's') +
+    (tests ? ', ' + tests + ' test failure' + (tests === 1 ? '' : 's') : '') + '. See Deploy Check for the fixes.');
 }
 
 /**
@@ -1178,7 +1284,12 @@ async function cmdApplyFix(item) {
   const f = item.failure;
 
   if (fix.kind === 'package') {
-    const pkg = state.pkg;
+    const pkg = state.validation.pkg;
+    if (!pkg) { vscode.window.showInformationMessage('Make this change on the user story in Copado - this result came from Copado\u2019s own deployment.'); return; }
+    if (pkg.workspace && fix.op === 'add') {
+      vscode.window.showInformationMessage('Add ' + fix.component.type + ' ' + fix.component.name + ' to the user story in Copado and commit it - this validation reads its files from the branch, so it has to be on the branch too.');
+      return;
+    }
     const { type, name } = fix.component;
     const add = (map) => { if (!map.has(type)) map.set(type, new Set()); map.get(type).add(name); };
     const del = (map) => { const s = map.get(type); if (s) { s.delete(name); if (!s.size) map.delete(type); } };
@@ -1188,7 +1299,8 @@ async function cmdApplyFix(item) {
     if (pkg.result.selective) pkg.result.counts.selective = count(pkg.result.selective);
     pkg.result.counts.retrieve = count(pkg.result.retrieve);
     pkg.result.counts.retrieveOnly = count(pkg.result.retrieveOnly);
-    if (!pkg.external) await writePackageFiles(pkg);
+    if (pkg.workspace) fs.writeFileSync(pkg.files.deploy.fsPath, manifest.toPackageXml(pkg.result.deploy, pkg.version));
+    else if (!pkg.external) await writePackageFiles(pkg);
     pkg.changed = true;
     fix.applied = true;
     refreshAll();
@@ -1243,7 +1355,9 @@ async function cmdCopyErrors() {
   L.push('| | |');
   L.push('| --- | --- |');
   if (v.result.id) L.push('| Deploy id | `' + v.result.id + '` |');
-  L.push('| Mode | ' + v.params.mode + (v.params.sourceOrg ? ' from ' + v.params.sourceOrg : '') + ' |');
+  L.push('| From | ' + md(v.params.meta && v.params.meta.branches && v.params.meta.branches.length ? v.params.meta.branches.join(', ') : v.params.label || 'the project') + ' |');
+  if (v.params.environment) L.push('| Copado environment | ' + md(v.params.environment) + ' |');
+  if (v.params.username) L.push('| Validated as | ' + md(v.params.username) + ' |');
   L.push('| Tests | ' + v.params.testLevel + (v.params.tests && v.params.tests.length ? ': ' + v.params.tests.join(', ') : '') + ' |');
   L.push('| Component errors | ' + v.failures.length + ' |');
   L.push('| Test failures | ' + v.result.testFailures.length + ' |');
@@ -1264,6 +1378,80 @@ async function cmdCopyErrors() {
 
 function md(s) { return String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' '); }
 
+/* ======================================================= network */
+
+/** The proxy and certificates for every request: cmr.http.proxy, else VS Code's http.proxy, else the environment. */
+function configureNetwork() {
+  const c = vscode.workspace.getConfiguration('cmr');
+  const h = vscode.workspace.getConfiguration('http');
+  let ca = null;
+  const caFile = c.get('http.caFile', '');
+  if (caFile) { try { ca = fs.readFileSync(caFile, 'utf8'); } catch (e) { output.appendLine('network: cannot read the CA file ' + caFile + ' - ' + e.message); } }
+  const noProxy = h.get('noProxy', []);
+  httpx.configure({ proxy: c.get('http.proxy', '') || h.get('proxy', '') || '', strictSSL: h.get('proxyStrictSSL', true) !== false, ca,
+    noProxy: Array.isArray(noProxy) ? noProxy.join(',') : String(noProxy || '') });
+}
+
+/* ======================================================= after Copado deploys */
+
+/**
+ * Component errors from Copado's own deployment, put in the Deploy Check
+ * panel with the same file lookup and fix advice as a validation of ours.
+ * o: { label, environment }.
+ */
+async function showCopadoErrors(failures, o) {
+  const root = projectRoot();
+  const list = [];
+  for (const f of failures) {
+    const fileUri = await locate(f, root);
+    list.push(Object.assign({}, f, { fileUri, suggestions: fixes.suggest(f, { isRetrieveOnly: () => false }).map(s => Object.assign(s, { applied: false })) }));
+  }
+  const result = { id: null, status: 'Failed', success: false, componentFailures: failures, testFailures: [], coverageWarnings: [], coverage: [], message: '', errorName: '', actions: [] };
+  const run = { result, failures: list, advice: [], ranAt: new Date(), pkg: null,
+    params: { targetOrg: o.environment || 'Copado', testLevel: 'Copado deployment', mode: 'copado', label: o.label, environment: o.environment || null } };
+  state.validation = run;
+  publish(run);
+  return list.map(f => ({ type: f.type, fullName: f.fullName, problem: f.problem, line: f.line, file: f.fileUri ? vscode.workspace.asRelativePath(f.fileUri) : null,
+    fixes: f.suggestions.map(s => s.title) }));
+}
+
+/* ======================================================= readiness */
+
+/**
+ * The readiness report for a promotion, written under .copado/reports/ and
+ * opened. o: { promotion: { id, name, status, to } }.
+ */
+async function readinessReport(o) {
+  const c = rc();
+  if (!needCopado(c)) return null;
+  const root = projectRoot();
+  const api = copadoApi(c, root, (await apiVersion()) || '62.0');
+  let data;
+  const p = o.promotion;
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Putting together the readiness report for ' + p.name }, async () => {
+    const stories = await lifecycle.promotionStories(api, p.id);
+    const full = await lifecycle.storiesByIds(api, stories.map(s => s.id));
+    const comp = await lifecycle.promotionComponents(api, p.id, stories);
+    const per = await lifecycle.storyComponents(api, stories);
+    let files = 0;
+    try { files = await promotionLib.unresolvedCount(api, p.id); } catch (e) { /* unknown */ }
+    data = { name: p.name, status: p.status, to: p.to, stories: full.length ? full : stories, components: comp.rows,
+      overlaps: lifecycle.forecast(Object.fromEntries(stories.map(s => [s.name, (per[s.id] || {}).rows || []]))),
+      missing: stories.filter(s => !per[s.id]).map(s => s.name), conflicts: [{ promotion: p.name, status: p.status, files, open: files > 0 }].filter(x => x.files || /conflict/i.test(x.status || '')),
+      storyNames: stories.map(s => s.name), promotionName: p.name };
+  });
+  const all = history.load((await deps.storageDir('history')).fsPath);
+  data.validations = history.about(all, { stories: data.storyNames, promotion: data.promotionName || null });
+  data.at = new Date().toISOString();
+  const text = redact(require('./src/report').readiness(data), c.maskIdentities);
+  const dir = await deps.storageDir('reports');
+  const file = vscode.Uri.joinPath(dir, 'readiness-' + data.name.replace(/[^\w.-]/g, '_') + '-' + data.at.replace(/[:.]/g, '-').slice(0, 19) + '.md');
+  await vscode.workspace.fs.writeFile(file, Buffer.from(text, 'utf8'));
+  await vscode.window.showTextDocument(file, { preview: false });
+  output.appendLine('readiness: ' + data.name + ' - ' + data.stories.length + ' stories, ' + data.validations.length + ' validation(s) recorded; report ' + path.basename(file.fsPath));
+  return { file: file.fsPath, name: data.name };
+}
+
 /* ================================================================ views */
 
 function provider(roots, children) {
@@ -1280,9 +1468,17 @@ function refreshAll() {
   branchProvider.refresh();
   deployProvider.refresh();
   refreshMessages();
-  vscode.commands.executeCommand('setContext', 'cmr.hasPackage', !!state.pkg);
-  vscode.commands.executeCommand('setContext', 'cmr.hasValidation', !!state.validation);
-  vscode.commands.executeCommand('setContext', 'cmr.hasBranchCheck', !!state.branch);
+  // these decide which sidebar sections show: a section is revealed only once VS Code has them
+  return Promise.all([
+    vscode.commands.executeCommand('setContext', 'cmr.hasPackage', !!state.pkg),
+    vscode.commands.executeCommand('setContext', 'cmr.hasValidation', !!state.validation),
+    vscode.commands.executeCommand('setContext', 'cmr.hasBranchCheck', !!state.branch)
+  ]).catch(() => {});
+}
+
+/** Shows a sidebar section: after it is visible, never an error if VS Code cannot focus it. */
+function reveal(view) {
+  return refreshAll().then(() => vscode.commands.executeCommand(view + '.focus')).catch(() => {});
 }
 
 function refreshMessages() {
@@ -1386,8 +1582,8 @@ function deployRoots() {
       icon: r.success ? 'pass-filled' : 'error',
       color: r.success ? 'testing.iconPassed' : 'testing.iconFailed',
       description: v.params.targetOrg + ' \u00b7 ' + v.params.testLevel + ' \u00b7 ' + v.ranAt.toLocaleTimeString(),
-      tooltip: (r.id ? 'Deploy id ' + r.id + '\n' : '') + (v.params.mode === 'retrieve' ? 'Retrieved from ' + v.params.sourceOrg : 'Validated from the workspace') +
-        (v.params.tests && v.params.tests.length ? '\nTests: ' + v.params.tests.join(', ') : ''),
+      tooltip: (r.id ? 'Deploy id ' + r.id + '\n' : '') + (v.params.label ? v.params.label + '\n' : '') + (v.params.username ? 'Validated as ' + v.params.username + '\n' : '') +
+        (v.params.environment ? 'Copado environment ' + v.params.environment : '') + (v.params.tests && v.params.tests.length ? '\nTests: ' + v.params.tests.join(', ') : ''),
       contextValue: 'cmrValidation'
     }));
     if (cliError(v)) {
@@ -1398,22 +1594,11 @@ function deployRoots() {
         command: { command: 'cmr.showReport', title: 'Show output' }
       }));
     }
-    if (v.params.mode === 'retrieve') {
-      out.push(item('Retrieved into this project', {
-        icon: 'cloud-download',
-        description: v.retrievedFiles + ' file' + (v.retrievedFiles === 1 ? '' : 's') + ' \u00b7 click to see the changes',
-        tooltip: 'Retrieved from ' + v.params.sourceOrg + ' with sf project retrieve start, into your package directories. Source Control shows exactly what changed.',
-        command: { command: 'workbench.view.scm', title: 'Show changes' }
-      }));
-    }
-    if (v.retrieveWarnings && v.retrieveWarnings.length) {
-      out.push(item('Retrieve warnings', { children: true, expanded: true, icon: 'warning', color: 'list.warningForeground', description: String(v.retrieveWarnings.length), data: { kind: 'retrieveWarnings' } }));
-    }
     if (v.failures.length) {
       out.push(item('Component errors', { children: true, expanded: true, icon: 'bug', description: String(v.failures.length), data: { kind: 'errors' } }));
     }
-    if (r.testFailures.length || r.coverageWarnings.length) {
-      out.push(item('Tests and coverage', { children: true, expanded: true, icon: 'beaker', description: (r.testFailures.length + r.coverageWarnings.length) + '', data: { kind: 'tests' } }));
+    if (v.advice.length) {
+      out.push(item('Tests and coverage', { children: true, expanded: true, icon: 'beaker', description: String(v.advice.length), data: { kind: 'tests' } }));
     }
   }
   return out;
@@ -1469,11 +1654,6 @@ function deployChildren(p) {
       data: { fix: s, failure: p.failure }
     }));
   }
-  if (p.kind === 'retrieveWarnings') {
-    return state.validation.retrieveWarnings.map(w => item(w.problem, {
-      icon: 'warning', color: 'list.warningForeground', description: w.fileName, tooltip: (w.fileName ? w.fileName + '\n' : '') + w.problem
-    }));
-  }
   if (p.kind === 'tests') {
     return state.validation.advice.map(a => item(a.title, {
       icon: /^Coverage/.test(a.title) ? 'graph' : 'beaker', color: 'list.warningForeground',
@@ -1483,4 +1663,5 @@ function deployChildren(p) {
   return [];
 }
 
-module.exports = { activate, state };
+const exported = { activate, state, helpers: null };
+module.exports = exported;

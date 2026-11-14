@@ -1,0 +1,90 @@
+/* The merge editor: VS Code's own colours, with red for what was removed, green for the feature's,
+   blue for your own edits, purple for moves, yellow for what both branches changed. */
+:root {
+  --red: rgba(241, 76, 76, .17); --red-strong: #f14c4c; --red-text: #f58f8f;
+  --green: rgba(155, 185, 85, .22); --green-strong: #89d185;
+  --blue: rgba(55, 148, 255, .16); --blue-strong: #3794ff; --blue-text: #8cc2ff;
+  --purple: rgba(177, 128, 215, .1); --purple-strong: #b180d7; --purple-text: #c9a6ec;
+  --yellow: rgba(204, 167, 0, .16); --yellow-strong: #cca700;
+  --orange: rgba(232, 145, 45, .16); --orange-strong: #e8912d; --orange-text: #f0a75a;
+}
+body.vscode-light { --orange-text: #b35c00; --red-text: #c72e2e; --blue-text: #005fb8; --purple-text: #7b3fae; --green-strong: #388a34; }
+html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+body { display: flex; flex-direction: column; background: var(--vscode-editor-background); color: var(--vscode-foreground); font: var(--vscode-font-size, 13px) var(--vscode-font-family, sans-serif); }
+
+.top { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); flex: 0 0 auto; flex-wrap: wrap; }
+.top .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 11.5px; padding: 1px 8px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.chip.mv { background: rgba(177,128,215,.22); color: var(--purple-text); }
+.chip.feat { background: rgba(137,209,133,.2); color: var(--green-strong); }
+.chip.own { background: rgba(55,148,255,.2); color: var(--blue-text); }
+.chip.del { background: rgba(241,76,76,.2); color: var(--red-text); }
+.chip.keep { background: rgba(232,145,45,.22); color: var(--orange-text); }
+.chip.conf { background: rgba(204,167,0,.22); color: var(--yellow-strong); }
+.top .sp { flex: 1; }
+button { font: 12px var(--vscode-font-family, sans-serif); color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 1px solid transparent; border-radius: 3px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button.pri { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.pri:hover { background: var(--vscode-button-hoverBackground); }
+button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.start { font-size: 12px; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.start select { font: 12px var(--vscode-font-family, sans-serif); color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 3px; padding: 2px 4px; }
+#help { position: fixed; right: 14px; top: 44px; z-index: 20; background: var(--vscode-editorWidget-background, #252526); color: var(--vscode-editorWidget-foreground, inherit); border: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,.4)); border-radius: 4px; padding: 10px 14px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+#help table { border-collapse: collapse; } #help td { padding: 2px 10px 2px 0; white-space: nowrap; } #help kbd { font: 11px var(--vscode-editor-font-family, monospace); padding: 0 4px; border: 1px solid rgba(128,128,128,.45); border-radius: 3px; }
+#menu { position: fixed; z-index: 30; min-width: 190px; padding: 4px 0; background: var(--vscode-menu-background, #252526); color: var(--vscode-menu-foreground, inherit); border: 1px solid var(--vscode-menu-border, rgba(128,128,128,.35)); border-radius: 5px; box-shadow: 0 4px 14px rgba(0,0,0,.35); font-size: 12.5px; }
+#menu .mi { display: flex; justify-content: space-between; gap: 24px; padding: 4px 14px; cursor: default; }
+#menu .mi:hover { background: var(--vscode-menu-selectionBackground, #04395e); color: var(--vscode-menu-selectionForeground, #fff); }
+#menu .sc { opacity: .7; } #menu .sep { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, rgba(128,128,128,.35)); }
+#held { color: var(--vscode-editorWarning-foreground, #cca700); font-size: 12px; }
+#note { font-size: 12px; color: var(--vscode-descriptionForeground); }
+#note.warn { color: var(--vscode-editorWarning-foreground, #cca700); }
+
+.heads { display: grid; grid-template-columns: 1fr 26px 1fr; flex: 0 0 auto; font-size: 12px; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); }
+.heads > div { padding: 4px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.heads b { color: var(--vscode-foreground); font-weight: 600; }
+.heads .ok { color: var(--green-strong); }
+.panes { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 26px 1fr; }
+#left, #right { min-width: 0; min-height: 0; }
+#gap { position: relative; background: var(--vscode-editorGutter-background, transparent); border-left: 1px solid var(--vscode-panel-border, rgba(128,128,128,.2)); border-right: 1px solid var(--vscode-panel-border, rgba(128,128,128,.2)); overflow: hidden; }
+#joins { position: absolute; inset: 0; pointer-events: none; }
+.join { position: absolute; left: 0; right: 0; height: 2px; background: var(--purple-strong); }
+.join::before, .join::after { content: ""; position: absolute; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--purple-strong); }
+.join::before { left: -3px; } .join::after { right: -3px; }
+.foot { flex: 0 0 auto; padding: 4px 12px; font-size: 11.5px; color: var(--vscode-descriptionForeground); border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); }
+
+/* lines */
+.monaco-editor .del { background: var(--red); }
+.monaco-editor .feat { background: var(--green); }
+.monaco-editor .own { background: var(--blue); }
+.monaco-editor .conf { background: var(--yellow); }
+.monaco-editor .keep { background: var(--orange); }
+.monaco-editor .keep-g { border-left: 3px solid var(--orange-strong); margin-left: 3px; }
+.monaco-editor .mv { box-shadow: inset 3px 0 0 var(--purple-strong); }
+.monaco-editor .mv:not(.del):not(.feat):not(.own) { background: var(--purple); }
+.monaco-editor .del-g { border-left: 3px solid var(--red-strong); margin-left: 3px; }
+.monaco-editor .feat-g { border-left: 3px solid var(--green-strong); margin-left: 3px; }
+.monaco-editor .own-g { border-left: 3px solid var(--blue-strong); margin-left: 3px; }
+.monaco-editor .conf-g { border-left: 3px solid var(--yellow-strong); margin-left: 3px; }
+.monaco-editor .mv-g { border-left: 3px solid var(--purple-strong); margin-left: 3px; }
+
+/* rows between lines: a header for each change, struck-through lines, blank padding */
+.zone { box-sizing: border-box; width: 100%; }
+.zone.head { display: flex; align-items: center; gap: 6px; padding-left: 8px; font: 11.5px var(--vscode-font-family, sans-serif); white-space: nowrap; overflow: hidden; }
+.zone.head .ic { width: 14px; text-align: center; }
+.zone.head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.zone.head .dim { opacity: .8; }
+.zone.head.move { color: var(--purple-text); background: var(--purple); box-shadow: inset 3px 0 0 var(--purple-strong); }
+.zone.head.removed, .zone.head.dropped { color: var(--red-text); background: rgba(241,76,76,.08); box-shadow: inset 3px 0 0 var(--red-strong); }
+.zone.head.feature, .zone.head.changed-feature { color: var(--green-strong); background: rgba(155,185,85,.08); box-shadow: inset 3px 0 0 var(--green-strong); }
+.zone.head.own, .zone.head.changed-own { color: var(--blue-text); background: rgba(55,148,255,.07); box-shadow: inset 3px 0 0 var(--blue-strong); }
+.zone.head.kept, .zone.head.differs { color: var(--orange-text); background: rgba(232,145,45,.08); box-shadow: inset 3px 0 0 var(--orange-strong); }
+.zone.head.conf { color: var(--yellow-strong); background: var(--yellow); box-shadow: inset 3px 0 0 var(--yellow-strong); }
+.zone.head.l { opacity: .85; }
+.zone.ghost { background: rgba(241,76,76,.07); padding-left: 8px; overflow: hidden; }
+.zone.ghost.dropped { background: rgba(155,185,85,.06); }
+.zone.ghost .gl { white-space: pre; text-decoration: line-through; text-decoration-color: rgba(241,76,76,.6); color: var(--red-text); opacity: .85; }
+.zone.ghost.dropped .gl { text-decoration-color: rgba(137,209,133,.6); color: var(--green-strong); }
+.zone.pad { background: repeating-linear-gradient(-45deg, transparent 0 6px, rgba(128,128,128,.12) 6px 7px); }
+.acts { position: absolute; right: 22px; display: flex; align-items: center; gap: 5px; z-index: 5; }
+.acts button { padding: 0 8px; font-size: 11px; height: calc(100% - 4px); }
