@@ -1317,7 +1317,7 @@ module.exports = function register(ok, section, h) {
     const withFallback = o => new Proxy(o, { get: (t, k) => k in t ? t[k] : any() });
     vs.window = withFallback(vs.window); vs.workspace = withFallback(vs.workspace); vs.languages = withFallback(vs.languages);
     const full = withFallback(vs);
-    let deps = null;
+    let deps = null; let api = null;
     const Module = require('module'); const load = Module._load;
     Module._load = function (req) {
       if (req === 'vscode') return full;
@@ -1329,13 +1329,13 @@ module.exports = function register(ok, section, h) {
       delete require.cache[require.resolve('../extension')];
       const ext = require('../extension');
       const ws = new Map();
-      await ext.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => ws.has(k) ? ws.get(k) : d, update: async (k, v) => { ws.set(k, v); } }, globalState: { get: (k, d) => kept.has(k) ? kept.get(k) : d, update: async (k, v) => { kept.set(k, v); } },
+      api = await ext.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => ws.has(k) ? ws.get(k) : d, update: async (k, v) => { ws.set(k, v); } }, globalState: { get: (k, d) => kept.has(k) ? kept.get(k) : d, update: async (k, v) => { kept.set(k, v); } },
         extensionUri: vs.Uri.file(root), globalStorageUri: vs.Uri.file(path.join(root, '.g')), storageUri: vs.Uri.file(path.join(root, '.s')), extensionPath: root, secrets: any() });
     } finally { Module._load = load; }
     const wait = ms => new Promise(r => setTimeout(r, ms));
     const mergedOf = () => { const d = vs.log.commands.filter(c => c[0] === 'vscode.diff').pop(); return d && d[2]; };
     const kindOf = t => 'rangeBehavior' in t.o ? 'note' : t.o.borderStyle === 'dashed' ? 'removed' : /55, 148, 255/.test(t.o.backgroundColor || '') ? 'own' : t.o.backgroundColor && t.o.backgroundColor.id === 'merge.incomingContentBackground' ? 'added' : null;
-    return {
+    return { api,
       vs, deps: () => deps, mergedOf, wait, webviews,
       show: () => { editorUri = mergedOf(); },
       edit: async text => { fs.writeFileSync(mergedOf().fsPath, text); for (const f of changes) f({ document: doc(mergedOf()), contentChanges: [] }); await wait(180); },
@@ -2355,6 +2355,19 @@ module.exports = function register(ok, section, h) {
       const rule = /(?:^|\n)html, body \{([^}]*)\}/.exec(css);
       assert.ok(rule && /padding: 0/.test(rule[1]) && /margin: 0/.test(rule[1]), f + ': html, body { margin: 0; padding: 0 }');
     }
+  });
+
+  section('3.9.3: CI on every system');
+
+  ok('the tests inside VS Code reach the extension\u2019s own modules through what it hands them - never by a path, which on Windows can name a second copy', async () => {
+    const suite = fs.readFileSync(path.join(__dirname, 'integration', 'suite', 'extension.test.js'), 'utf8');
+    assert.ok(!/require\(path\.join\([^)]*extensionPath/.test(suite), 'no module loaded by its path');
+    assert.ok(/\(await vscode\.extensions\.getExtension\(ID\)\.activate\(\)\)\.manualUi/.test(suite));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra api '));
+    try {
+      const mv = await realMergeView(root, {});
+      assert.ok(mv.api && typeof mv.api.manualUi.act === 'function' && typeof mv.api.manualUi.snapshot === 'function', 'activate hands over the Manual tab');
+    } finally { rmTree(root); }
   });
 
   section('3.0: what is shipped');

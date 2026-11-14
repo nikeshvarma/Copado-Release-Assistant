@@ -71,13 +71,13 @@ test('Merge in Release Assistant opens the page on its Manual tab, with the file
   const file = vscode.Uri.file(path.join(root(), 'conflict', 'metadata', 'resolution.xml'));
   await vscode.commands.executeCommand('cmr.manual.mergeWith', file);
   await until(() => vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputWebview && /cmrPage/.test(t.input.viewType)), 'the Release Assistant page', 30000);
-  const manual = require(path.join(vscode.extensions.getExtension(ID).extensionPath, 'manualUi.js'));
+  const manual = (await vscode.extensions.getExtension(ID).activate()).manualUi;   // the extension's own module
   const snap = manual.snapshot();
   assert.deepStrictEqual([snap.show, snap.target && snap.target.name, snap.target && snap.target.type, snap.target && snap.target.valid], [true, 'resolution.xml', 'PermissionSet', true]);
 });
 
 test('a manual merge opens the merge editor on the two versions merged; closing its tab ends the merge', async () => {
-  const manual = require(path.join(vscode.extensions.getExtension(ID).extensionPath, 'manualUi.js'));
+  const manual = (await vscode.extensions.getExtension(ID).activate()).manualUi;   // the extension's own module
   const feature = fs.readFileSync(path.join(root(), 'conflict', 'metadata', 'feature.xml'), 'utf8');
   await manual.act('manual.set', { side: 'incoming', text: feature, name: 'feature.xml' });
   await manual.act('manual.merge');

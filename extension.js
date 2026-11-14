@@ -107,6 +107,9 @@ function activate(context) {
       { provideDocumentFormattingEdits: doc => (isMetadata(doc) ? formatEdits(doc) : []) }
     )
   );
+  // what the extension hands to whoever activates it: its own Manual tab - for the tests inside VS Code, which
+  // must reach the very module the extension loaded (a path of their own can name another copy on Windows)
+  return { manualUi: require('./manualUi') };
 }
 
 function deactivate() {

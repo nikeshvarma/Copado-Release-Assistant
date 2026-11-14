@@ -73,7 +73,7 @@ The **Manual** tab — always there — merges two versions pasted from Copado's
 
 1. Download the `.vsix` from the [latest release](https://github.com/nikeshvarma/Copado-Release-Assistant/releases/latest) and install it:
    ```bash
-   code --install-extension copado-release-assistant-3.9.2.vsix
+   code --install-extension copado-release-assistant-3.9.3.vsix
    ```
 2. Open your Salesforce project folder.
 3. Run **Copado: Open Settings** and set **Copado org** — the Salesforce CLI alias of the org where Copado runs.

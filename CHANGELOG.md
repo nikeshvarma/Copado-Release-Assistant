@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.9.3
+
+- **CI on Windows**: the tests inside VS Code reach the Manual tab through what the extension hands them when it activates, instead of loading its file by a path - on Windows a path can differ from VS Code's only in the drive letter's case, which gave the tests a second, unconnected copy. No change to what the extension does.
+
 ## 3.9.2
 
 - The Release Assistant page uses the full width: VS Code gives every webview's body side padding, which left a strip on each side of the page; it is taken off, as the merge editor already did.
