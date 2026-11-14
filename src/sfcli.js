@@ -450,7 +450,7 @@ async function validate(sfPath, o) {
   // no deploy happened, or no detail could be fetched: the CLI's words are the result
   return {
     id, status: null, success: s.code === 0,
-    componentFailures: [], testFailures: [], coverageWarnings: [],
+    componentFailures: [], testFailures: [], coverageWarnings: [], coverage: [],
     message: s.code === 0 ? '' : errorFrom(s.lines), errorName: '', actions: []
   };
 }
@@ -559,42 +559,20 @@ async function restPatch(sfPath, org, restPath, fields, cwd) {
   }
 }
 
-function httpSend(method, url, token, body) {
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith('http://') ? require('http') : require('https');
-    const req = lib.request(url, { method, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'Content-Length': body.length } }, res => {
-      const chunks = [];
-      res.on('data', d => chunks.push(d));
-      res.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8');
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(text);
-        else reject(new Error('HTTP ' + res.statusCode + ': ' + text.slice(0, 300)));
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(120000, () => req.destroy(new Error('the request timed out')));
-    req.end(body);
-  });
+/** A REST call with the CLI's session, through the shared client (proxy included). */
+async function httpSend(method, url, token, body) {
+  const r = await require('./http').request(url, { method, body, timeout: 120000,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' } });
+  const text = r.body.toString('utf8');
+  if (r.status >= 200 && r.status < 300) return text;
+  throw new Error('HTTP ' + r.status + ': ' + text.slice(0, 300));
 }
 
-function httpGet(url, token, redirects) {
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith('http://') ? require('http') : require('https');
-    const req = lib.get(url, { headers: { Authorization: 'Bearer ' + token, Accept: '*/*' } }, res => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && (redirects || 0) < 3) {
-        res.resume(); resolve(httpGet(new URL(res.headers.location, url).toString(), token, (redirects || 0) + 1)); return;
-      }
-      const chunks = [];
-      res.on('data', d => chunks.push(d));
-      res.on('end', () => {
-        const body = Buffer.concat(chunks);
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(body);
-        else reject(new Error('HTTP ' + res.statusCode + ': ' + body.toString('utf8').slice(0, 300)));
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(60000, () => req.destroy(new Error('the request timed out')));
-  });
+/** GET with the CLI's session. A redirect elsewhere is followed without the token - it never leaves Salesforce. */
+async function httpGet(url, token) {
+  const r = await require('./http').request(url, { headers: { Authorization: 'Bearer ' + token, Accept: '*/*' }, followCrossHost: true });
+  if (r.status >= 200 && r.status < 300) return r.body;
+  throw new Error('HTTP ' + r.status + ': ' + r.body.toString('utf8').slice(0, 300));
 }
 
 function cleanError(text) {
@@ -613,17 +591,10 @@ async function query(sfPath, org, soql, cwd) {
 /** The fields of an object, or null when the org has no such object. */
 async function describe(sfPath, org, sobject, cwd) {
   const r = await run(sfPath, ['sobject', 'describe', '--sobject', sobject, '--target-org', org], { cwd });
-  if (r.json && r.json.status === 0) return (r.json.result.fields || []).map(f => Object.assign({ name: f.name, relationshipName: f.relationshipName || null },
-    Array.isArray(f.picklistValues) && f.picklistValues.length ? { picklist: f.picklistValues.filter(v => v.active !== false).map(v => v.value) } : {}));
+  if (r.json && r.json.status === 0) return (r.json.result.fields || []).map(f => require('./copadoClient').fieldOf(f));
   const msg = (r.json && r.json.message) || cleanError(r.stderr) || '';
   if (/NOT_FOUND|INVALID_TYPE|not supported|does not exist/i.test(msg + ' ' + ((r.json && r.json.name) || ''))) return null;
   throw new Error(msg || 'Could not describe ' + sobject + '.');
-}
-
-/** The committed XML of a Copado selective commit - a Salesforce File (ContentVersion). */
-function selectiveFileGet(sfPath, org, fileId, apiVersion, cwd) {
-  if (!/^068[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$/.test(String(fileId))) return Promise.reject(new Error('"' + fileId + '" is not a Salesforce File version id'));
-  return restGet(sfPath, org, '/services/data/v' + (apiVersion || '62.0') + '/sobjects/ContentVersion/' + fileId + '/VersionData', cwd);
 }
 
 /**
@@ -635,6 +606,7 @@ function parseDeploy(json) {
   const failures = [];
   const tests = [];
   const coverage = [];
+  const perClass = new Map();
   let id = null;
   let status = null;
   let success = null;
@@ -651,6 +623,11 @@ function parseDeploy(json) {
       });
     }
     if (key === 'codeCoverageWarnings') for (const c of arr(v)) coverage.push({ name: c.name || '', message: c.message || '' });
+    if (key === 'codeCoverage') for (const c of arr(v)) {
+      if (!c || !c.name || c.numLocations == null) continue;
+      const total = toInt(c.numLocations) || 0, missed = toInt(c.numLocationsNotCovered) || 0;
+      perClass.set(String(c.name), { name: String(c.name), covered: total - missed, total, percent: total ? Math.round((total - missed) / total * 1000) / 10 : 100 });
+    }
   });
 
   const dedup = new Map();
@@ -661,7 +638,7 @@ function parseDeploy(json) {
   if (json && json.status !== 0 && json.status !== undefined) success = false;
   return {
     id, status, success,
-    componentFailures, testFailures: tests, coverageWarnings: coverage,
+    componentFailures, testFailures: tests, coverageWarnings: coverage, coverage: [...perClass.values()].sort((a, b) => a.name.localeCompare(b.name)),
     message: json && json.message ? String(json.message) : '',
     errorName: json && json.name ? String(json.name) : '',
     actions: json && Array.isArray(json.actions) ? json.actions.map(String) : []
@@ -694,6 +671,6 @@ function walk(v, fn, key, depth) {
 }
 
 module.exports = {
-  version, listOrgs, retrieve, validate, restGet, selectiveFileGet, query, describe, resetRest, isMissingCommand, openPath, restPatch, loginFor, httpGet, display, commandFor, escapeArgument,
+  version, listOrgs, retrieve, validate, restGet, query, describe, resetRest, isMissingCommand, openPath, restPatch, loginFor, httpGet, display, commandFor, escapeArgument,
   parseJson, parseOrgs, parseDeploy, parseRetrieveText, lineCleaner, reprintFilter, shapeOf, signature, durationMs, orgWaitFrom, deployIdFrom, errorFrom, retrieveArgs, validateArgs
 };

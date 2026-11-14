@@ -607,7 +607,7 @@ function windowsRoundTrip(spec) {
 
 ok('paths with spaces reach the CLI as one argument on Windows', () => {
   const nasty = [
-    'C:\\SP DJI\\CopadoDevOps\\manifest\\package.xml',
+    'C:\\ACME Release\\Release Work\\manifest\\package.xml',
     'C:\\Users\\me\\My Projects (work)\\manifest\\package.xml',
     'D:\\R&D\\100% done\\pkg.xml',
     'C:\\trailing\\slash\\',
@@ -627,13 +627,13 @@ ok('the project is found automatically, and the setting overrides it', () => {
   const paths = require('../src/paths');
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cra proj '));        // a space on purpose
   const mk = (rel, project) => { const d = path.join(base, rel); fs.mkdirSync(d, { recursive: true }); if (project) fs.writeFileSync(path.join(d, 'sfdx-project.json'), '{}'); return d; };
-  const single = mk('SP DJI/CopadoDevOps', true);
-  mk('SP DJI/CopadoDevOps/force-app/main/default/permissionsets');
+  const single = mk('ACME Release/Release Work', true);
+  mk('ACME Release/Release Work/force-app/main/default/permissionsets');
   const file = path.join(single, 'force-app/main/default/permissionsets/A.permissionset-meta.xml');
   fs.writeFileSync(file, '<PermissionSet/>');
 
   assert.strictEqual(paths.findProjectRoot({ folders: [single] }).root, single, 'the open folder');
-  assert.strictEqual(paths.findProjectRoot({ folders: [path.join(base, 'SP DJI')] }).root, single, 'one level below');
+  assert.strictEqual(paths.findProjectRoot({ folders: [path.join(base, 'ACME Release')] }).root, single, 'one level below');
   assert.strictEqual(paths.findProjectRoot({ folders: [base] }).root, single, 'two levels below');
   assert.strictEqual(paths.findProjectRoot({ folders: [base], activeFile: file }).root, single, 'from the open file');
 
@@ -921,90 +921,6 @@ ok('a selective-commit download is recognised by its name, however the browser s
   assert.strictEqual(sel.rootOf('\uFEFF<?xml version="1.0"?>\n<!-- c -->\n<Layout xmlns="x"/>'), 'Layout');
 });
 
-function selProject() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra selective '));
-  const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
-  return { root, put, folder: path.join(root, 'conflict', 'selective'), read: rel => fs.readFileSync(path.join(root, rel), 'utf8') };
-}
-
-ok('each selective commit is planned: ready, missing, duplicate, wrong type, split or unsupported', () => {
-  const sel = require('../src/selective');
-  const p = selProject();
-  const drop = (t, n, text, suffix) => p.put('conflict/selective/' + sel.hashFor(t, n) + (suffix || ''), text);
-  p.put('force-app/main/default/layouts/Account-Main.layout-meta.xml', '<Layout>local</Layout>');
-  drop('Layout', 'Account-Main', '<Layout xmlns="x">committed</Layout>');
-  drop('FlexiPage', 'Home', '<FlexiPage/>'); drop('FlexiPage', 'Home', '<FlexiPage/>', ' (1)');
-  drop('Profile', 'Admin', '<PermissionSet/>');
-  drop('CustomObject', 'Invoice__c', '<CustomObject><fields><fullName>A__c</fullName></fields></CustomObject>');
-  drop('Profile', 'From_Another_Story', '<Profile/>');
-  p.put('conflict/selective/notes.txt', 'hi');
-  const items = [['Layout', 'Account-Main'], ['FlexiPage', 'Home'], ['Profile', 'Admin'], ['CustomObject', 'Invoice__c'],
-    ['FlexiPage', 'Not_Downloaded'], ['ApexClass', 'Service']].map(([type, name]) => ({ type, name }));
-  const plan = sel.plan({ root: p.root, folder: p.folder, dirs: ['force-app'], items });
-  assert.deepStrictEqual(plan.items.map(i => i.status), ['ready', 'duplicate', 'mismatch', 'split', 'missing', 'unsupported']);
-  assert.strictEqual(plan.items[2].found, 'PermissionSet');
-  assert.strictEqual(plan.items[0].target, path.join(p.root, 'force-app', 'main', 'default', 'layouts', 'Account-Main.layout-meta.xml'), 'goes where the file already is');
-  assert.strictEqual(plan.items[4].target, path.join(p.root, 'force-app', 'main', 'default', 'flexipages', 'Not_Downloaded.flexipage-meta.xml'), 'or where it belongs');
-  assert.deepStrictEqual(plan.extra.map(x => x.id ? x.id.name : path.basename(x.file)).sort(), ['From_Another_Story', 'notes.txt'], 'leftovers are listed, never applied');
-  fs.rmSync(p.root, { recursive: true, force: true });
-});
-
-ok('importing copies the committed version byte for byte, backs up, and can be undone', () => {
-  const sel = require('../src/selective');
-  const p = selProject();
-  const committed = '<?xml version="1.0" encoding="UTF-8"?>\r\n<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\r\n    <layoutSections/>\r\n</Layout>\r\n';
-  p.put('force-app/main/default/layouts/Account-Main.layout-meta.xml', '<Layout>local edits</Layout>\n');
-  p.put('conflict/selective/' + sel.hashFor('Layout', 'Account-Main') + '.xml', committed);
-  p.put('conflict/selective/' + sel.hashFor('FlexiPage', 'New_Page'), '<FlexiPage>new</FlexiPage>');
-  const storage = path.join(p.root, '.copado');
-  const items = sel.plan({ root: p.root, folder: p.folder, dirs: ['force-app'], items: [{ type: 'Layout', name: 'Account-Main' }, { type: 'FlexiPage', name: 'New_Page' }] }).items;
-  const record = sel.apply(items, { root: p.root, storage, stamp: 'run1' });
-  assert.strictEqual(record.items.length, 2);
-  assert.strictEqual(p.read('force-app/main/default/layouts/Account-Main.layout-meta.xml'), committed, 'byte for byte, CRLF kept');
-  assert.strictEqual(p.read('force-app/main/default/flexipages/New_Page.flexipage-meta.xml'), '<FlexiPage>new</FlexiPage>', 'a file new to the project is created');
-  assert.deepStrictEqual(fs.readdirSync(p.folder), [], 'the drop folder is emptied for the next story');
-  assert.strictEqual(fs.readFileSync(path.join(storage, 'selective', 'backup', 'run1', 'files', 'force-app', 'main', 'default', 'layouts', 'Account-Main.layout-meta.xml'), 'utf8'), '<Layout>local edits</Layout>\n');
-
-  const undone = sel.undo(storage);
-  assert.strictEqual(undone.items.length, 2);
-  assert.strictEqual(p.read('force-app/main/default/layouts/Account-Main.layout-meta.xml'), '<Layout>local edits</Layout>\n', 'restored');
-  assert.ok(!fs.existsSync(path.join(p.root, 'force-app/main/default/flexipages/New_Page.flexipage-meta.xml')), 'a created file is removed again');
-  assert.strictEqual(fs.readdirSync(p.folder).length, 2, 'the downloads are back');
-  assert.strictEqual(sel.undo(storage), null, 'nothing left to undo');
-  fs.rmSync(p.root, { recursive: true, force: true });
-});
-
-ok('a selective-commit file is downloaded from Copado through the CLI, or directly when the CLI cannot', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra copado '));
-  const sf = fakeSf(dir);
-  const viaCli = await sfcli.selectiveFileGet(sf, 'copado', '068000000000001AAA', '62.0', dir);
-  assert.ok(/<Layout[^>]*>from 068000000000001AAA via copado<\/Layout>/.test(viaCli.toString('utf8')), 'through sf api request rest');
-
-  // an older CLI without "sf api request": the CLI's token, used directly, never logged
-  const http = require('http');
-  let seenAuth = null;
-  const server = http.createServer((req, res) => {
-    seenAuth = req.headers.authorization;
-    if (!/\/services\/data\/v62\.0\/sobjects\/ContentVersion\/068000000000002AAA\/VersionData$/.test(req.url)) { res.writeHead(404); res.end('nope'); return; }
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); res.end('<Layout>direct</Layout>');
-  });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  process.env.FAKE_SF_NO_API = '1';
-  process.env.FAKE_SF_TOKEN = '00D000000000001!secrettokenvalue1234567890';
-  process.env.FAKE_SF_INSTANCE = 'http://127.0.0.1:' + server.address().port;
-  try {
-    const direct = await sfcli.selectiveFileGet(sf, 'copado', '068000000000002AAA', '62.0', dir);
-    assert.strictEqual(direct.toString('utf8'), '<Layout>direct</Layout>');
-    assert.strictEqual(seenAuth, 'Bearer 00D000000000001!secrettokenvalue1234567890');
-    await assert.rejects(sfcli.selectiveFileGet(sf, 'copado', '068000000000009AAA', '62.0', dir), /HTTP 404/);
-  } finally {
-    delete process.env.FAKE_SF_NO_API; delete process.env.FAKE_SF_TOKEN; delete process.env.FAKE_SF_INSTANCE;
-    server.close();
-  }
-  await assert.rejects(sfcli.selectiveFileGet(sf, 'copado', 'not-an-id', '62.0', dir), /not a Salesforce File/);
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
 ok('session tokens never reach the log; identities are masked when asked', () => {
   const { redact } = require('../src/redact');
   const line = 'from jane@acme.com.dev org 00D5e000000AbCdEAF at https://acme--dev.sandbox.my.salesforce.com token 00D5e000000AbCd!ARQAQH.abcdefghijklmnopqrstuvwx Bearer abcdefghijklmnopqrstuvwxyz123 Deploy ID: 0Af000000000004AAA';
@@ -1022,7 +938,7 @@ ok('the team policy decides which orgs can be validated against, and with what t
     minimumTestLevel: { production: 'RunLocalTests', 'uat*': 'RunSpecifiedTests' } }), { allowedTargetOrgs: ['anything'] });
   assert.strictEqual(source, 'copado-policy.json', 'the committed file wins over personal settings');
   const c = (o, l) => G.check(policy, o, l);
-  assert.deepStrictEqual(c({ alias: 'qa', isSandbox: true }, 'NoTestRun'), { allowed: true, testLevel: 'NoTestRun', raisedFrom: undefined, rule: undefined });
+  assert.deepStrictEqual(c({ alias: 'qa', isSandbox: true }, 'NoTestRun'), { allowed: true, testLevel: 'NoTestRun', raisedFrom: undefined, rule: undefined, coverage: null, environmentRule: null });
   assert.strictEqual(c({ alias: 'uat2', isSandbox: true }, 'NoTestRun').testLevel, 'RunSpecifiedTests');
   assert.strictEqual(c({ alias: 'uat-old', isSandbox: true }, 'RunLocalTests').allowed, false, 'blocked wins');
   assert.ok(/not in the policy/.test(c({ alias: 'dev', isSandbox: true }, 'NoTestRun').reason));
@@ -1149,7 +1065,7 @@ ok('a CLI without "sf api request" is recognised once, however it words it, and 
   sfcli.resetRest();
   try {
     for (const id of ['068000000000001AAA', '068000000000002AAA', '068000000000003AAA']) {
-      const body = await sfcli.selectiveFileGet(sf, 'copado', id, '62.0', dir);
+      const body = await sfcli.restGet(sf, 'copado', '/services/data/v62.0/sobjects/ContentVersion/' + id + '/VersionData', dir);
       assert.ok(body.toString('utf8').includes(id));
     }
     const calls = fs.readFileSync(count, 'utf8').trim().split('\n');
@@ -1276,7 +1192,7 @@ ok('Phase 2a: conflicts are found for a story or a promotion, newest per file, p
       asked.push(q);
       if (/FROM copado__Promoted_User_Story__c /.test(q)) return [{ copado__Promotion__c: 'a0P000000000001AAA', copado__User_Story__r: { Name: 'US-0012345' } },
         { copado__Promotion__c: 'a0P000000000009AAA', copado__User_Story__r: { Name: 'US-0112345' } }];
-      if (/FROM copado__Promotion__c /.test(q)) return [{ Id: 'a0P000000000001AAA', Name: 'P220001', copado__Status__c: 'Merge Conflict',
+      if (/FROM copado__Promotion__c /.test(q)) return [{ Id: 'a0P000000000001AAA', Name: 'P10001', copado__Status__c: 'Merge Conflict',
         copado__Source_Environment__r: { Name: 'dev' }, copado__Destination_Environment__r: { Name: 'qa' } }];
       if (/FROM Attachment WHERE ParentId = 'a0P000000000001AAA'/.test(q)) return [
         { Id: 'n1', Name: 'US-0012345 force-app/main/default/permissionsets/Sales.permissionset-meta.xml', BodyLength: 900, CreatedDate: '2026-11-12' },
@@ -1291,10 +1207,10 @@ ok('Phase 2a: conflicts are found for a story or a promotion, newest per file, p
   const byStory = await P.promotionConflicts(api, 'US-0012345');
   assert.strictEqual(byStory.promotions.length, 1, 'US-0112345 also ends in 12345 but is another story');
   const pr = byStory.promotions[0];
-  assert.deepStrictEqual([pr.name, pr.status, pr.from, pr.to], ['P220001', 'Merge Conflict', 'dev', 'qa']);
+  assert.deepStrictEqual([pr.name, pr.status, pr.from, pr.to], ['P10001', 'Merge Conflict', 'dev', 'qa']);
   assert.deepStrictEqual(pr.conflicts.map(c => [c.path.split('/').pop(), c.id, c.resolution && c.resolution.id]),
     [['cmp.js', 'n2', 'r2'], ['Sales.permissionset-meta.xml', 'n1', null]], 'newest attachment per file; the resolution paired by path');
-  const byPromotion = await P.promotionConflicts(api, 'P220001');
+  const byPromotion = await P.promotionConflicts(api, 'P10001');
   assert.strictEqual(byPromotion.promotions[0].conflicts.length, 2);
   assert.ok(asked.every(q => /^SELECT /.test(q)), 'read-only');
   await assert.rejects(P.promotionConflicts(api, "x' OR Name != '"), /Give a promotion/);
@@ -1434,7 +1350,9 @@ function promoMerge() {
   const { runMergeJob } = require('../src/mergeJob');
   return async (ours, theirs, base) => {
     const r = runMergeJob({ targetText: ours, incomingText: theirs, ancestorText: base, merge: { dedupe: true, winner: 'incoming' }, format: { indent: 4, eol: '\n' }, normalize: false, rules: { enable: false } });
-    return r.ok ? { ok: true, mergedText: r.mergedText, conflicts: r.report.conflicts.length } : { ok: false, error: r.error };
+    if (!r.ok) return { ok: false, error: r.error };
+    const clashes = r.marks.filter(m => m.mark.kind === 'conflict').map(m => ({ line: m.startLine, tag: m.mark.conflict.tag, target: m.mark.conflict.base, incoming: m.mark.conflict.incoming }));
+    return { ok: true, mergedText: r.mergedText, conflicts: r.report.conflicts.length, clashes };
   };
 }
 
@@ -1458,7 +1376,7 @@ ok('promotion workspace: everything fetched at once, sorted into resolved automa
   const api = promoOrg();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra promo '));
   const s = W.store(dir);
-  const promotion = { id: 'P1', name: 'P220001', from: 'dev', to: 'qa' };
+  const promotion = { id: 'P1', name: 'P10001', from: 'dev', to: 'qa' };
   const r = await W.sync(api, s, promotion, promoMerge(), { copadoOrg: 'copado' });
   assert.strictEqual(r.fetched, 3, 'three conflict files, fetched together; the change list is not a conflict');
   const f = r.state.files;
@@ -1487,6 +1405,156 @@ ok('promotion workspace: everything fetched at once, sorted into resolved automa
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+ok('the page\u2019s choices: each clash takes the side you pick, exactly as the merge view would write it', async () => {
+  const W = require('../src/promotionWork');
+  const api = promoOrg();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra choose '));
+  const s = W.store(dir);
+  await W.sync(api, s, { id: 'P1', name: 'P10001' }, promoMerge(), {});
+  const rel = 'force-app/main/default/permissionsets/Ops.permissionset-meta.xml';
+  const e = s.load().files[rel];
+  assert.strictEqual(e.clashes.length, 1);
+  assert.deepStrictEqual([e.clashes[0].tag, e.clashes[0].target, e.clashes[0].incoming], ['description', 'qa text', 'feature text']);
+  const merged = s.read('merged', rel);
+  assert.ok(merged.includes('<description>feature text</description>'), 'the automatic result takes the feature\u2019s value');
+  const r = W.applyChoices(merged, e.clashes, { 0: 'target' });
+  assert.deepStrictEqual([r.applied, r.moved], [1, []]);
+  assert.ok(r.text.includes('    <description>qa text</description>\n') && !r.text.includes('feature text'), 'the promotion side, indent and line ending kept');
+  assert.strictEqual(X.parse(r.text).root.name, 'PermissionSet');
+  assert.strictEqual(W.applyChoices(merged, [{ line: 999, tag: 'x', target: 'a', incoming: 'b' }], { 0: 'target' }).moved.length, 1, 'a clash whose line moved is reported, not guessed');
+  assert.ok(W.applyChoices(merged, [{ line: e.clashes[0].line, tag: 'description', target: 'a < b & c', incoming: '' }], { 0: 'target' }).text.includes('<description>a &lt; b &amp; c</description>'), 'values are escaped');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+ok('the page: only the extension\u2019s own script runs, and the stylesheet uses only VS Code\u2019s theme', () => {
+  const Module = require('module'); const load = Module._load;
+  const vs = { Uri: { joinPath: (u, ...p) => ({ fsPath: [u.fsPath].concat(p).join('/') }) } };
+  Module._load = function (req) { return req === 'vscode' ? vs : load.apply(this, arguments); };
+  delete require.cache[require.resolve('../releasePage')];
+  const page = require('../releasePage');
+  Module._load = load;
+  const html = page.html({ cspSource: 'vscode-resource:', asWebviewUri: u => 'vscode-resource:' + u.fsPath }, { fsPath: '/ext/media' });
+  const csp = /Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)[1];
+  assert.ok(/default-src 'none'/.test(csp) && !/unsafe-inline|unsafe-eval/.test(csp), csp);
+  assert.ok(html.includes('<script nonce="' + nonce + '" src="vscode-resource:/ext/media/page.js">'), 'the one script, with the nonce');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'media', 'page.css'), 'utf8');
+  const colours = (css.match(/#[0-9a-fA-F]{3,8}\b/g) || []);
+  assert.deepStrictEqual(colours, ['#fff'], 'no fixed colours apart from the tick in a checked box');
+  assert.ok(/font-family: var\(--vscode-font-family\)/.test(css), 'VS Code\u2019s own font');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'media', 'page.js'), 'utf8');
+  assert.ok(!/eval\(|new Function/.test(js), 'no eval in the page');
+});
+
+/** A local server that answers like Azure DevOps, GitHub, GitLab and Bitbucket Cloud. */
+async function fakeGitHosts(opts) {
+  const http = require('http');
+  const FILES = { 'force-app/main/default/classes/A.cls': 'class A {}', 'force-app/main/default/classes/A.cls-meta.xml': '<ApexClass/>',
+    'force-app/main/default/lwc/cmp/cmp.js': 'export default 1;', 'force-app/main/default/lwc/cmp/__tests__/cmp.test.js': 'test', 'sfdx-project.json': '{"packageDirectories":[{"path":"force-app","default":true}]}' };
+  Object.assign(FILES, (opts && opts.files) || {});
+  const BRANCH = 'feature/US-0012345';
+  const BRANCHES = (opts && opts.branches) || [BRANCH];
+  const under = dir => Object.keys(FILES).filter(f => f.startsWith(dir + '/'));
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x'), q = k => u.searchParams.get(k);
+    const send = (code, body, type) => { res.writeHead(code, { 'Content-Type': type || 'application/octet-stream' }); res.end(body); };
+    seen.push(req.method + ' ' + u.pathname);
+    if (u.pathname.startsWith('/org/Proj/_apis/git/repositories/repo')) {                    // Azure DevOps
+      if (req.headers.authorization !== 'Basic ' + Buffer.from(':az-token').toString('base64')) return send(203, '<html>sign in</html>', 'text/html');
+      if (u.pathname.endsWith('/repo')) return send(200, '{"name":"repo"}', 'application/json');
+      if (u.pathname.endsWith('/refs')) return send(200, JSON.stringify({ value: BRANCHES.filter(b => ('heads/' + b).startsWith(q('filter'))).map(b => ({ name: 'refs/heads/' + b })) }), 'application/json');
+      if (!BRANCHES.includes(q('versionDescriptor.version'))) return send(404, '{}');
+      if (q('scopePath')) return send(200, JSON.stringify({ value: [{ path: q('scopePath'), isFolder: true }].concat(under(q('scopePath').slice(1)).map(f => ({ path: '/' + f, isFolder: false }))) }), 'application/json');
+      const f = FILES[q('path').slice(1)]; return f ? send(200, f) : send(404, '{}');
+    }
+    if (u.pathname.startsWith('/api/v3/repos/owner/repo')) {                                  // GitHub
+      if (req.headers.authorization !== 'Bearer gh-token' || !req.headers['user-agent']) return send(401, '{"message":"Bad credentials"}', 'application/json');
+      if (u.pathname.endsWith('/repo')) return send(200, '{"name":"repo"}', 'application/json');
+      if (u.pathname.includes('/git/ref/heads/')) return BRANCHES.includes(decodeURIComponent(u.pathname.split('/git/ref/heads/')[1])) ? send(200, '{"ref":"x"}', 'application/json') : send(404, '{}', 'application/json');
+      if (!BRANCHES.includes(q('ref'))) return send(404, '{}');
+      const p2 = decodeURIComponent(u.pathname.split('/contents/')[1]);
+      if (FILES[p2]) return send(200, FILES[p2]);
+      const kids = under(p2); if (!kids.length) return send(404, '{}');
+      const direct = [...new Set(kids.map(f => f.slice(p2.length + 1).split('/')[0]))].map(n => FILES[p2 + '/' + n] != null ? { type: 'file', path: p2 + '/' + n } : { type: 'dir', path: p2 + '/' + n });
+      return send(200, JSON.stringify(direct), 'application/json');
+    }
+    if (u.pathname.startsWith('/api/v4/projects/group%2Frepo') || u.pathname.startsWith('/api/v4/projects/group/repo')) {   // GitLab
+      if (req.headers['private-token'] !== 'gl-token') return send(401, '{"message":"401 Unauthorized"}', 'application/json');
+      const rest = req.url.split('/api/v4/projects/group%2Frepo')[1] || '';
+      if (rest === '' || rest.startsWith('?')) return send(200, '{"name":"repo"}', 'application/json');
+      if (rest.startsWith('/repository/branches/')) return BRANCHES.includes(decodeURIComponent(rest.split('/repository/branches/')[1].split('?')[0])) ? send(200, '{}', 'application/json') : send(404, '{}', 'application/json');
+      if (!BRANCHES.includes(q('ref'))) return send(404, '{}');
+      if (rest.startsWith('/repository/tree')) {
+        const all = under(q('path')).map(f => ({ type: 'blob', path: f }));
+        const page = Number(q('page')); const slice = all.slice((page - 1) * 1, page * 1);   // one per page: paging is exercised
+        res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, page < all.length ? { 'X-Next-Page': String(page + 1) } : {})); return res.end(JSON.stringify(slice));
+      }
+      const fp = decodeURIComponent(rest.split('/repository/files/')[1].split('/raw')[0]);
+      return FILES[fp] ? send(200, FILES[fp]) : send(404, '{}');
+    }
+    if (u.pathname.startsWith('/2.0/repositories/ws/repo')) {                                // Bitbucket Cloud
+      if (req.headers.authorization !== 'Basic ' + Buffer.from('me@example.com:bb-token').toString('base64')) return send(401, '', 'text/plain');
+      const rest = u.pathname.slice('/2.0/repositories/ws/repo'.length);
+      if (!rest) return send(200, '{"name":"repo"}', 'application/json');
+      if (rest.startsWith('/refs/branches/')) return BRANCHES.includes(decodeURIComponent(rest.slice(15))) ? send(200, '{"target":{"hash":"abc123"}}', 'application/json') : send(404, '{}');
+      if (rest.startsWith('/src/abc123/')) {
+        const p2 = decodeURIComponent(rest.slice(12)).replace(/\/$/, '');
+        if (FILES[p2]) return send(200, FILES[p2]);
+        const kids = under(p2); if (!kids.length) return send(404, '{}');
+        const direct = [...new Set(kids.map(f => f.slice(p2.length + 1).split('/')[0]))].map(n => FILES[p2 + '/' + n] != null ? { type: 'commit_file', path: p2 + '/' + n } : { type: 'commit_directory', path: p2 + '/' + n });
+        return send(200, JSON.stringify({ values: direct }), 'application/json');
+      }
+      return send(404, '{}');
+    }
+    send(404, '');
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return { server, base: 'http://127.0.0.1:' + server.address().port, BRANCH, seen };
+}
+
+ok('repository connectors: Azure DevOps, GitHub, GitLab and Bitbucket each read a file and a folder at the feature branch', async () => {
+  const R = require('../src/repoHost');
+  assert.deepStrictEqual(R.parseRepoUrl('https://spexample.visualstudio.com/Digital%20Sales/_git/Crm').api, 'https://spexample.visualstudio.com/Digital%20Sales/_apis/git/repositories/Crm');
+  assert.strictEqual(R.parseRepoUrl('https://me@dev.azure.com/acme/Sales/_git/crm').api, 'https://dev.azure.com/acme/Sales/_apis/git/repositories/crm');
+  assert.strictEqual(R.parseRepoUrl('https://github.com/acme/crm.git').api, 'https://api.github.com/repos/acme/crm');
+  assert.strictEqual(R.parseRepoUrl('https://gitlab.com/acme/sf/crm').api, 'https://gitlab.com/api/v4/projects/acme%2Fsf%2Fcrm');
+  assert.strictEqual(R.parseRepoUrl('https://bitbucket.org/acme/crm').api, 'https://api.bitbucket.org/2.0/repositories/acme/crm');
+  assert.strictEqual(R.parseRepoUrl('https://git.example.com/acme/crm'), null, 'an unknown host needs the provider set');
+  const g = await fakeGitHosts();
+  try {
+    for (const [provider, url, token] of [['azure', g.base + '/org/Proj/_git/repo', 'az-token'], ['github', g.base + '/owner/repo', 'gh-token'],
+      ['gitlab', g.base + '/group/repo', 'gl-token'], ['bitbucket', g.base + '/ws/repo', 'me@example.com:bb-token']]) {
+      const host = R.createHost(R.parseRepoUrl(url, provider), token);
+      assert.deepStrictEqual(await host.check(), { ok: true, message: 'the token can read repo' }, provider);
+      assert.strictEqual((await host.readFile(g.BRANCH, 'force-app/main/default/classes/A.cls')).toString(), 'class A {}', provider + ': a file at the branch');
+      assert.strictEqual(await host.readFile(g.BRANCH, 'force-app/main/default/classes/Missing.cls'), null, provider + ': a missing file is null');
+      assert.deepStrictEqual((await host.listFiles(g.BRANCH, 'force-app/main/default/lwc/cmp')).sort(),
+        ['force-app/main/default/lwc/cmp/__tests__/cmp.test.js', 'force-app/main/default/lwc/cmp/cmp.js'], provider + ': a bundle, subfolders included');
+      const bad = await R.createHost(R.parseRepoUrl(url, provider), 'wrong').check();
+      assert.ok(!bad.ok && /not accepted|invalid or expired/.test(bad.message), provider + ': ' + bad.message);
+    }
+  } finally { g.server.close(); }
+});
+
+ok('the branch check builds its own workspace from the branch - code with its meta file, bundles whole - and names what is missing', async () => {
+  const R = require('../src/repoHost'), B = require('../src/branchCheck');
+  const g = await fakeGitHosts();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra branch '));
+  try {
+    const host = R.createHost(R.parseRepoUrl(g.base + '/owner/repo', 'github'), 'gh-token');
+    const deploy = new Map([['ApexClass', new Set(['A', 'Gone'])], ['LightningComponentBundle', new Set(['cmp'])]]);
+    const r = await B.buildWorkspace(host, g.BRANCH, deploy, dir);
+    assert.deepStrictEqual(r.written, ['force-app/main/default/classes/A.cls', 'force-app/main/default/classes/A.cls-meta.xml',
+      'force-app/main/default/lwc/cmp/__tests__/cmp.test.js', 'force-app/main/default/lwc/cmp/cmp.js']);
+    assert.deepStrictEqual(r.missing, ['ApexClass Gone']);
+    assert.ok(fs.existsSync(path.join(dir, 'sfdx-project.json')), 'the branch\u2019s own project file');
+    assert.ok(fs.existsSync(path.join(dir, '.forceignore')), 'its own .forceignore, so a parent project\u2019s is never used');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'force-app/main/default/classes/A.cls'), 'utf8'), 'class A {}');
+  } finally { g.server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
 ok('promotion workspace: code blocks are settled when the sides agree or only one side changed', () => {
   const W = require('../src/promotionWork');
   const r = W.settleCodeBlocks('a\n<<<<<<< ours\nx\n||||||| base\nx\n=======\ny\n>>>>>>> theirs\nb\n<<<<<<< ours\np\n||||||| base\no\n=======\nq\n>>>>>>> theirs\n');
@@ -1500,7 +1568,7 @@ ok('promotion workspace: Upload all checks each file, uploads in parallel, sets 
   const api = promoOrg();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra upload '));
   const s = W.store(dir);
-  await W.sync(api, s, { id: 'P1', name: 'P220001' }, promoMerge(), { copadoOrg: 'copado' });
+  await W.sync(api, s, { id: 'P1', name: 'P10001' }, promoMerge(), { copadoOrg: 'copado' });
   // the review file accepted with a choice; the code file resolved by hand - but one is left broken
   const st = s.load();
   s.write('resolved', 'force-app/main/default/permissionsets/Ops.permissionset-meta.xml', s.read('merged', 'force-app/main/default/permissionsets/Ops.permissionset-meta.xml'));
@@ -1529,7 +1597,7 @@ ok('promotion workspace: Upload all checks each file, uploads in parallel, sets 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-ok('pre-check: file paths become components, and the resolved files go into the project with a backup', () => {
+ok('pre-check: file paths become the components they belong to', () => {
   const W = require('../src/promotionWork');
   const c = r => { const x = W.componentOf(r); return x ? x.type + ' ' + x.name : null; };
   assert.strictEqual(c('force-app/main/default/permissionsets/Sales.permissionset-meta.xml'), 'PermissionSet Sales');
@@ -1540,19 +1608,7 @@ ok('pre-check: file paths become components, and the resolved files go into the 
   assert.strictEqual(c('force-app/main/default/objects/Account/Account.object-meta.xml'), 'CustomObject Account');
   assert.strictEqual(c('force-app/main/default/flows/Lead_Flow.flow-meta.xml'), 'Flow Lead_Flow');
   assert.strictEqual(c('README.md'), null);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra precheck '));
-  const s = W.store(path.join(root, '.copado', 'promotions', 'P1'));
-  const rel = 'force-app/main/default/classes/LeadService.cls';
-  fs.mkdirSync(path.join(root, 'force-app/main/default/classes'), { recursive: true });
-  fs.writeFileSync(path.join(root, rel), 'retrieved');
-  s.write('resolved', rel, 'resolved');
-  s.write('resolved', 'force-app/main/default/classes/NewOne.cls', 'new');
-  W.overlay(s, root, [rel, 'force-app/main/default/classes/NewOne.cls']);
-  assert.strictEqual(fs.readFileSync(path.join(root, rel), 'utf8'), 'resolved');
-  W.undoOverlay(s);
-  assert.strictEqual(fs.readFileSync(path.join(root, rel), 'utf8'), 'retrieved', 'restored');
-  assert.ok(!fs.existsSync(path.join(root, 'force-app/main/default/classes/NewOne.cls')), 'a file the pre-check added is removed again');
-  fs.rmSync(root, { recursive: true, force: true });
+  assert.ok(true);
 });
 
 ok('the Copado client: direct REST in parallel, describes cached, and the CLI when the network refuses', async () => {
@@ -1588,7 +1644,7 @@ ok('the Copado client: direct REST in parallel, describes cached, and the CLI wh
   fs.rmSync(path.dirname(cache), { recursive: true, force: true });
 });
 
-ok('the Promotion panel, end to end: open, sorted groups, accept, save a code file, upload all with the status, undo', async () => {
+ok('the Promotion panel, end to end: open, sorted groups, accept, save a code file, upload all with the status, undo - driven from the page, as there is no sidebar for it', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra panel '));
   const api = promoOrg();
   const baseDescribe = api.describe, baseQuery = api.query;
@@ -1598,13 +1654,13 @@ ok('the Promotion panel, end to end: open, sorted groups, accept, save a code fi
         n === 'copado__Status__c' ? { picklist: ['Merge Conflict', 'Conflicts Resolved'] } : {}))
     : baseDescribe(o);
   api.query = async q => /FROM copado__Promotion__c WHERE Name LIKE/.test(q) || /FROM copado__Promotion__c WHERE Id = 'P1' LIMIT 1/.test(q)
-    ? [{ Id: 'P1', Name: 'P220001', copado__Status__c: api.promo.copado__Status__c, copado__Source_Environment__r: { Name: 'dev' }, copado__Destination_Environment__r: { Name: 'qa' } }]
+    ? [{ Id: 'P1', Name: 'P10001', copado__Status__c: api.promo.copado__Status__c, copado__Source_Environment__r: { Name: 'dev' }, copado__Destination_Environment__r: { Name: 'qa' } }]
     : baseQuery(q);
 
   // a stand-in VS Code with the pieces the panel uses
   const registered = {}, events = {}, info = [];
-  let provider = null;
-  const answers = { input: ['P220001'], warning: [] };
+  let treeViews = 0;
+  const answers = { input: ['P10001'], warning: [] };
   class Emitter { constructor() { this.fns = []; this.event = fn => { this.fns.push(fn); return { dispose() {} }; }; } fire() { this.fns.forEach(f => f()); } dispose() {} }
   class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
   const vs = {
@@ -1612,7 +1668,7 @@ ok('the Promotion panel, end to end: open, sorted groups, accept, save a code fi
     MarkdownString: function (v) { this.value = v; }, ProgressLocation: { Notification: 15 },
     Uri: { file: p => ({ scheme: 'file', fsPath: p }) },
     window: {
-      createTreeView: (id, o) => { provider = o.treeDataProvider; return { dispose() {} }; },
+      createTreeView: () => { treeViews++; return { dispose() {} }; },
       withProgress: async (o, fn) => fn({ report() {} }),
       showInputBox: async () => answers.input.shift(),
       showQuickPick: async items => items[0],
@@ -1621,7 +1677,8 @@ ok('the Promotion panel, end to end: open, sorted groups, accept, save a code fi
       setStatusBarMessage: () => ({ dispose() {} }),
       showTextDocument: async () => ({}), activeTextEditor: undefined
     },
-    workspace: { getConfiguration: () => ({ get: (k, d) => d }), onDidSaveTextDocument: fn => { events.save = fn; return { dispose() {} }; } },
+    // this test is about resolving automatically, so it is on here; off is the default (tested in smoke3)
+    workspace: { getConfiguration: () => ({ get: (k, d) => k === 'promotion.autoResolve' ? true : d }), onDidSaveTextDocument: fn => { events.save = fn; return { dispose() {} }; } },
     commands: { executeCommand: async () => {} },
     env: { clipboard: { writeText: async () => {} } }
   };
@@ -1637,54 +1694,58 @@ ok('the Promotion panel, end to end: open, sorted groups, accept, save a code fi
     output: { appendLine: l => logs.push(l) }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf' }), cmd: (id, fn) => { registered[id] = fn; },
     requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => api,
     deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: promoMerge(), startSession: async () => {} },
-    cmdPackage: async (u, us) => { calls.pkg = JSON.parse(fs.readFileSync(us[0].fsPath, 'utf8')); }, cmdValidate: async o => { calls.validate = o; },
-    orgForEnvironment: async (c, r, id, name) => name === 'dev' ? 'devAlias' : name === 'qa' ? 'qaAlias' : null, orgList: async () => [], sfcli: { openPath: async () => {} }
+    cmdValidate: async o => { calls.validate = o; }, runBranchCheck: async o => { calls.branch = o; },
+    orgForEnvironment: async (c, r, id, name) => name === 'dev' ? 'devAlias' : name === 'qa' ? 'qaAlias' : null, orgList: async () => [], sfcli: { openPath: async () => {} },
+    credentialsFor: async () => [], onValidation: () => ({ dispose() {} }), validationStatus: () => null, validatePromotionBranch: async o => { calls.promoBranch = o; },
+    showCopadoErrors: async f => f, readinessReport: async o => { calls.readiness = o; }
   });
 
+  const GROUP = [['To review', ['review']], ['Code to resolve', ['code', 'error']], ['Ready to upload', ['auto', 'resolved']], ['Done', ['uploaded', 'copado']]];
+  const groups = async () => { const f = Object.values((await ui.snapshot()).current.state.files);
+    return GROUP.map(([label, states]) => [label, f.filter(e => states.includes(e.state)).length]).filter(x => x[1]).map(([l, n]) => l + ' (' + n + ')'); };
+  const opened = [];
+  vs.commands.executeCommand = async (...a) => { opened.push(a[0]); };
   await registered['cmr.promotion.open']();
-  const top = await provider.getChildren();
-  assert.strictEqual(top[0].label, 'P220001 \u00b7 Merge Conflict');
-  assert.deepStrictEqual(top.slice(1).map(g => g.label), ['To review (1)', 'Code to resolve (1)', 'Ready to upload (1)']);
-  const reviewItem = (await provider.getChildren(top[1]))[0];
-  assert.strictEqual(reviewItem.label, 'Ops.permissionset-meta.xml');
-  assert.strictEqual(reviewItem.contextValue, 'promoFile.review');
+  assert.deepStrictEqual([opened[0], treeViews], ['cmr.page.open', 0], 'it opens on the page; there is no sidebar view for a promotion');
+  const snap0 = await ui.snapshot();
+  assert.deepStrictEqual([snap0.current.promotion.name, snap0.current.promotion.status], ['P10001', 'Merge Conflict']);
+  assert.deepStrictEqual(await groups(), ['To review (1)', 'Code to resolve (1)', 'Ready to upload (1)']);
+  const reviewRel = Object.entries(snap0.current.state.files).find(([, e]) => e.state === 'review')[0];
+  assert.strictEqual(path.basename(reviewRel), 'Ops.permissionset-meta.xml');
   assert.ok(info.some(m => /1 resolved automatically, 1 to review, 1 code file to resolve/.test(m)), info.join(' | '));
   assert.ok(logs.some(l => /3 files fetched in/.test(l)));
 
-  await registered['cmr.promotion.accept'](reviewItem);
+  await ui.act('accept', { rel: reviewRel });
   // the code file, finished in the editor and saved: it moves to Ready by itself
-  const codeFile = path.join(root, '.copado', 'promotions', 'P220001', 'resolved', 'force-app', 'main', 'default', 'classes', 'A.cls');
+  const codeFile = path.join(root, '.copado', 'promotions', 'P10001', 'resolved', 'force-app', 'main', 'default', 'classes', 'A.cls');
   fs.writeFileSync(codeFile, 'class A {\n  same();\n  feature();\n}\n');
   events.save({ uri: vs.Uri.file(codeFile), getText: () => fs.readFileSync(codeFile, 'utf8') });
-  const after = await provider.getChildren();
-  assert.deepStrictEqual(after.slice(1).map(g => g.label), ['Ready to upload (3)']);
+  assert.deepStrictEqual(await groups(), ['Ready to upload (3)']);
 
-  answers.warning.push('Upload and set the status');
-  await registered['cmr.promotion.uploadAll']();
+  // the page's dialog has been answered: upload, and set the status
+  await ui.act('upload', { status: true });
   assert.ok(Object.values(api.att).filter(a => /^RESOLVED /.test(a.Name)).length === 3, 'all three uploaded');
   assert.strictEqual(api.promo.copado__Status__c, 'Conflicts Resolved');
-  assert.deepStrictEqual((await provider.getChildren()).slice(1).map(g => g.label), ['Done (3)']);
+  assert.deepStrictEqual(await groups(), ['Done (3)']);
 
   answers.warning.push('Undo');
-  await registered['cmr.promotion.undoUpload']();
+  await ui.act('undo', {});
   assert.strictEqual(api.promo.copado__Status__c, 'Merge Conflict');
   assert.ok(Object.values(api.att).filter(a => /^RESOLVED /.test(a.Name)).length === 0);
-  assert.deepStrictEqual((await provider.getChildren()).slice(1).map(g => g.label), ['Ready to upload (3)'], 'still resolved here, ready to upload again');
-  assert.deepStrictEqual(state.get('cmr.recentPromotions'), ['P220001']);
+  assert.deepStrictEqual(await groups(), ['Ready to upload (3)'], 'still resolved here, ready to upload again');
+  assert.deepStrictEqual(state.get('cmr.recentPromotions'), ['P10001']);
   // the pre-check: the promotion's change list plus the resolved files, retrieve from the source, files on top, validate against the destination
   const q0 = api.query, d0 = api.download;
   api.query = async q => /FROM ContentDocumentLink WHERE LinkedEntityId = 'P1'/.test(q)
     ? [{ ContentDocument: { Title: 'Copado Promotion changes', LatestPublishedVersionId: '068000000000020AAA', CreatedDate: '2026-11-12' } }] : q0(q);
   api.download = async (k, id) => id === '068000000000020AAA' ? Buffer.from(JSON.stringify([{ t: 'Flow', n: 'Lead_Flow', a: 'Add' }])) : d0(k, id);
-  await registered['cmr.promotion.precheck']();
-  assert.deepStrictEqual(calls.pkg.map(r => r.t + ' ' + r.n).sort(), ['ApexClass A', 'Flow Lead_Flow', 'PermissionSet Ops', 'PermissionSet Sales']);
-  assert.deepStrictEqual([calls.validate.sourceOrg, calls.validate.targetOrg, calls.validate.mode], ['devAlias', 'qaAlias', 'retrieve']);
-  const target = path.join(root, 'force-app', 'main', 'default', 'classes', 'A.cls');
-  assert.ok(!fs.existsSync(target), 'nothing touches the project before the retrieve');
-  assert.ok(/3 resolved file\(s\) put over the retrieved ones/.test(await calls.validate.overlay()));
-  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'class A {\n  same();\n  feature();\n}\n');
-  await registered['cmr.promotion.undoPrecheck']();
-  assert.ok(!fs.existsSync(target), 'undo removes what the pre-check added');
+  await ui.act('precheck', {});
+  const b = calls.branch;
+  assert.deepStrictEqual(b.rows.map(r => r.t + ' ' + r.n).sort(), ['ApexClass A', 'Flow Lead_Flow', 'PermissionSet Ops', 'PermissionSet Sales'], 'the promotion\u2019s change list plus the resolved files');
+  assert.deepStrictEqual(b.branches, ['feature/US-0012345'], 'the stories\u2019 feature branches - nothing from the source org');
+  assert.deepStrictEqual([b.target, b.overlay.length], ['qaAlias', 3], 'validated against the destination, the resolutions on top');
+  assert.ok(b.overlay.every(f => fs.existsSync(f.file)), 'the resolved files exist');
+  assert.ok(!fs.existsSync(path.join(root, 'force-app')), 'the project is never touched');
   assert.ok(ui.promotionRef('https://x.lightning.force.com/lightning/r/copado__Promotion__c/a0P5e000001AbCdEAF/view') === 'a0P5e000001AbCdEAF');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -1984,6 +2045,9 @@ ok('a fix on a 49,000-line file removes one entry and nothing else', () => {
     '    <fieldPermissions>\n        <editable>false</editable>\n        <field>ACME_Obj_7__c.ACME_Field_7__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n'.length);
 });
 
+/* ------------------------------------------------------------ 3.0 */
+require('./smoke3')(ok, section, { fakeGitHosts: (...a) => fakeGitHosts(...a), fakeSf: (...a) => fakeSf(...a), promoMerge: (...a) => promoMerge(...a), promoOrg: (...a) => promoOrg(...a) });
+
 /* ------------------------------------------------------------ run */
 (async () => {
   // a test file edited by hand can end up with a block pasted twice; refuse to run quietly over that
@@ -1995,7 +2059,7 @@ ok('a fix on a 49,000-line file removes one entry and nothing else', () => {
   for (const t of tests) {
     if (t.section) { console.log(t.section); continue; }
     try { await t.fn(); pass++; console.log('  ok  ' + t.name); }
-    catch (e) { fail++; console.log('  FAIL ' + t.name + '\n      ' + (e.message || e).split('\n').join('\n      ')); }
+    catch (e) { fail++; console.log('  FAIL ' + t.name + '\n      ' + String((e && e.message) || (e && e.stack) || JSON.stringify(e)).split('\n').join('\n      ')); }
   }
   if (repo) try { fs.rmSync(repo, { recursive: true, force: true }); } catch (e) { /* tmp */ }
   console.log('\n' + pass + ' checks passed' + (fail ? ', ' + fail + ' FAILED' : ''));

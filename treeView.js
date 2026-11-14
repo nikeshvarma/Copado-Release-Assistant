@@ -61,7 +61,15 @@ function roots(session) {
     description: unreviewed ? unreviewed + ' to review' : (session.conflicts.length ? 'all reviewed' : 'none'),
     contextValue: session.conflicts.length ? 'cmrConflictRoot' : 'cmrEmpty'
   }));
-  out.push(group('Added from incoming', 'added', r.added.length, 'diff-added'));
+  // your resolution against the target, as you edit it - otherwise what the merge added
+  const live = session.live && !session.live.tooMany ? session.live : null;
+  if (live) {
+    const n = kinds => live.list.filter(c => kinds.includes(c.kind)).length;
+    out.push(group('Removed by you', 'live-removed', n(['removed']), 'discard'));
+    out.push(group('Left out from ' + (session.theirs || 'the incoming file'), 'live-dropped', n(['dropped']), 'discard'));
+    out.push(group('From ' + (session.theirs || 'the incoming file'), 'live-feature', n(['feature', 'changed-feature']), 'diff-added'));
+    out.push(group('Your own edits', 'live-own', n(['own', 'changed-own']), 'edit'));
+  } else out.push(group('Added from incoming', 'added', r.added.length, 'diff-added'));
   if (session.threeWay) {
     out.push(group('Auto-resolved', 'auto', r.auto.length, 'wand', {
       description: r.auto.length ? 'only one side changed' : undefined
@@ -95,6 +103,22 @@ function group(label, id, count, icon, extra) {
 }
 
 function groupChildren(session, parent) {
+  if (/^live-/.test(parent.group) && session.live) {
+    const kinds = { 'live-removed': ['removed'], 'live-dropped': ['dropped'], 'live-feature': ['feature', 'changed-feature'], 'live-own': ['own', 'changed-own'] }[parent.group];
+    return session.live.list.filter(c => kinds.includes(c.kind)).slice(0, MAX_PER_SECTION).map(c => {
+      const text = ((c.kind === 'removed' || c.kind === 'dropped' ? c.removed : c.added).find(l => l.trim()) || '').trim();
+      const name = c.label || text;
+      const item = node(name.length > 60 ? name.slice(0, 57) + '\u2026' : name, 'live', { leaf: true });
+      item.description = 'line ' + (c.bStart + 1) + (c.kind === 'removed' ? ' \u00b7 from the target' : /^changed/.test(c.kind) ? ' \u00b7 changed' : '');
+      item.iconPath = new vscode.ThemeIcon({ removed: 'discard', dropped: 'discard', feature: 'diff-added', 'changed-feature': 'diff-modified', own: 'edit', 'changed-own': 'edit' }[c.kind]);
+      item.command = { command: 'cmr.mergeReveal', title: 'Go to it', arguments: [c.bStart] };
+      // its action as a button on the item: Restore, Add it back, Undo or Use target
+      item.contextValue = c.undo ? 'cmrLiveChange' : 'cmrLiveChangeNoAction';
+      item.change = c;
+      item.tooltip = { removed: 'Restore', dropped: 'Add it back', feature: 'Undo', own: 'Undo', 'changed-feature': 'Use target', 'changed-own': 'Use target' }[c.kind] + ' - the button on the right';
+      return item;
+    });
+  }
   if (parent.group === 'conflicts') return sections(session.conflicts.map((c, i) => ({ c, i })), e => sectionOf(e.c.path, e.c.tag), 'conflicts');
   if (parent.group === 'added') return sections(session.report.added.map((a, i) => ({ a, i })), e => sectionOf(e.a.path), 'added');
   if (parent.group === 'duplicates') return session.report.duplicates.map(duplicateItem);

@@ -15,8 +15,10 @@ function keyOf(el, spec) {
   }
   const parts = [];
   for (const name of spec.key || []) {
-    const c = X.childByName(el, name);
-    if (c) parts.push(name + '=' + X.textOf(c));
+    // a key can be one level down: "componentInstance/identifier" - a FlexiPage item is the component it holds
+    let c = el;
+    for (const step of name.split('/')) c = c && X.childByName(c, step);
+    if (c && !X.hasElementChildren(c)) parts.push(name + '=' + X.textOf(c));
   }
   if (!parts.length) return null;
   return { value: parts.join('|'), kind: 'key' };

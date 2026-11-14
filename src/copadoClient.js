@@ -4,8 +4,8 @@
  * One session per Copado org. Logs in once through the Salesforce CLI, then
  * sends queries, describes and downloads straight to the REST API, a few at a
  * time - far faster than one CLI process per call. Describes are cached on disk
- * for a day. With a proxy configured (Node does not use it by itself), or when
- * the direct route fails, it falls back to the CLI for the rest of the session.
+ * for a day. Requests go through the configured proxy (src/http.js); when the
+ * direct route fails anyway, it falls back to the CLI for the rest of the session.
  *
  * Same interface as before: describe, query, download, patch.
  */
@@ -31,8 +31,7 @@ function createClient(o) {
   const v = o.version || '62.0';
   const base = '/services/data/v' + v;
   const limit = limiter(o.parallel || 6);
-  const proxied = !!(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy);
-  let direct = o.direct !== undefined ? o.direct : !proxied;
+  let direct = o.direct !== undefined ? o.direct : true;
   const memo = new Map();
   let disk = null;
   const cacheFile = o.cacheFile;
@@ -82,17 +81,17 @@ function createClient(o) {
     async describe(sobject) {
       if (memo.has(sobject)) return memo.get(sobject);
       const cache = loadDisk();
-      const hit = cache[o.org + '|' + sobject];
+      const key = 'v3|' + o.org + '|' + sobject;   // v3: with labels, field types and references
+      const hit = cache[key];
       if (hit && Date.now() - hit.at < DAY) { memo.set(sobject, hit.fields); return hit.fields; }
       const fields = await viaDirectOr(async () => {
         try {
           const d = JSON.parse((await get(base + '/sobjects/' + encodeURIComponent(sobject) + '/describe')).toString('utf8'));
-          return (d.fields || []).map(f => Object.assign({ name: f.name, relationshipName: f.relationshipName || null },
-            Array.isArray(f.picklistValues) && f.picklistValues.length ? { picklist: f.picklistValues.filter(x => x.active !== false).map(x => x.value) } : {}));
+          return (d.fields || []).map(fieldOf);
         } catch (e) { if (/^HTTP 404/.test(e.message)) return null; throw restError(e); }
       }, () => sf.describe(o.sfPath, o.org, sobject, o.cwd));
       memo.set(sobject, fields);
-      loadDisk()[o.org + '|' + sobject] = { at: Date.now(), fields };
+      loadDisk()[key] = { at: Date.now(), fields };
       saveDisk();
       return fields;
     },
@@ -120,6 +119,15 @@ function createClient(o) {
   };
 }
 
+/** What the extension keeps of a described field: name, relationship, type, what it references, active picklist values. */
+function fieldOf(f) {
+  return Object.assign({ name: f.name, relationshipName: f.relationshipName || null },
+    f.label ? { label: f.label } : {},
+    f.type ? { type: f.type } : {},
+    Array.isArray(f.referenceTo) && f.referenceTo.length ? { referenceTo: f.referenceTo.slice() } : {},
+    Array.isArray(f.picklistValues) && f.picklistValues.length ? { picklist: f.picklistValues.filter(x => x.active !== false).map(x => x.value) } : {});
+}
+
 function stripAttributes(r) {
   if (!r || typeof r !== 'object') return r;
   const out = {};
@@ -127,4 +135,4 @@ function stripAttributes(r) {
   return out;
 }
 
-module.exports = { createClient, limiter };
+module.exports = { createClient, limiter, fieldOf };
