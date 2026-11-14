@@ -2,7 +2,7 @@
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
   "description": "Copado release work for Salesforce metadata: resolve promotion conflicts, validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
-  "version": "3.9.3",
+  "version": "3.9.4",
   "publisher": "nikeshvarma",
   "license": "MIT",
   "repository": {
@@ -1026,6 +1026,7 @@
     "check": "node scripts/check-unused.js && node scripts/check-activation.js",
     "package": "node scripts/package.js",
     "package:check": "node scripts/check-package.js",
+    "tidy": "node scripts/tidy.js",
     "package:vsce": "npx @vscode/vsce package"
   },
   "author": {

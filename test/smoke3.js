@@ -2233,10 +2233,13 @@ module.exports = function register(ok, section, h) {
     // the settings the README names are settings
     const all = Object.assign({}, ...pkg.contributes.configuration.map(c => c.properties));
     for (const k of [...readme.matchAll(/`(cmr\.[\w.]+)`/g)].map(m => m[1])) assert.ok(k in all, 'the README names a setting that does not exist: ' + k);
-    // every picture it shows is there, and every picture there is shown
-    const pics = [...readme.matchAll(/\((media\/readme\/[\w-]+\.png)\)/g)].map(m => m[1]);
+    // every picture it shows is there - and a picture it does not show, left in a clone, never ships
+    const ship = require('../scripts/ship');
+    const pics = [...ship.shown(root)];
+    assert.ok(pics.length >= 5, 'the pictures it shows');
     for (const f of pics) assert.ok(fs.existsSync(path.join(root, f)), f);
-    assert.deepStrictEqual(fs.readdirSync(path.join(root, 'media', 'readme')).filter(f => f.endsWith('.png')).map(f => 'media/readme/' + f).filter(f => !pics.includes(f)), [], 'pictures nothing shows');
+    const keep = ship.keep(root);
+    for (const f of fs.readdirSync(path.join(root, 'media', 'readme')).filter(f => f.endsWith('.png')).map(f => 'media/readme/' + f)) assert.strictEqual(keep(f), pics.includes(f), f + (pics.includes(f) ? ' ships' : ' is left over: it does not ship'));
     assert.deepStrictEqual([pkg.bugs.url, pkg.homepage], ['https://github.com/' + repo + '/issues', 'https://github.com/' + repo + '#readme']);
     for (const f of ['SECURITY.md', 'CONTRIBUTING.md', 'LICENSE', '.github/ISSUE_TEMPLATE/bug_report.md', '.github/ISSUE_TEMPLATE/feature_request.md', '.github/pull_request_template.md']) assert.ok(fs.existsSync(path.join(root, f)), f);
   });
@@ -2368,6 +2371,33 @@ module.exports = function register(ok, section, h) {
       const mv = await realMergeView(root, {});
       assert.ok(mv.api && typeof mv.api.manualUi.act === 'function' && typeof mv.api.manualUi.snapshot === 'function', 'activate hands over the Manual tab');
     } finally { rmTree(root); }
+  });
+
+  section('3.9.4: a clone with leftovers');
+
+  ok('a clone still holding what the project removed: none of it ships, and npm run tidy deletes it - with git when it is a checkout', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra tidy '));
+    try {
+      const put = (f, t) => { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); };
+      put('scripts/removed.txt', '# removed\nquickMerge.js\nmedia/readme/banner.png\n');
+      put('README.md', '![Shown](media/readme/merge-editor.png)\n');
+      for (const f of ['quickMerge.js', 'media/readme/banner.png', 'media/readme/old-unlisted.png', 'media/readme/merge-editor.png', 'extension.js']) put(f, 'x');
+      const ship = require('../scripts/ship');
+      const keep = ship.keep(root);
+      assert.deepStrictEqual(['quickMerge.js', 'media/readme/banner.png', 'media/readme/old-unlisted.png', 'media/readme/merge-editor.png', 'extension.js', 'media\\readme\\banner.png'].map(keep), [false, false, false, true, true, false]);
+      assert.deepStrictEqual(ship.leftovers(root), ['media/readme/banner.png', 'media/readme/old-unlisted.png', 'quickMerge.js']);
+      // tidy, in the copy: its own ship.js beside it
+      put('scripts/ship.js', fs.readFileSync(path.join(__dirname, '..', 'scripts', 'ship.js'), 'utf8'));
+      put('scripts/tidy.js', fs.readFileSync(path.join(__dirname, '..', 'scripts', 'tidy.js'), 'utf8'));
+      const out = require('child_process').execFileSync(process.execPath, [path.join(root, 'scripts', 'tidy.js')], { encoding: 'utf8' });
+      assert.ok(/3 file\(s\) removed/.test(out), out);
+      assert.deepStrictEqual(['quickMerge.js', 'media/readme/banner.png', 'media/readme/old-unlisted.png', 'media/readme/merge-editor.png', 'extension.js'].map(f => fs.existsSync(path.join(root, f))), [false, false, false, true, true]);
+      assert.ok(/nothing left over/.test(require('child_process').execFileSync(process.execPath, [path.join(root, 'scripts', 'tidy.js')], { encoding: 'utf8' })), 'then nothing');
+    } finally { rmTree(root); }
+    // this project's list names what it removed - a clone may still hold them: the package leaves them out
+    const list = require('../scripts/ship').removed(path.join(__dirname, '..'));
+    assert.ok(['quickMerge.js', 'treeView.js', 'src/liveMarks.js', 'media/readme/banner.png', 'media/readme/merge.png'].every(f => list.includes(f)), 'the removed files are listed');
+    assert.ok(!list.some(f => /^(extension\.js|package\.json|README\.md|media\/readme\/(merge-editor|duplicates|promotion|precheck|manual|components)\.png)$/.test(f)), 'and nothing still used');
   });
 
   section('3.0: what is shipped');

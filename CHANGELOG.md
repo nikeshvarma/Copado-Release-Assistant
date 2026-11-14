@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.9.4
+
+- **CI passes in a clone that still holds what the project removed.** Unzipping a new source over a clone never deletes files, so old README pictures and code files stayed - and failed the README test. Now none of them ships: the package leaves out every file in `scripts/removed.txt` and every README picture the README does not show, and the package check makes sure. `npm run tidy` deletes them from the clone, to commit. No change to what the extension does.
+
 ## 3.9.3
 
 - **CI on Windows**: the tests inside VS Code reach the Manual tab through what the extension hands them when it activates, instead of loading its file by a path - on Windows a path can differ from VS Code's only in the drive letter's case, which gave the tests a second, unconnected copy. No change to what the extension does.
