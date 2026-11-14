@@ -29,9 +29,13 @@ function vscodeExecutable(exe, platform) {
  * macOS a socket path may be at most 103 characters - the test runner's default, inside the checkout,
  * is longer on CI. So under /tmp on macOS (its os.tmpdir() is itself long), the system's temp folder elsewhere.
  */
-function userDataDir(platform) {
-  const base = (platform || process.platform) === 'darwin' ? '/tmp' : os.tmpdir();
-  return fs.mkdtempSync(path.join(base, 'cra-ud-'));
+function userDataBase(platform) {
+  return (platform || process.platform) === 'darwin' ? '/tmp' : os.tmpdir();
 }
 
-module.exports = { vscodeExecutable, userDataDir };
+/** Made in that base, for the system this runs on. */
+function userDataDir() {
+  return fs.mkdtempSync(path.join(userDataBase(), 'cra-ud-'));
+}
+
+module.exports = { vscodeExecutable, userDataBase, userDataDir };

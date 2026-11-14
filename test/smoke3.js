@@ -1995,16 +1995,19 @@ module.exports = function register(ok, section, h) {
   });
 
   ok('VS Code\u2019s user data goes in a short folder: its socket path stays under macOS\u2019s 103 characters', () => {
-    const { userDataDir } = require('./integration/vscodeExecutable');
-    for (const platform of ['darwin', process.platform]) {
-      const d = userDataDir(platform);
-      try {
-        assert.ok(fs.existsSync(d), 'made');
-        if (platform === 'darwin') assert.ok(d.startsWith('/tmp/cra-ud-'), d);
-        // the socket VS Code 1.146 opens there - versions give it a few characters more, still well under
-        assert.ok((d + '/1.146-main.sock').length < 104 - 20, (d + '/1.146-main.sock').length + ' characters');
-      } finally { rmTree(d); }
-    }
+    const { userDataBase, userDataDir } = require('./integration/vscodeExecutable');
+    // the choice, for every system - without making anything: /tmp exists only on macOS and Linux
+    assert.strictEqual(userDataBase('darwin'), '/tmp', 'macOS: /tmp - its own temp folder is itself long');
+    assert.strictEqual(userDataBase('win32'), os.tmpdir());
+    assert.strictEqual(userDataBase('linux'), os.tmpdir());
+    // the socket VS Code 1.146 opens there on macOS - versions give it a few characters more, still well under
+    assert.ok(('/tmp/cra-ud-XXXXXX/1.146-main.sock').length < 104 - 20);
+    // made, for the system this runs on
+    const d = userDataDir();
+    try {
+      assert.ok(fs.existsSync(d) && path.basename(d).startsWith('cra-ud-'), d);
+      assert.strictEqual(path.dirname(d), path.resolve(userDataBase()));
+    } finally { rmTree(d); }
     const run = fs.readFileSync(path.join(__dirname, 'integration', 'runTest.js'), 'utf8');
     assert.ok(/'--user-data-dir=' \+ data/.test(run), 'the runner passes it to VS Code');
     assert.ok(/process\.exitCode = 1/.test(run) && !/process\.exit\(1\)/.test(run), 'a failed run still tidies up before exiting');

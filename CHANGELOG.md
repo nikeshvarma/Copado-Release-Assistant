@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.4
+
+- Fixed: the unit test for the VS Code tests' short user-data folder tried to make macOS's `/tmp` folder on Windows, where it does not exist. It now checks the choice of folder for every system without making anything, and makes one only for the system it runs on. No change to what the extension does.
+
 ## 3.5.3
 
 - **The VS Code tests run on macOS.** VS Code gets a short user-data folder of its own: it opens a socket there, and macOS allows a socket path of at most 103 characters - the test runner's default folder, inside the checkout, made it longer on CI. A failed run now tidies up its temporary folders before it exits. No change to what the extension does.

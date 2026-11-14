@@ -2,7 +2,7 @@
 
 **Copado release work for Salesforce metadata, inside VS Code.** Resolve a promotion's merge conflicts without losing anything, validate a user story against an org before Copado does, find branch conflicts — with every change shown and every decision yours.
 
-`v3.5.3` · by **Nikesh Varma**
+`v3.5.4` · by **Nikesh Varma**
 
 ![How it works: a user story, its package.xml, a check-only validation, fixes](media/readme/how-it-works.png)
 
@@ -11,7 +11,7 @@ Start with **Copado: Open Release Assistant** — the page for promotions and us
 ## Install
 
 ```bash
-code --install-extension copado-release-assistant-3.5.3.vsix --force
+code --install-extension copado-release-assistant-3.5.4.vsix --force
 ```
 
 Open your Salesforce project folder. The extension finds the project by its `sfdx-project.json` — the project of the file you have open, the open folder, or the single project inside it; with several, set `cmr.project.path`. Paths with spaces are fine. Validation needs the **Salesforce CLI** (`sf`) with your orgs already logged in — the extension never sees or stores a password. Branch conflicts need **git 2.38+**.
