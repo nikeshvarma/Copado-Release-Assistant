@@ -2,14 +2,18 @@ name: test
 
 on:
   push:
+    # branches only: a tag's release runs these tests itself (release.yml), so they do not run twice
+    branches: ['**']
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: test-${{ github.ref }}
+  # its own group when release.yml calls it, so a release is never cancelled by a push's run
+  group: test-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

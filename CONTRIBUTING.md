@@ -32,6 +32,14 @@ npm run package:check     # what it must hold and must not, and that it activate
 
 The package is the files git tracks, less what `.vscodeignore` leaves out - commit a new file before packaging it. Install it with `code --install-extension <file> --force`. Bump `version` in `package.json` for each release, with an entry in `CHANGELOG.md` - VS Code caches an installed extension by version. To publish to the Marketplace with `vsce` (`npm run package:vsce`), add a `repository` field to `package.json` first.
 
+## Release it
+
+1. Bump `version` in `package.json` (`3.5.5` → `3.5.6`; a pre-release such as `3.6.0-beta.1` is marked so on GitHub).
+2. Add its section to `CHANGELOG.md`, headed exactly `## 3.5.6` - it becomes the release notes.
+3. Commit and push to `main`.
+
+`.github/workflows/release.yml` sees a version with no tag yet, runs the whole test workflow - every system, the browser, VS Code - and only if it passes builds the `.vsix`, makes the tag `v3.5.6` and publishes the GitHub release with the notes and the `.vsix` attached. It stops, with the reason, for a version with no changelog section, or a tag pushed by hand that is not the version. A push that does not change the version releases nothing. Running it again for a published version replaces its `.vsix` and notes. `node scripts/release.js plan` and `notes` show what it would do.
+
 ## Ground rules
 
 - **No runtime dependencies.** Everything is plain Node.js and the VS Code API. The one thing shipped from outside is Monaco Editor in `media/monaco/` (MIT, Microsoft) - only the files the merge editor loads; `scripts/check-package.js` checks they are all there.

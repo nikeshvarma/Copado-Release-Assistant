@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.5
+
+- **Releases from CI.** Bump the version, add its changelog section, push to main: the whole test workflow runs, and if it passes the `.vsix` is built, the tag is made and the GitHub release is published with the notes and the `.vsix` (`.github/workflows/release.yml`). A tag pushed by hand releases the same way, if it matches the version. No change to what the extension does.
+
 ## 3.5.4
 
 - Fixed: the unit test for the VS Code tests' short user-data folder tried to make macOS's `/tmp` folder on Windows, where it does not exist. It now checks the choice of folder for every system without making anything, and makes one only for the system it runs on. No change to what the extension does.
