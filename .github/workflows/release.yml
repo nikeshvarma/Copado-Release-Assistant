@@ -1,0 +1,76 @@
+name: release
+
+# Bump "version" in package.json, add its "## <version>" section to CHANGELOG.md, push to main:
+# when that version has no tag yet, the whole test workflow runs, and if it passes the .vsix is built,
+# the tag is made and the GitHub release is published with the notes and the .vsix.
+# A tag pushed by hand (git tag v1.2.3 && git push origin v1.2.3) releases the same way, if it matches.
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# one release at a time: a second push waits for the first, never cancels it
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: plan
+        run: node scripts/release.js plan
+
+  test:
+    # the same tests as every push - every system, the browser, VS Code
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: [plan, test]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run package
+      - run: npm run package:check
+      - run: node scripts/release.js notes > release-notes.md
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          VSIX="dist/$(node -p "require('./package.json').name")-$VERSION.vsix"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # run again for a release that exists: the .vsix and the notes are replaced
+            gh release upload "$TAG" "$VSIX" --clobber
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            FLAGS=""
+            if [ "$PRERELEASE" = "true" ]; then FLAGS="--prerelease"; fi
+            # the tag is made on this commit when it is not there yet
+            gh release create "$TAG" "$VSIX" --title "$VERSION" --notes-file release-notes.md --target "$GITHUB_SHA" $FLAGS
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ needs.plan.outputs.version }}
+          path: dist/*.vsix

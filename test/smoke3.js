@@ -2025,6 +2025,42 @@ module.exports = function register(ok, section, h) {
     for (const f of ['smoke.js', 'smoke3.js']) assert.ok(!/fs\.rmSync\([^)]*recursive/.test(fs.readFileSync(path.join(__dirname, f), 'utf8')), f + ' cleans up through rmTree');
   });
 
+  section('3.5.5: releases from CI');
+
+  ok('a release: a push to main releases a version with no tag yet; a pushed tag must be the version; never without its notes', () => {
+    const { decide, notesFor } = require('../scripts/release');
+    const log = '# Changelog\n\n## 1.3.0\n\n- New thing.\n- Another.\n\n## 1.2.0\n\n- Older.\n';
+    assert.deepStrictEqual(decide({ version: '1.3.0', ref: 'refs/heads/main', tags: ['v1.2.0'], changelog: log }),
+      { release: true, tag: 'v1.3.0', version: '1.3.0', prerelease: false, why: 'v1.3.0 is not released yet' });
+    const again = decide({ version: '1.3.0', ref: 'refs/heads/main', tags: ['v1.2.0', 'v1.3.0'], changelog: log });
+    assert.deepStrictEqual([again.release, again.tag], [false, 'v1.3.0'], 'released already: a push without a new version does nothing');
+    assert.strictEqual(decide({ version: '1.3.0', ref: 'refs/tags/v1.3.0', tags: ['v1.3.0'], changelog: log }).release, true, 'the tag pushed by hand');
+    assert.throws(() => decide({ version: '1.3.0', ref: 'refs/tags/v1.3.1', tags: [], changelog: log }), /tag v1\.3\.1 does not match package\.json's version 1\.3\.0/);
+    assert.throws(() => decide({ version: '1.4.0', ref: 'refs/heads/main', tags: [], changelog: log }), /no "## 1\.4\.0" section/);
+    assert.throws(() => decide({ version: 'next', ref: 'refs/heads/main', tags: [], changelog: log }), /not a version/);
+    assert.strictEqual(decide({ version: '2.0.0-beta.1', ref: 'refs/heads/main', tags: [], changelog: '## 2.0.0-beta.1\n\n- Try it.\n' }).prerelease, true);
+    assert.strictEqual(notesFor(log, '1.3.0'), '- New thing.\n- Another.');
+    assert.strictEqual(notesFor(log, '1.2.0'), '- Older.');
+    assert.strictEqual(notesFor(log, '1.2'), null, 'the whole version, not a prefix');
+    assert.strictEqual(notesFor(log.replace(/\n/g, '\r\n'), '1.2.0'), '- Older.', 'Windows line endings');
+    // this repository: its version has its notes
+    const pkg = require('../package.json');
+    assert.ok(notesFor(fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8'), pkg.version), 'CHANGELOG.md has a section for ' + pkg.version);
+  });
+
+  ok('the release workflow: tests first - the whole test workflow - then the .vsix, the tag and the release; the test workflow runs on branches and is callable', () => {
+    const wf = f => fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', f), 'utf8');
+    const rel = wf('release.yml'), tst = wf('test.yml');
+    assert.ok(/tags: \['v\*'\]/.test(rel) && /branches: \[main, master\]/.test(rel));
+    assert.ok(/contents: write/.test(rel) && /cancel-in-progress: false/.test(rel));
+    assert.ok(/uses: \.\/\.github\/workflows\/test\.yml/.test(rel), 'the release runs the whole test workflow');
+    assert.ok(/needs: \[plan, test\]/.test(rel) && /if: needs\.plan\.outputs\.release == 'true'/.test(rel), 'and publishes only after it');
+    for (const step of ['node scripts/release.js plan', 'npm run package', 'npm run package:check', 'node scripts/release.js notes', 'gh release create']) assert.ok(rel.includes(step), step);
+    assert.ok(/workflow_call:/.test(tst) && /branches: \['\*\*'\]/.test(tst), 'callable, and not run twice for a tag');
+    assert.ok(/group: test-\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}/.test(tst), 'a release\u2019s tests are not cancelled by a push');
+    assert.ok(!/\t/.test(rel + tst), 'YAML indented with spaces');
+  });
+
   section('3.0: what is shipped');
 
   ok('the package: every command registered and contributed, every setting read, the Command Palette short, nothing removed left behind', () => {

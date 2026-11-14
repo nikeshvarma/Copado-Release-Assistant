@@ -2,7 +2,7 @@
 
 **Copado release work for Salesforce metadata, inside VS Code.** Resolve a promotion's merge conflicts without losing anything, validate a user story against an org before Copado does, find branch conflicts — with every change shown and every decision yours.
 
-`v3.5.4` · by **Nikesh Varma**
+`v3.5.5` · by **Nikesh Varma**
 
 ![How it works: a user story, its package.xml, a check-only validation, fixes](media/readme/how-it-works.png)
 
@@ -11,7 +11,7 @@ Start with **Copado: Open Release Assistant** — the page for promotions and us
 ## Install
 
 ```bash
-code --install-extension copado-release-assistant-3.5.4.vsix --force
+code --install-extension copado-release-assistant-3.5.5.vsix --force
 ```
 
 Open your Salesforce project folder. The extension finds the project by its `sfdx-project.json` — the project of the file you have open, the open folder, or the single project inside it; with several, set `cmr.project.path`. Paths with spaces are fine. Validation needs the **Salesforce CLI** (`sf`) with your orgs already logged in — the extension never sees or stores a password. Branch conflicts need **git 2.38+**.
@@ -207,7 +207,9 @@ npm install --no-save @vscode/test-electron
 npm run test:vscode       # on Linux without a display: xvfb-run -a npm run test:vscode
 ```
 
-GitHub Actions (`.github/workflows/test.yml`) runs all of it on every push: the unit tests on Linux, Windows and macOS with Node 18, 20 and 22, the checks and the package (kept as a downloadable artifact), the browser tests, and the VS Code tests on all three systems. To publish to the Marketplace with `vsce` (`npm run package:vsce`), add a `repository` field to `package.json` first. Press **F5** in VS Code to run the extension in a development host. See [CONTRIBUTING.md](CONTRIBUTING.md).
+GitHub Actions (`.github/workflows/test.yml`) runs all of it on every push: the unit tests on Linux, Windows and macOS with Node 18, 20 and 22, the checks and the package (kept as a downloadable artifact), the browser tests, and the VS Code tests on all three systems.
+
+**Releases are automatic.** Bump `version` in `package.json`, add its `## <version>` section to `CHANGELOG.md`, and push to `main`: when that version has no tag yet, `.github/workflows/release.yml` runs the whole test workflow, and if it passes, builds the `.vsix`, makes the tag `v<version>` and publishes the GitHub release with that section as its notes and the `.vsix` attached. A version like `2.0.0-beta.1` is a pre-release. Pushing the tag yourself (`git tag v1.2.3 && git push origin v1.2.3`) releases the same way, if it matches the version. A push that does not change the version releases nothing. To publish to the Marketplace with `vsce` (`npm run package:vsce`), add a `repository` field to `package.json` first. Press **F5** in VS Code to run the extension in a development host. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
