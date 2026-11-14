@@ -4,6 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const rmTree = require('./rmTree');
 const { execFileSync } = require('child_process');
 
 const X = require('../src/xmlParser');
@@ -650,7 +651,7 @@ ok('the project is found automatically, and the setting overrides it', () => {
 
   assert.strictEqual(paths.forCli(path.join(single, 'manifest', 'package.xml'), single), 'manifest/package.xml');
   assert.strictEqual(paths.forCli(path.join(base, 'elsewhere.xml'), single), path.join(base, 'elsewhere.xml'));
-  fs.rmSync(base, { recursive: true, force: true });
+  rmTree(base);
 });
 
 /* ------------------------------------------------------------ live output */
@@ -767,7 +768,7 @@ ok('retrieve and validation stream the CLI output live, then return a structured
   assert.strictEqual(bad.success, false);
   assert.ok(/No file found at manifest\/missing\.xml/.test(bad.message), 'the CLI error text becomes the message');
   assert.ok(Date.now() - t0 < 20000);
-  fs.rmSync(dir, { recursive: true, force: true });
+  rmTree(dir);
 });
 
 ok('spinners and ticking timers are not changes; a real change prints the whole snapshot', () => {
@@ -860,7 +861,7 @@ ok('a CLI reprinting its block every tick gives a short event log, and source tr
     await sfcli.retrieve(sf, { manifest: 'manifest/package.xml', org: 'dev', cwd: dir, onLine: l => quick.push(l), env: { SF_DISABLE_SOURCE_MEMBER_POLLING: 'true' } });
     assert.ok(!quick.some(l => /Updating source tracking/.test(l)), 'the switch reaches the CLI');
   } finally { delete process.env.FAKE_SF_STYLE; }
-  fs.rmSync(dir, { recursive: true, force: true });
+  rmTree(dir);
 });
 
 /* ------------------------------------------------------------ selective commits */
@@ -1046,7 +1047,7 @@ ok('Phase 0: queries and describes go through the Salesforce CLI intact', async 
   const f = await sfcli.describe(sf, 'copado', 'copado__User_Story__c', dir);
   assert.deepStrictEqual(f, [{ name: 'Id', relationshipName: null }, { name: 'copado__Project__c', relationshipName: 'copado__Project__r' }]);
   assert.strictEqual(await sfcli.describe(sf, 'copado', 'copado__Not_There__c', dir), null, 'a missing object is null, not an error');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rmTree(dir);
 });
 
 ok('a CLI without "sf api request" is recognised once, however it words it, and one login serves every download', async () => {
@@ -1075,7 +1076,7 @@ ok('a CLI without "sf api request" is recognised once, however it words it, and 
     for (const k of ['FAKE_SF_NO_API', 'FAKE_SF_COUNT', 'FAKE_SF_INSTANCE']) delete process.env[k];
     sfcli.resetRest();
     server.close();
-    fs.rmSync(dir, { recursive: true, force: true });
+    rmTree(dir);
   }
 });
 
@@ -1342,7 +1343,7 @@ ok('Phase 2b: writes go straight to the REST API with the CLI\u2019s session - P
     assert.deepStrictEqual(JSON.parse(seen.body), { Name: 'RESOLVED x', Body: 'PExheW91dC8+' });
   } finally {
     delete process.env.FAKE_SF_TOKEN; delete process.env.FAKE_SF_INSTANCE;
-    sfcli.resetRest(); server.close(); fs.rmSync(dir, { recursive: true, force: true });
+    sfcli.resetRest(); server.close(); rmTree(dir);
   }
 });
 
@@ -1402,7 +1403,7 @@ ok('promotion workspace: everything fetched at once, sorted into resolved automa
   api.att.A4.Name = 'RESOLVED ' + api.att.A4.Name;
   const third = await W.sync(api, s, promotion, promoMerge(), {});
   assert.strictEqual(third.state.files['force-app/main/default/permissionsets/Ops.permissionset-meta.xml'].state, 'copado');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rmTree(dir);
 });
 
 ok('the page\u2019s choices: each clash takes the side you pick, exactly as the merge view would write it', async () => {
@@ -1423,7 +1424,7 @@ ok('the page\u2019s choices: each clash takes the side you pick, exactly as the 
   assert.strictEqual(X.parse(r.text).root.name, 'PermissionSet');
   assert.strictEqual(W.applyChoices(merged, [{ line: 999, tag: 'x', target: 'a', incoming: 'b' }], { 0: 'target' }).moved.length, 1, 'a clash whose line moved is reported, not guessed');
   assert.ok(W.applyChoices(merged, [{ line: e.clashes[0].line, tag: 'description', target: 'a < b & c', incoming: '' }], { 0: 'target' }).text.includes('<description>a &lt; b &amp; c</description>'), 'values are escaped');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rmTree(dir);
 });
 
 ok('the page: only the extension\u2019s own script runs, and the stylesheet uses only VS Code\u2019s theme', () => {
@@ -1551,7 +1552,7 @@ ok('the branch check builds its own workspace from the branch - code with its me
     assert.ok(fs.existsSync(path.join(dir, 'sfdx-project.json')), 'the branch\u2019s own project file');
     assert.ok(fs.existsSync(path.join(dir, '.forceignore')), 'its own .forceignore, so a parent project\u2019s is never used');
     assert.strictEqual(fs.readFileSync(path.join(dir, 'force-app/main/default/classes/A.cls'), 'utf8'), 'class A {}');
-  } finally { g.server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+  } finally { g.server.close(); rmTree(dir); }
 });
 
 
@@ -1594,7 +1595,7 @@ ok('promotion workspace: Upload all checks each file, uploads in parallel, sets 
   assert.strictEqual(api.promo.copado__Status__c, 'Merge Conflict');
   assert.strictEqual(s.load().files['force-app/main/default/classes/A.cls'].state, 'resolved', 'kept as resolved here, ready to upload again');
   assert.strictEqual(W.lastBatch(s).id, first.batch.id, 'the earlier batch is next to undo');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rmTree(dir);
 });
 
 ok('pre-check: file paths become the components they belong to', () => {
@@ -1641,7 +1642,7 @@ ok('the Copado client: direct REST in parallel, describes cached, and the CLI wh
   assert.deepStrictEqual(await c.query('SELECT Id FROM X'), [{ Id: '1', Rel__r: { Name: 'n' } }], 'records without Salesforce\u2019s attributes');
   assert.strictEqual((await c.download('Attachment', '00P1')).toString(), 'via cli', 'a network failure switches to the CLI');
   assert.strictEqual(c.mode, 'cli');
-  fs.rmSync(path.dirname(cache), { recursive: true, force: true });
+  rmTree(path.dirname(cache));
 });
 
 ok('the Promotion panel, end to end: open, sorted groups, accept, save a code file, upload all with the status, undo - driven from the page, as there is no sidebar for it', async () => {
@@ -1747,7 +1748,7 @@ ok('the Promotion panel, end to end: open, sorted groups, accept, save a code fi
   assert.ok(b.overlay.every(f => fs.existsSync(f.file)), 'the resolved files exist');
   assert.ok(!fs.existsSync(path.join(root, 'force-app')), 'the project is never touched');
   assert.ok(ui.promotionRef('https://x.lightning.force.com/lightning/r/copado__Promotion__c/a0P5e000001AbCdEAF/view') === 'a0P5e000001AbCdEAF');
-  fs.rmSync(root, { recursive: true, force: true });
+  rmTree(root);
 });
 
 ok('Phase 0: a missing story or a non-Copado org is explained, not crashed on', async () => {
@@ -1883,7 +1884,7 @@ ok('one click merges resolution into place, and auto-merge follows the pastes', 
   // hiding the button
   await vs.registered['cmr.quickMerge.toggleButton']();
   assert.strictEqual(vs.item.shown, false);
-  fs.rmSync(root, { recursive: true, force: true });
+  rmTree(root);
 });
 
 ok('a missing or empty conflict file explains itself instead of merging', async () => {
@@ -1908,7 +1909,7 @@ ok('a missing or empty conflict file explains itself instead of merging', async 
   await vs.registered['cmr.quickMerge.run']();
   assert.ok(vs.messages.some(m => /resolution\.xml is empty/.test(m)), vs.messages.join(' | '));
   assert.strictEqual(started, 0);
-  fs.rmSync(root, { recursive: true, force: true });
+  rmTree(root);
 });
 
 /* ------------------------------------------------------------ large files */
@@ -2061,7 +2062,7 @@ require('./smoke3')(ok, section, { fakeGitHosts: (...a) => fakeGitHosts(...a), f
     try { await t.fn(); pass++; console.log('  ok  ' + t.name); }
     catch (e) { fail++; console.log('  FAIL ' + t.name + '\n      ' + String((e && e.message) || (e && e.stack) || JSON.stringify(e)).split('\n').join('\n      ')); }
   }
-  if (repo) try { fs.rmSync(repo, { recursive: true, force: true }); } catch (e) { /* tmp */ }
+  if (repo) try { rmTree(repo); } catch (e) { /* tmp */ }
   console.log('\n' + pass + ' checks passed' + (fail ? ', ' + fail + ' FAILED' : ''));
   if (fail) process.exitCode = 1;
 })();

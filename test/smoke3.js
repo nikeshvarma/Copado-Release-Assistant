@@ -10,6 +10,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const rmTree = require('./rmTree');
 const http = require('http');
 const https = require('https');
 const net = require('net');
@@ -186,7 +187,7 @@ module.exports = function register(ok, section, h) {
       assert.deepStrictEqual(mine.map(e => e.label), ['run 502', 'run 501'], 'newest first; story names match regardless of case');
       fs.writeFileSync(path.join(dir, 'validations.json'), '{ broken');
       assert.deepStrictEqual(H.load(dir), [], 'a broken file is an empty history, not a crash');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmTree(dir); }
   });
 
   section('3.0: the lifecycle - pipeline steps, journeys, back-promotions');
@@ -434,7 +435,7 @@ module.exports = function register(ok, section, h) {
         openTextDocument: async u => ({ getText: () => fs.readFileSync(u.fsPath, 'utf8'), positionAt: () => 0, uri: u }),
         applyEdit: async () => true,
         fs: { readFile: async u => fs.readFileSync(u.fsPath), writeFile: async (u, b) => { fs.mkdirSync(path.dirname(u.fsPath), { recursive: true }); fs.writeFileSync(u.fsPath, b); },
-          createDirectory: async u => fs.mkdirSync(u.fsPath, { recursive: true }), stat: async u => fs.statSync(u.fsPath), readDirectory: async () => [], delete: async u => fs.rmSync(u.fsPath, { recursive: true, force: true }) }
+          createDirectory: async u => fs.mkdirSync(u.fsPath, { recursive: true }), stat: async u => fs.statSync(u.fsPath), readDirectory: async () => [], delete: async u => rmTree(u.fsPath) }
       },
       languages: { createDiagnosticCollection: () => ({ clear() {}, set() {}, delete() {}, dispose() {} }) },
       commands: { registerCommand: (id, fn) => { registered[id] = fn; return { dispose() {} }; }, executeCommand: async (...a) => { log.commands.push(a); } },
@@ -529,7 +530,7 @@ module.exports = function register(ok, section, h) {
       assert.deepStrictEqual([hist().length, hist()[2].source, hist()[2].environment], [3, 'feature branch', 'uat']);
     } finally {
       g.server.close(); sfcli.resetRest();
-      fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(tools, { recursive: true, force: true });
+      rmTree(root); rmTree(tools);
     }
   });
 
@@ -720,7 +721,7 @@ module.exports = function register(ok, section, h) {
         assert.strictEqual(timers.length, 2, 'and keeps following while the job runs');
       } finally { global.setTimeout = realTimeout; }
       assert.ok(api.queries.every(q => /^SELECT /.test(q)), 'Copado is only read');
-    } finally { await ui.act('stopWatch', {}); fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { await ui.act('stopWatch', {}); rmTree(root); }
   });
 
   ok('the readiness report and Copado\u2019s own errors, end to end through the extension', async () => {
@@ -751,7 +752,7 @@ module.exports = function register(ok, section, h) {
       assert.ok(vs.log.info.some(m => /came from Copado\u2019s deployment of P0003/.test(m)));
     } finally {
       sfcli.resetRest();
-      fs.rmSync(root, { recursive: true, force: true });
+      rmTree(root);
     }
   });
 
@@ -784,7 +785,7 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(r.kind, 'code', 'merged as text');
       s.write('resolved', rel, r.merged.replace(/<<<<<<<[^\n]*\n|=======\n|>>>>>>>[^\n]*\n/g, '').replace('</PermissionSet>\n', ''));
       assert.ok(!W.gates(s, rel, { kind: r.kind, state: 'auto' }, libs()).ok, 'the old gate would have let this through to Copado');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmTree(dir); }
   });
 
   ok('resolutions already in Copado that are not well-formed are found - Copado would fail on them', () => {
@@ -797,7 +798,7 @@ module.exports = function register(ok, section, h) {
       s.write('resolved', b, '<PermissionSet><label>B</label></PermissionSet>');
       const st = { files: { [a]: { state: 'uploaded', kind: 'xml' }, [b]: { state: 'uploaded', kind: 'xml' }, 'force-app/main/default/classes/C.cls': { state: 'uploaded', kind: 'code' } } };
       assert.deepStrictEqual(W.uploadedHealth(s, st, libs()), [{ rel: a, reason: 'not valid XML: Element <PermissionSet> is never closed (line 1)' }]);
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmTree(dir); }
   });
 
   ok('Copado\u2019s job watch finds the validation under its deployment, shows each record once, newest first - and only the newest run\u2019s errors count', async () => {
@@ -908,7 +909,7 @@ module.exports = function register(ok, section, h) {
       api.data.copado__Deployment__c.push({ Id: 'DEP45', Name: 'DEP-0045', copado__Promotion__c: 'P42', copado__Status__c: 'Completed Successfully', CreatedDate: '2099-02-01T09:00:00.000+0000' });
       await ui.act('jobs', {});
       assert.strictEqual(api.data.copado__Promotion__c[0].copado__Recreate_Promotion_Branch__c, false, 'unticked after the validation that followed');
-    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); rmTree(root); }
   });
 
   ok('a resolution changed in Copado while you edit it is not overwritten; Discard leaves Copado as it is', async () => {
@@ -930,7 +931,7 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(s.read('resolved', api.PS), api.BROKEN, 'the file is back to what Copado held when you started');
       const P = require('../src/promotion');
       await assert.rejects(P.uploadResolution(api, { id: 'AT1' }, api.FIXED), /use Edit again to change that resolution/, 'a first upload never overwrites a resolution');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmTree(dir); }
   });
 
   ok('the page after a failed validation: what needs another look, Edit again, the switch, the newest run first', () => {
@@ -1053,7 +1054,7 @@ module.exports = function register(ok, section, h) {
       assert.ok(/rebuilt: the earlier version broke a value that spans lines/.test(st.files[fixed[0]].note));
       assert.ok(s.read('resolved', 'force-app/main/default/permissionsets/B.permissionset-meta.xml').includes('edited by hand'), 'your edit is left alone');
       assert.deepStrictEqual(W.repairChoices(s, st, X), [], 'and once is enough');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmTree(dir); }
   });
 
   ok('opening a promotion rebuilds what the one-line choices broke, and says so', async () => {
@@ -1086,7 +1087,7 @@ module.exports = function register(ok, section, h) {
       assert.ok(snap.current.plan.ready.some(x => x.rel === rel) && !snap.current.plan.held.some(x => x.rel === rel), 'ready to upload again, not held back');
       assert.ok(snap.current.state.events.some(e => /Rebuilt 1 resolution from your choices/.test(e.text) && /Ops_Seeded/.test(e.detail)));
       assert.ok(out.some(l => /rebuilt .*Ops_Seeded.* from your choices/.test(l)));
-    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); rmTree(root); }
   });
 
   ok('a run that succeeded shows no component errors - and a list of what was deployed is not an error', async () => {
@@ -1147,7 +1148,7 @@ module.exports = function register(ok, section, h) {
       const api = { query: async () => [], download: async () => Buffer.from('') };
       const r = await W.sync(api, s, { id: 'P1', name: 'P1' }, clean, { autoResolve: false });
       assert.deepStrictEqual([r.returned, r.state.files[xml].state, r.state.files[xml].suggestion, r.state.files[cls].state], [1, 'review', true, 'resolved'], 'your own resolution stays yours');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally { rmTree(dir); }
     // the page: a suggestion to accept
     const page = runPage();
     const now = new Date().toISOString();
@@ -1230,7 +1231,7 @@ module.exports = function register(ok, section, h) {
       assert.ok(/class="tab on" data-tab="Files"/.test(page.html) && /class="row sel" data-sel="force-app\/main\/default\/permissionsets\/Sales_User/.test(page.html), 'Open your resolution goes to the file');
     } finally {
       g.server.close(); sfcli.resetRest();
-      fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(tools, { recursive: true, force: true });
+      rmTree(root); rmTree(tools);
     }
   });
 
@@ -1459,7 +1460,7 @@ module.exports = function register(ok, section, h) {
       await mv.save(mv.mergedOf());
       assert.strictEqual(fs.readFileSync(resolved, 'utf8'), 'untouched', 'Merge two files is not changed');
       assert.ok(vs.log.commands.filter(c => c[0] === 'vscode.diff').map(c => c[3]).some(t => / \(target\) \u2194 MERGED \(editable\)$/.test(t)));
-    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { rmTree(root); }
   });
 
   ok('reopened on a resolution you saved: the merge\u2019s conflicts are found again in it - the one you settled otherwise is not', () => {
@@ -1517,7 +1518,7 @@ module.exports = function register(ok, section, h) {
       snap.current.state.files[REL] = { state: 'review', suggestion: true, kind: 'xml', blocks: 1, labels: { ours: 'HEAD', theirs: 'origin/feature/US-0000103' } };
       page.state({ copadoOrg: 'copado', recent: [], current: snap.current, validation: null });
       assert.ok(/Accept the suggestion/.test(page.text()) && /Review in merge/.test(page.text()) && /change what you need and save\./.test(page.text()));
-    } finally { await ui.act('stopWatch', {}); fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { await ui.act('stopWatch', {}); rmTree(root); }
   });
 
   section('3.1.0: the sidebar only for what the page does not do; steadier');
@@ -1598,7 +1599,7 @@ module.exports = function register(ok, section, h) {
       await ui.act('jobs', {});
       const j = (await ui.snapshot()).current.jobs;
       assert.ok(j && /session expired/.test(j.error) && j.watching === false, JSON.stringify(j));
-    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); rmTree(root); }
   });
 
   section('3.2.0: simpler words');
@@ -1867,7 +1868,7 @@ module.exports = function register(ok, section, h) {
       w3.panel.dispose();
       await start();
       assert.strictEqual(mv.webviews.length, 5, 'a closed panel ended its merge: the next one opens');
-    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { rmTree(root); }
   });
 
   section('3.5.0: nothing merged behind your back - what the feature branch removed is shown');
@@ -1966,7 +1967,43 @@ module.exports = function register(ok, section, h) {
       const saved = await open('Saved.flexipage-meta.xml', HT, HF, { startFrom: HT.replace('Clone', 'CloneX') });
       assert.strictEqual(saved.start, 'saved');
       assert.ok(saved.text.includes('CloneX'));
-    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    } finally { rmTree(root); }
+  });
+
+  section('3.5.2: CI on every system');
+
+  ok('the VS Code tests find VS Code\u2019s program on macOS whatever the build names it; elsewhere, or where it is, the path stays', () => {
+    const { vscodeExecutable } = require('./integration/vscodeExecutable');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra exe '));
+    try {
+      const mac = path.join(root, 'Visual Studio Code.app', 'Contents', 'MacOS');
+      fs.mkdirSync(mac, { recursive: true });
+      const asked = path.join(mac, 'Electron');
+      fs.writeFileSync(path.join(mac, 'Code'), '');
+      assert.strictEqual(vscodeExecutable(asked, 'darwin'), path.join(mac, 'Code'), 'renamed: the program that is there');
+      assert.strictEqual(vscodeExecutable(asked, 'linux'), asked, 'not macOS: as given');
+      fs.writeFileSync(asked, '');
+      assert.strictEqual(vscodeExecutable(asked, 'darwin'), asked, 'there: as given');
+      fs.rmSync(asked); fs.rmSync(path.join(mac, 'Code')); fs.writeFileSync(path.join(mac, 'Something Else'), '');
+      assert.strictEqual(vscodeExecutable(asked, 'darwin'), path.join(mac, 'Something Else'), 'one program: that one');
+      fs.writeFileSync(path.join(mac, 'Another'), Buffer.alloc(4096));
+      assert.strictEqual(vscodeExecutable(asked, 'darwin'), path.join(mac, 'Another'), 'several, none named for VS Code: the largest - the app\u2019s main program');
+      fs.writeFileSync(path.join(mac, 'VSCodeHelper'), '');
+      assert.strictEqual(vscodeExecutable(asked, 'darwin'), path.join(mac, 'VSCodeHelper'), 'one with Code in its name');
+      assert.strictEqual(vscodeExecutable(path.join(root, 'nowhere', 'Electron'), 'darwin'), path.join(root, 'nowhere', 'Electron'));
+    } finally { rmTree(root); }
+  });
+
+  ok('temporary folders are removed patiently and a folder that will not go never fails a test', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra rm '));
+    fs.mkdirSync(path.join(root, 'a', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'a', 'b', 'f.xml'), 'x');
+    rmTree(root);
+    assert.ok(!fs.existsSync(root));
+    rmTree(root);   // already gone: nothing to do
+    const src = fs.readFileSync(path.join(__dirname, 'rmTree.js'), 'utf8');
+    assert.ok(/maxRetries: 20/.test(src) && /catch \(e\)/.test(src));
+    for (const f of ['smoke.js', 'smoke3.js']) assert.ok(!/fs\.rmSync\([^)]*recursive/.test(fs.readFileSync(path.join(__dirname, f), 'utf8')), f + ' cleans up through rmTree');
   });
 
   section('3.0: what is shipped');

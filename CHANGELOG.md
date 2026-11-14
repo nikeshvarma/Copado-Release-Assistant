@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.2
+
+- **CI on every system.** The VS Code tests find VS Code's program on macOS whatever a VS Code build names it - VS Code 1.146 no longer has the `Contents/MacOS/Electron` that the test runner looks for, so the macOS job could not start it. The tests' temporary folders are removed patiently on Windows, where Windows Defender or the search indexer can hold a file just written - a test whose checks passed no longer fails on its clean-up. No change to what the extension does.
+
 ## 3.5.1
 
 - **The README describes the extension as it is now**: the Release Assistant page, the merge editor and its marks, Start from, its keys; validation from the project as it is or from a story's feature branch. Its pictures are redrawn with what they show today, and the merge editor's are real renders of its page.
