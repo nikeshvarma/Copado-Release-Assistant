@@ -53,34 +53,33 @@ const menu = async (p, btn, label) => { await p.click('#' + btn); await p.click(
 const checks = [];
 const ok = (name, fn) => checks.push([name, fn]);
 
-ok('moved and edited, and a block removed: lined up, struck through, every button one undoable edit; Ctrl+S saves', async () => {
-  const mine = page(REG + APP + TEAM('required'));
+ok('a block moved and another removed: removed from its place and added at the new one, linked; the left pane is the target as it is; Restore puts it back in one step; Ctrl+S saves', async () => {
+  const mine = page(REG + APP + TEAM());
   await run(Object.assign({}, base, { text: mine }), async (p, h) => {
-    // the rows are taller than a line: bring the moved block into view first
-    await p.evaluate(() => { for (const ed of window.monaco.editor.getEditors()) { const n = ed.getModel().getLinesContent().findIndex(l => l.includes('RecordTeam_cField')); if (n >= 0) ed.revealLineInCenter(n + 1); } });
-    await p.waitForTimeout(300);
     const a = await look(p);
-    assert.strictEqual(a.chips, '1 moved1 your edit1 removed');
-    assert.deepStrictEqual(a.rows, ['Removed', 'Moved', 'Edited'], 'one word each');
-    assert.deepStrictEqual(a.buttons, ['Restore', 'Move back', 'Use target']);
-    assert.strictEqual(a.ghost, 10, 'the removed block, struck through, line for line');
-    assert.ok(a.level[0] != null && a.level[0] === a.level[1], 'the moved block level in both panes: ' + a.level);
+    assert.strictEqual(a.chips, '1 your edit2 removed');
+    assert.ok(/^Removed \u00b7 now at line \d+$/.test(a.rows[0]) && a.rows.includes('Removed') && a.rows.some(r => /^Added by you \u00b7 from line \d+$/.test(r)), JSON.stringify(a.rows));
+    assert.ok(!a.rows.some(r => /Moved/.test(r)) && !a.buttons.includes('Move back'), 'no moves');
+    assert.deepStrictEqual(a.buttons, ['Restore', 'Restore', 'Undo']);
+    assert.strictEqual(await p.evaluate(() => window.monaco.editor.getEditors().find(e => e.getOption(window.monaco.editor.EditorOption.readOnly)).getValue()), T, 'the left pane is the target, as it is');
     await shot(p, 'merge-editor-dark.png');
-    await click(p, 'Restore'); await eventually(async () => assert.ok((await look(p)).buttons.includes('Move back')));
-    await click(p, 'Move back'); await eventually(async () => assert.deepStrictEqual((await look(p)).buttons, ['Use target']));
-    await click(p, 'Use target');
+    // the linked Restore: back at its place, and the copy gone - one step
+    await p.click('.acts button[title="Restore"]');
+    await eventually(() => assert.strictEqual(h.text(), page(TEAM() + REG + APP), 'back where it was, the copy gone'));
+    await click(p, 'Restore');
     await eventually(() => assert.strictEqual(h.text(), T, 'the target exactly'));
     await eventually(async () => assert.strictEqual((await look(p)).chips, 'the same as the target'));
     await p.click('#right .view-lines');
-    for (let i = 0; i < 3; i++) { await p.keyboard.press('Control+z'); await p.waitForTimeout(150); }
-    await eventually(() => assert.strictEqual(h.text(), mine, 'Ctrl+Z three times: what you had'));
+    for (let i = 0; i < 2; i++) { await p.keyboard.press('Control+z'); await p.waitForTimeout(150); }
+    await eventually(() => assert.strictEqual(h.text(), mine, 'Ctrl+Z twice: what you had'));
     await p.keyboard.press('Control+s');
     await eventually(() => assert.ok(h.sent.some(m => m.type === 'save' && m.text === mine && !m.close)));
     assert.deepStrictEqual(h.errors, []);
   });
 });
 
-ok('typing: compared again as you go; broken XML pauses the marks; Literal order shows the target as it is', async () => {
+
+ok('typing: compared again as you go; broken XML pauses the marks', async () => {
   await run(Object.assign({}, base, { text: T }), async (p, h) => {
     assert.strictEqual((await look(p)).chips, 'the same as the target');
     // select a value and type over it
@@ -100,8 +99,7 @@ ok('typing: compared again as you go; broken XML pauses the marks; Literal order
     await eventually(async () => assert.ok((await look(p)).held, 'paused'));
     await p.keyboard.press('Backspace');
     await eventually(async () => { const a = await look(p); assert.ok(!a.held && a.chips === '1 your edit', JSON.stringify(a.chips)); });
-    await menu(p, 'viewBtn', 'Target in literal order');
-    await eventually(async () => { const a = await look(p); assert.ok(/as it is/.test(a.left), a.left); });
+    assert.ok(!/in your order|as it is/.test((await look(p)).left), 'the target is shown as it is - there is no other order');
     assert.deepStrictEqual(h.errors, []);
   });
 });
@@ -138,7 +136,7 @@ ok('what the feature branch removed is marked, whatever the start: still here - 
     assert.deepStrictEqual(a.rows, ['Not in feature', 'Not in feature']);
     assert.deepStrictEqual(a.buttons, ['Restore', 'Restore']);
     await p.click('#viewBtn');
-    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), '\u25cfThe feature branch | \u25cbTarget branch (HEAD) | \u25cbMerged (both) | Hide identical lines | Target in literal order', 'Start from and the view, in one menu');
+    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), '\u25cfThe feature branch | \u25cbTarget branch (HEAD) | \u25cbMerged (both) | Hide identical lines', 'Start from and the view, in one menu');
     await p.keyboard.press('Escape');
     assert.deepStrictEqual(h.errors, []);
   });
@@ -318,7 +316,7 @@ ok('a duplicate you add is marked on its lines - a row, a margin mark, an underl
 });
 
 ok('a button whose lines you just changed does nothing, and says so; one Save and close; every button the same drawn icon', async () => {
-  const mine = page(REG + APP + TEAM('required'));
+  const mine = page(TEAM('required') + REG + APP + OWN);
   await run(Object.assign({}, base, { text: mine }), async (p, h) => {
     assert.deepStrictEqual(await p.$$eval('.top button', bs => bs.map(b => b.id)), ['prev', 'next', 'viewBtn', 'saveClose', 'moreBtn'], 'Save & Close, no Save button; More at the far right');
     assert.strictEqual(await p.$eval('#saveClose', b => b.textContent), 'Save & Close');

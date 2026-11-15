@@ -53,7 +53,7 @@ const strip = ls => ls.map(l => l.replace(/\r?\n$/, ''));
 
 /** Pieces from comparing two runs of lines - for literal mode, long text, and what is not XML. */
 function lineRuns(leftLines, rightLines, b0, feature, out, context) {
-  const list = D.changes(leftLines.join(''), rightLines.join('')) || null;
+  const list = D.changes(leftLines.join('').replace(/\r\n/g, '\n'), rightLines.join('').replace(/\r\n/g, '\n')) || null;
   if (!list) { out.push({ kind: 'changed-own', left: leftLines, b0, b1: b0 + rightLines.length, label: null, context }); return; }
   const inFeature = ls => feature && ls.filter(l => l.trim()).every(l => feature.has(l.trim()));
   let ai = 0, bi = 0;
@@ -91,10 +91,24 @@ function align(targetText, incomingText, mergedText, opts) {
   const openEnd = (s, el) => lineOf(s, (el.openTagEnd != null ? el.openTagEnd : el.start + 1) - 1) + 1;
   const range = (s, el, ks, i) => [i ? lineOf(s, ks[i - 1].end - 1) + 1 : openEnd(s, el), lineOf(s, ks[i].end - 1) + 1];
   // the same element, and the same lines around it - a comment added or taken out is a change
-  const sameLines = (a1, b1) => a1.map(l => l.trim()).filter(Boolean).join('\n') === b1.map(l => l.trim()).filter(Boolean).join('\n');
+  const notes = ls => ls.map(l => l.trim()).filter(l => /<!--|-->/.test(l)).join('\n');
+  const sameLines = (a1, b1) => notes(a1) === notes(b1);
+  // lines alike but for their line endings
+  const eq = (x, y) => x.replace(/\r/g, '') === y.replace(/\r/g, '');
   const slice = (side, r) => lines[side].slice(r[0], r[1]);
   const flat = (s, el) => s.flat(el);
-  const orderMatters = (path, tag) => { const spec = registry.specFor(type, path, tag); return !(spec && spec.sortable === true); };
+  // order is meaning unless the list is sortable (Salesforce sorts it) or order-free (read by name, run by connectors)
+  const orderMatters = (path, tag) => { const spec = registry.specFor(type, path, tag); return !(spec && (spec.sortable === true || spec.orderFree === true)); };
+
+  // two opening tags alike as Salesforce reads them: the same attributes - an identity attribute, such as a component
+  // configuration's targets, as a set; any other exactly (a picklist property's datasource is in order)
+  const sameOpenTag = (a, b, path) => {
+    if (a.name !== b.name) return false;
+    const spec = registry.specFor(type, path.slice(0, -1), a.name), keyed = new Set((spec && spec.key) || []);
+    const norm = (n, v) => keyed.has(n) ? String(v).split(',').map(t => t.trim()).filter(Boolean).sort().join(',') : v;
+    const am = new Map((a.attrs || []).map(t => [t.name, norm(t.name, t.value)])), bm = new Map((b.attrs || []).map(t => [t.name, norm(t.name, t.value)]));
+    return am.size === bm.size && [...am].every(([n, v]) => bm.get(n) === v);
+  };
 
   function walk(a, b, f, path) {
     const A = kids(a), B = kids(b), F = f ? kids(f) : [];
@@ -111,15 +125,32 @@ function align(targetText, incomingText, mergedText, opts) {
     const zInA = new Set(af.pairs.map(([, z]) => z)), xInF = new Set(af.pairs.map(([x]) => x));
     const idxA = new Map(A.map((x, i) => [x, i])), idxB = new Map(B.map((y, i) => [y, i]));
 
-    // moves: the longest run still in the target's order stays put; the rest moved. Where two runs are as
-    // long - two neighbours swapped - the one with fewer unchanged elements moves: what you edited moved
+    // where order is meaning, the longest run still in the target's order stays paired; the rest were moved, which is
+    // what it is to the file - removed from one place and added at another. Where two runs are as long, the one with
+    // fewer unchanged elements is the one taken out: what you edited moved. An identical pair is linked, so either
+    // half's Restore or Undo puts the original back, the copy gone
     const paired = B.filter(y => xOf.has(y));
-    const keep = keptInOrder(paired.map(y => idxA.get(xOf.get(y))), paired.map(y => flat(sa, xOf.get(y)) === flat(sb, y)), paired);
-    const movedYs = new Set(paired.filter(y => !keep.has(y) && orderMatters(path, y.name)));
+    const keep = new Set();
+    for (const tag of new Set(paired.map(y => y.name))) {
+      const group = paired.filter(y => y.name === tag);
+      for (const y of keptInOrder(group.map(y => idxA.get(xOf.get(y))), group.map(y => flat(sa, xOf.get(y)) === flat(sb, y)), group)) keep.add(y);
+    }
+    const links = new Map();
+    // what the feature branch itself moved: out of the target's order there too
+    const aOfZ = new Map(af.pairs.map(([x, z]) => [z, x]));
+    const pairedF = F.filter(z => aOfZ.has(z));
+    const keepF = f ? keptInOrder(pairedF.map(z => idxA.get(aOfZ.get(z))), pairedF.map(z => flat(sa, aOfZ.get(z)) === flat(sf, z)), pairedF) : new Set();
+    const featureMoved = z => !!z && aOfZ.has(z) && !keepF.has(z);
+    for (const y of paired) {
+      if (keep.has(y) || !orderMatters(path, y.name)) continue;
+      const x = xOf.get(y);
+      xOf.delete(y); yOf.delete(x);
+      if (flat(sa, x) === flat(sb, y)) { const l = { x, y }; links.set(x, l); links.set(y, l); }
+    }
 
     // the parent's own opening lines
     const head = [lineOf(sa, a.start), openEnd(sa, a)], headB = [lineOf(sb, b.start), openEnd(sb, b)];
-    pieces.push({ kind: slice('a', head).join('') === slice('b', headB).join('') ? 'same' : 'changed-own', left: slice('a', head), b0: headB[0], b1: headB[1], label: b.name });
+    pieces.push({ kind: eq(slice('a', head).join(''), slice('b', headB).join('')) || sameOpenTag(a, b, path) ? 'same' : 'changed-own', left: slice('a', head), b0: headB[0], b1: headB[1], label: attrDiff(a, b) ? b.name + ' ' + attrDiff(a, b) : b.name });
 
     // what the target has and you do not, and what the feature added and you left out: each after the sibling it followed
     const after = new Map(), atStart = [];
@@ -130,8 +161,11 @@ function align(targetText, incomingText, mergedText, opts) {
       for (const it of items) {
         const left = slice(it.side, it.r);
         const n = left.filter(l => l.trim()).length;
-        pieces.push({ kind: it.kind, left: it.kind === 'removed' ? left : [], ghost: left, b0: at, b1: at, notInFeature: it.notInFeature || undefined, label: nameOf(type, path, it.el) + (n > 1 ? ' (' + n + ' lines)' : ''),
-          undo: [{ b0: at, b1: at, expect: [], insert: left.join('') }] });
+        const piece = { kind: it.kind, left: it.kind === 'removed' ? left : [], ghost: left, b0: at, b1: at, notInFeature: it.notInFeature || undefined, label: nameOf(type, path, it.el) + (n > 1 ? ' (' + n + ' lines)' : ''),
+          undo: [{ b0: at, b1: at, expect: [], insert: left.join('') }] };
+        const l = it.kind === 'removed' && links.get(it.el);
+        if (l) { l.at = at; l.ghost = left; l.removed = piece; }
+        pieces.push(piece);
       }
     };
     gone(atStart, headB[1]);
@@ -139,21 +173,14 @@ function align(targetText, incomingText, mergedText, opts) {
     B.forEach((y, i) => {
       const yr = range(sb, b, B, i), x = xOf.get(y), z = zOf.get(y);
       const yLines = slice('b', yr);
-      if (movedYs.has(y)) {
-        // where it was: straight after the sibling it followed in the target, which stayed put
-        const xi = idxA.get(x);
-        let to = null;
-        for (let j = xi - 1; j >= 0 && to == null; j--) { const yy = yOf.get(A[j]); if (yy && keep.has(yy)) to = range(sb, b, B, idxB.get(yy))[1]; }
-        for (let j = xi + 1; j < A.length && to == null; j++) { const yy = yOf.get(A[j]); if (yy && keep.has(yy)) to = range(sb, b, B, idxB.get(yy))[0]; }
-        if (to == null) to = headB[1];
-        const now = paired.indexOf(y) + 1, was = [...paired].sort((p, q) => idxA.get(xOf.get(p)) - idxA.get(xOf.get(q))).indexOf(y) + 1;
-        moves.push({ b0: yr[0], b1: yr[1], label: nameOf(type, path, y), from: was, to: now, inside: flat(sa, x) !== flat(sb, y),
-          undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: '' }, { b0: to, b1: to, expect: [], insert: yLines.join('') }] });
-      }
       if (!x) {
-        const kind = z && flat(sf, z) === flat(sb, y) ? 'feature' : 'own';
+        // a moved one is yours unless the feature branch made the same move
+        const kind = z && flat(sf, z) === flat(sb, y) && (!links.has(y) || featureMoved(z)) ? 'feature' : 'own';
         const n = yLines.filter(l => l.trim()).length;
-        pieces.push({ kind, left: [], b0: yr[0], b1: yr[1], label: nameOf(type, path, y) + (n > 1 ? ' (' + n + ' lines)' : ''), undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: '' }] });
+        const piece = { kind, left: [], b0: yr[0], b1: yr[1], label: nameOf(type, path, y) + (n > 1 ? ' (' + n + ' lines)' : ''), undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: '' }] };
+        const l = links.get(y);
+        if (l) { l.yr = yr; l.yLines = yLines; l.added = piece; }
+        pieces.push(piece);
       } else {
         const xr = range(sa, a, A, idxA.get(x));
         if (flat(sa, x) === flat(sb, y) && !sameLines(slice('a', xr), yLines)) {
@@ -172,7 +199,13 @@ function align(targetText, incomingText, mergedText, opts) {
           } else walk(x, y, z, path.concat(x.name));
         } else if (isLeaf(x) && isLeaf(y)) {
           const ta = val(x), tb = val(y);
-          if (/\n/.test(ta) || /\n/.test(tb)) lineRuns(slice('a', xr), yLines, yr[0], new Set(z ? slice('f', [lineOf(sf, z.start), lineOf(sf, z.end - 1) + 1]).map(l => l.trim()) : []), pieces, 'in ' + y.name);
+          // the same text, other attributes - a component property's default: say which, and how
+          const attrsChanged = ta === tb && attrDiff(x, y);
+          if (attrsChanged) pieces.push({ kind: z && flat(sf, z) === flat(sb, y) ? 'changed-feature' : 'changed-own', left: slice('a', xr), b0: yr[0], b1: yr[1],
+            label: XC.describe(type, path, y) + ' ' + attrsChanged, undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: slice('a', xr).join('') }] });
+          else if (/\n/.test(ta) || /\n/.test(tb)) lineRuns(slice('a', xr), yLines, yr[0], new Set(z ? slice('f', [lineOf(sf, z.start), lineOf(sf, z.end - 1) + 1]).map(l => l.trim()) : []), pieces, 'in ' + y.name);
+          else if (type === 'Flow' && /^location[XY]$/.test(y.name)) pieces.push({ kind: 'position', left: slice('a', xr), b0: yr[0], b1: yr[1], owner: nameOf(type, path.slice(0, -1), b),
+            label: y.name + ': ' + XC.clip(ta) + ' \u2192 ' + XC.clip(tb), undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: slice('a', xr).join('') }] });
           else pieces.push({ kind: z && val(z) === tb ? 'changed-feature' : 'changed-own', left: slice('a', xr), b0: yr[0], b1: yr[1],
             label: XC.leafLabel(type, path, b, y) + ': ' + XC.clip(ta) + ' \u2192 ' + XC.clip(tb), undo: [{ b0: yr[0], b1: yr[1], expect: strip(yLines), insert: slice('a', xr).join('') }] });
         } else if (isLeaf(x) !== isLeaf(y)) {
@@ -183,16 +216,23 @@ function align(targetText, incomingText, mergedText, opts) {
       gone(after.get(y) || [], yr[1]);
     });
 
+    for (const l of new Set(links.values())) {
+      if (!l.removed || !l.added) continue;
+      const both = [{ b0: l.yr[0], b1: l.yr[1], expect: strip(l.yLines), insert: '' }, { b0: l.at, b1: l.at, expect: [], insert: l.ghost.join('') }];
+      l.removed.undo = both; l.added.undo = both;
+      l.removed.now = l.yr[0] + 1; l.added.was = l.at + 1;
+    }
+
     // the parent's closing lines
     // after the last child: what is left before the end tag, and the end tag
     const tail = [lineOf(sa, A[A.length - 1].end - 1) + 1, lineOf(sa, a.end - 1) + 1], tailB = [lineOf(sb, B[B.length - 1].end - 1) + 1, lineOf(sb, b.end - 1) + 1];
-    pieces.push({ kind: slice('a', tail).join('') === slice('b', tailB).join('') ? 'same' : 'changed-own', left: slice('a', tail), b0: tailB[0], b1: tailB[1] });
+    pieces.push({ kind: eq(slice('a', tail).join(''), slice('b', tailB).join('')) ? 'same' : 'changed-own', left: slice('a', tail), b0: tailB[0], b1: tailB[1] });
   }
 
   // what comes before and after the root - the XML declaration, a trailing newline
   const rootA = sa.doc.root, rootB = sb.doc.root;
   const preA = [0, lineOf(sa, rootA.start)], preB = [0, lineOf(sb, rootB.start)];
-  if (preB[1] || preA[1]) pieces.push({ kind: slice('a', preA).join('') === slice('b', preB).join('') ? 'same' : 'changed-own', left: slice('a', preA), b0: 0, b1: preB[1] });
+  if (preB[1] || preA[1]) pieces.push({ kind: slice('a', preA).join('').replace(/\r/g, '') === slice('b', preB).join('').replace(/\r/g, '') ? 'same' : 'changed-own', left: slice('a', preA), b0: 0, b1: preB[1] });
   walk(rootA, rootB, sf && sf.ok ? sf.doc.root : null, []);
   const postA = [lineOf(sa, rootA.end - 1) + 1, lines.a.length], postB = [lineOf(sb, rootB.end - 1) + 1, lines.b.length];
   if (postB[1] > postB[0] || postA[1] > postA[0]) pieces.push({ kind: 'same', left: slice('a', postA), b0: postB[0], b1: postB[1] });
@@ -208,6 +248,14 @@ function align(targetText, incomingText, mergedText, opts) {
  * page's items, a flow's elements - which are short; a long one is ranked
  * by count alone.
  */
+/** "default: Hello \u2192 Hi, label: (none) \u2192 Title" - the attributes that differ, or null. */
+function attrDiff(x, y) {
+  const a = new Map((x.attrs || []).map(t => [t.name, t.value])), b = new Map((y.attrs || []).map(t => [t.name, t.value]));
+  const out = [];
+  for (const n of [...new Set([...a.keys(), ...b.keys()])].sort()) if (a.get(n) !== b.get(n)) out.push(n + ': ' + (a.has(n) ? XC.clip(a.get(n)) : '(none)') + ' \u2192 ' + (b.has(n) ? XC.clip(b.get(n)) : '(none)'));
+  return out.length ? out.join(', ') : null;
+}
+
 function keptInOrder(seq, unchanged, items) {
   const n = seq.length, keep = new Set();
   if (!n) return keep;
@@ -242,13 +290,16 @@ function finish(pieces, moves, sb, mode) {
       piece.undo = [{ b0: p.b0, b1: p.b1, expect: right, insert: left.join('') }];
     }
     if (piece.kind !== 'same' && !piece.label) piece.label = ((piece.kind === 'removed' || piece.kind === 'dropped' ? (piece.ghost || left) : sb.lines.slice(p.b0, p.b1)).find(l => l.trim()) || '').trim();
-    // neighbours of the same kind make one piece
+    // neighbours of the same kind make one piece - and an element's X and Y on the canvas, one move
     const last = out[out.length - 1];
     if (last && last.kind === 'same' && piece.kind === 'same') { last.left = last.left.concat(left); last.a1 = piece.a1; last.b1 = piece.b1; continue; }
+    if (last && last.kind === 'position' && piece.kind === 'position' && last.b1 === piece.b0 && last.owner === piece.owner) {
+      last.left = last.left.concat(left); last.a1 = piece.a1; last.b1 = piece.b1; last.undo = last.undo.concat(piece.undo); last.label += ', ' + piece.label; continue;
+    }
     out.push(piece);
   }
   if (b !== sb.lines.length) ok = false;
-  const counts = { feature: 0, own: 0, removed: 0, dropped: 0, kept: 0, differs: 0, moved: moves.length };
+  const counts = { feature: 0, own: 0, removed: 0, dropped: 0, kept: 0, differs: 0, position: 0, moved: moves.length };
   for (const p of out) if (p.kind !== 'same') counts[p.kind === 'changed-feature' ? 'feature' : p.kind === 'changed-own' ? 'own' : p.kind]++;
   return { ok, mode, left: out.map(p => (p.left || []).join('')).join(''), pieces: out, moves, counts };
 }

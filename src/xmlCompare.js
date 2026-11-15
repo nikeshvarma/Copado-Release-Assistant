@@ -43,7 +43,24 @@ function side(text) {
   const lineOf = off => { let lo = 0, hi = starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (starts[m] <= off) lo = m; else hi = m - 1; } return lo; };
   const lines = src.split(/(?<=\n)/);
   const memo = new WeakMap();
-  const flat = el => { let f = memo.get(el); if (f == null) { f = src.slice(el.start, el.end).replace(/>\s+</g, '><').trim(); memo.set(el, f); } return f; };
+  // an element as Salesforce reads it, not as it is written: <x/> and <x></x> alike, entities decoded, attributes in
+  // one order, line endings ignored - and within an entry whose fields each appear once, their order is not meaning.
+  // Comments count: one added inside an element is a change
+  const flat = el => {
+    let f = memo.get(el);
+    if (f != null) return f;
+    const attrs = (el.attrs || []).map(a => a.name + '="' + a.value + '"').sort().join(' ');
+    const ks = kids(el);
+    if (!ks.length) f = '<' + el.name + (attrs ? ' ' + attrs : '') + '>' + X.textOf(el).replace(/\r\n?/g, '\n') + '</' + el.name + '>';
+    else {
+      const comments = (el.children || []).filter(c => c.type === X.COMMENT).map(c => '<!--' + c.value.trim() + '-->').join('');
+      let parts = ks.map(flat);
+      if (new Set(ks.map(k => k.name)).size === ks.length) parts = parts.slice().sort();
+      f = '<' + el.name + (attrs ? ' ' + attrs : '') + '>' + comments + parts.join('') + '</' + el.name + '>';
+    }
+    memo.set(el, f);
+    return f;
+  };
   // an element owns its lines when only whitespace shares them - then whole lines can be put back or taken out
   const owns = el => /^\s*$/.test(src.slice(starts[lineOf(el.start)], el.start)) && /^\s*$/.test(src.slice(el.end, (starts[lineOf(el.end - 1) + 1] || src.length + 1) - 1));
   return { src, doc, ok: !!doc.root && !(doc.errors && doc.errors.length), lineOf, lines, flat, owns };
@@ -76,6 +93,22 @@ function describe(type, path, el) {
 }
 
 /**
+ * A field that can stand for the identity of a list's elements when nothing else does: a leaf every element
+ * has exactly once, named like an identity (…Name, …Key, …Id, …Reference, identifier), whose values are unique
+ * on each side. null when there is none - repeated values mean order is the identity, as in a list view's filters.
+ */
+const NAME_LIKE = /^(?:identifier|.+(?:Name|Key|Id|Reference))$/;
+function inferKey(la, lb) {
+  const all = la.concat(lb);
+  if (all.length < 2) return null;
+  const once = e => { const m = new Map(); for (const k of kids(e)) if (isLeaf(k)) m.set(k.name, (m.get(k.name) || 0) + 1); return m; };
+  const counts = all.map(once);
+  const names = [...counts[0].keys()].filter(n => NAME_LIKE.test(n) && counts.every(c => c.get(n) === 1));
+  const unique = (list, n) => { const vs = list.map(e => val(kids(e).find(k => k.name === n))); return vs.every(v => v) && new Set(vs).size === vs.length; };
+  return names.find(n => unique(la, n) && unique(lb, n)) || null;
+}
+
+/**
  * Pairs the children of two matched elements. Returns { pairs: [[a, b]], onlyA, onlyB }.
  */
 function match(type, path, A, B, sa, sb) {
@@ -90,7 +123,10 @@ function match(type, path, A, B, sa, sb) {
     // wrappers of one element, on both sides throughout: identified by what they wrap
     const wrappers = la.concat(lb).every(e => kids(e).length === 1 && !isLeaf(kids(e)[0]));
     const idOf = new Map();
-    const id = e => { if (!idOf.has(e)) idOf.set(e, identity(type, path, e, wrappers)); return idOf.get(e); };
+    // nothing known identifies them: a name-like field they all have once, unique on both sides, does - so a list
+    // from a newer release (agents, topics, summary configurations...) pairs by its names, not by position
+    const inferred = la.concat(lb).every(e => !isLeaf(e) && identity(type, path, e, wrappers) == null) ? inferKey(la, lb) : null;
+    const id = e => { if (!idOf.has(e)) idOf.set(e, inferred ? inferred + '=' + val(kids(e).find(k => k.name === inferred)) : identity(type, path, e, wrappers)); return idOf.get(e); };
     // by identity, when it is unique on both sides
     const idsB = new Map(), dupB = new Set();
     for (const y of lb) { const k = id(y); if (k == null) continue; if (idsB.has(k)) dupB.add(k); idsB.set(k, y); }

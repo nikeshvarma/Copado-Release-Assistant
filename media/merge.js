@@ -69,7 +69,6 @@
       if (e.scrollTopChanged) to.setScrollTop(e.scrollTop);
       if (e.scrollLeftChanged) to.setScrollLeft(e.scrollLeft);
       syncing = false;
-      drawJoins();
     });
     sync(L, R); sync(R, L);
     R.onDidChangeModelContent(e => { typedSince(e.changes); dirty(); typed(); });
@@ -224,8 +223,10 @@
     removed: ['rem', 'Removed', [['\u21b6', 'Restore']]], notin: ['rem', 'Not in ' + side(), [['\u21b6', 'Restore']]],
     dupRemoved: ['dupr', 'Duplicate removed', [['\u21b6', 'Put it back']]], dropped: ['rem', 'Left out', [['\u21b6', 'Add it back']]],
     kept: ['keep', 'Kept \u00b7 not in ' + side(), [['\u2715', 'Remove']]], differs: ['keep', cap(side()) + ' differs', [['\u21c4', 'Use ' + side()]]],
-    move: ['mv', 'Moved', [['\u21b6', 'Move back']]], conf: ['conf', 'Both changed', [['\u21b6', 'Use target'], ['\u21c4', 'Use ' + side()]]],
-    dup: ['dup', 'Duplicate', [['\u2715', 'Remove copy']]]
+ conf: ['conf', 'Both changed', [['\u21b6', 'Use target'], ['\u21c4', 'Use ' + side()]]],
+    dup: ['dup', 'Duplicate', [['\u2715', 'Remove copy']]],
+    // a flow element only dragged in Flow Builder: shown, quietly - F7 passes it by
+    position: ['pos', 'Moved on the canvas', [['\u21b6', 'Use target']]]
   })[k];
   const rowNode = (cls, word) => zoneNode('head ' + cls, '<span class="dotk"></span><b>' + esc(word) + '</b>');
 
@@ -235,10 +236,10 @@
     const HEAD = Math.max(22, lh + 3), FOLD = lh + 4;
     const items = { left: [], right: [] };
     // a zone: lines, or a header row's pixels; buttons over it, or the whole of it a click
-    const zone = (sd, after, lines, node, buttons, move, opts) => items[sd].push(Object.assign({ after, lines, node, buttons, move }, opts || {}));
+    const zone = (sd, after, lines, node, buttons, opts) => items[sd].push(Object.assign({ after, lines, node, buttons }, opts || {}));
     // a change's row on both sides: the word on your side, a wordless row on the target's, the same height
     const rowsAt = new Map();
-    const row = (key, after, leftAfter, undos, word, move) => {
+    const row = (key, after, leftAfter, undos, word) => {
       const [cls, w, btns] = ROW(key);
       const buttons = btns.map((b, i) => [b[0], b[1], undos[i]]).filter(b => b[2]);
       // only a duplicate joins a row already there - one for lines on your side (added, edited, kept), never a removed block's
@@ -249,10 +250,10 @@
         at.buttons.push(...buttons.map(b => b.concat(cls)));
         return;
       }
-      const item = { after, lines: 0, node: rowNode(cls, word || w), buttons: buttons.map(b => b.concat(cls)), move, px: HEAD, cls };
+      const item = { after, lines: 0, node: rowNode(cls, word || w), buttons: buttons.map(b => b.concat(cls)), px: HEAD, cls };
       items.right.push(item);
-      if (!move && !['removed', 'notin', 'dupRemoved', 'dropped'].includes(key)) rowsAt.set(after, item);
-      zone('left', leftAfter, 0, zoneNode('head ' + cls + ' l'), null, null, { px: HEAD });
+      if (!['removed', 'notin', 'dupRemoved', 'dropped'].includes(key)) rowsAt.set(after, item);
+      zone('left', leftAfter, 0, zoneNode('head ' + cls + ' l'), null, { px: HEAD });
     };
     const ld = [], rd = [];
     const whole = (arr, l0, l1, cls, ruler, glyph) => { if (l1 > l0) arr.push({ range: new monaco.Range(l0 + 1, 1, l1, 1), options: { isWholeLine: true, className: cls, linesDecorationsClassName: cls + '-g', glyphMarginClassName: glyph || undefined, overviewRuler: ruler ? { color: ruler, position: monaco.editor.OverviewRulerLane.Full } : undefined } }); };
@@ -261,26 +262,13 @@
     // a right-hand line's place on the left: line for line inside an unchanged piece, the piece's start otherwise
     const holding = b => m.pieces.find(p => p.b0 <= b && b < p.b1);
     const leftOf = b => { const p = holding(b); return p ? (p.kind === 'same' ? p.a0 + (b - p.b0) : p.a0) : (m.pieces.length ? m.pieces[m.pieces.length - 1].a1 : 0); };
-    // a move's row goes before its first line - after any piece that ends there, before any that starts there
-    const movesAt = new Map();
-    for (const mv of m.moves) {
-      const p = holding(mv.b0);
-      const key = p && p.kind === 'same' && p.b0 < mv.b0 ? 'inside:' + mv.b0 : p;
-      if (key) (movesAt.get(key) || movesAt.set(key, []).get(key)).push(mv);
-    }
-    const moveRow = mv => {
-      row('move', mv.b0, leftOf(mv.b0), [mv.undo], null, mv);
-      whole(rd, mv.b0, mv.b1, 'mv', PURPLE); whole(ld, leftOf(mv.b0), leftOf(mv.b1 - 1) + 1, 'mv');
-    };
     for (const p of m.pieces) {
-      for (const mv of (movesAt.get(p) || [])) moveRow(mv);
-      if (p.kind === 'same') {
-        for (const mv of m.moves) if (mv.b0 > p.b0 && mv.b0 < p.b1) moveRow(mv);
-        continue;
-      }
+      if (p.kind === 'same') continue;
       const lc = p.a1 - p.a0, rc = p.b1 - p.b0;
       const key = p.kind === 'removed' ? (p.dupRemoved ? 'dupRemoved' : p.notInFeature ? 'notin' : 'removed') : p.kind;
-      row(key, p.b0, p.a0, [p.undo]);
+      // moved: removed from its place, added at the new one - each says where the other is
+      const [, w0] = ROW(key);
+      row(key, p.b0, p.a0, [p.undo], p.now ? w0 + ' \u00b7 now at line ' + p.now : p.was ? w0 + ' \u00b7 from line ' + p.was : null);
       if (p.kind === 'removed' || p.kind === 'dropped') {
         // no lines on your side: the target's (or the feature's) lines, struck through, where they were
         const ghost = p.ghost || [];
@@ -290,6 +278,7 @@
       }
       if (p.kind === 'kept' || p.kind === 'differs') { whole(rd, p.b0, p.b1, 'keep', ORANGE); continue; }
       if (lc) whole(ld, p.a0, p.a1, 'del', RED);
+      if (p.kind === 'position') { whole(rd, p.b0, p.b1, 'pos'); continue; }
       whole(rd, p.b0, p.b1, /feature/.test(p.kind) ? 'feat' : 'own', /feature/.test(p.kind) ? GREEN : BLUE);
       if (rc > lc) zone('left', p.a1, rc - lc, zoneNode('pad'));
       if (lc > rc) zone('right', p.b1, lc - rc, zoneNode('pad'));
@@ -328,7 +317,7 @@
         const li = (sd === 'left' ? L : R).getLayoutInfo();
         // Monaco sizes a margin zone itself: the icon is placed inside it, exactly over the line-number column
         margin.innerHTML = '<span class="fx" style="left:' + li.lineNumbersLeft + 'px;width:' + li.lineNumbersWidth + 'px;height:' + FOLD + 'px">' + ICON.expand + '</span>';
-        zone(sd, after, 0, zoneNode('fold', '<span class="ft">' + esc(text) + '</span><span class="rule"></span>'), null, null, { click: open, title: 'Show these ' + n + ' lines', px: FOLD, margin });
+        zone(sd, after, 0, zoneNode('fold', '<span class="ft">' + esc(text) + '</span><span class="rule"></span>'), null, { click: open, title: 'Show these ' + n + ' lines', px: FOLD, margin });
       }
     }
     L.setHiddenAreas(S.hiddenRuns.map(r => new monaco.Range(r.a0 + 1, 1, r.a1, 1)));
@@ -378,7 +367,6 @@
     S.deco.left = S.deco.left ? (S.deco.left.set(ld), S.deco.left) : L.createDecorationsCollection(ld);
     S.deco.right = S.deco.right ? (S.deco.right.set(rd), S.deco.right) : R.createDecorationsCollection(rd);
     summary(m);
-    drawJoins();
     where();
     // the expand icon sits where the line numbers are, in each pane
     for (const ed of [L, R]) { const li = ed.getLayoutInfo(); const st = ed.getContainerDomNode().style; st.setProperty('--fold-w', li.contentLeft + 'px'); st.setProperty('--fold-pr', Math.max(0, li.contentLeft - (li.lineNumbersLeft + li.lineNumbersWidth)) + 'px'); }
@@ -394,7 +382,6 @@
     const keep = new Uint8Array(total + 1);
     const near = (b0, b1) => { for (let i = Math.max(0, b0 - CONTEXT); i < Math.min(total, b1 + CONTEXT); i++) keep[i] = 1; };
     for (const p of m.pieces) if (p.kind !== 'same') near(p.b0, p.b1);
-    for (const mv of m.moves) near(mv.b0, mv.b1);
     for (const c of S.conflicts) if (c.line != null) near(c.line, c.line + 1);
     // what you opened stays open, and so does the run your cursor is in
     const here = R.getPosition() ? R.getPosition().lineNumber - 1 : -1;
@@ -420,32 +407,17 @@
   }
   function place(it, top) {
     if (it.widget) { it.widget.style.top = top + 'px'; it.widget.style.display = ''; }
-    if (it.move) { it.move.top = top; drawJoins(); }
-  }
-
-  // a short purple join between the panes where a block moved
-  function drawJoins() {
-    const g = $('joins');
-    if (!g || !S.marks) return;
-    const box = $('gap').getBoundingClientRect(), rb = $('right').getBoundingClientRect();
-    g.innerHTML = '';
-    for (const mv of S.marks.moves) {
-      if (mv.top == null) continue;
-      const y = mv.top + rb.top - box.top + R.getOption(monaco.editor.EditorOption.lineHeight) / 2 - 1;
-      if (y < 0 || y > box.height) continue;
-      g.insertAdjacentHTML('beforeend', '<div class="join" style="top:' + y + 'px"></div>');
-    }
   }
 
   function summary(m) {
     const c = m.counts || {};
-    const chips = [['mv', c.moved, 'moved'], ['feat', (c.feature || 0), 'from ' + (S.short || 'the feature')], ['own', c.own, c.own === 1 ? 'your edit' : 'your edits'],
+    const chips = [['feat', (c.feature || 0), 'from ' + (S.short || 'the feature')], ['own', c.own, c.own === 1 ? 'your edit' : 'your edits'],
       ['del', (c.removed || 0) + (c.dropped || 0), 'removed'], ['keep', (c.kept || 0) + (c.differs || 0), 'not taken from ' + (S.short || 'the feature')],
-      ['conf', S.conflicts.length, S.conflicts.length === 1 ? 'conflict' : 'conflicts']]
+      ['conf', S.conflicts.length, S.conflicts.length === 1 ? 'conflict' : 'conflicts'], ['pos', c.position, 'on the canvas']]
       .filter(x => x[1]).map(x => '<span class="chip ' + x[0] + '" title="' + x[1] + ' ' + x[2] + '">' + x[1] + ' ' + x[2] + '</span>');
     $('chips').innerHTML = chips.length ? chips.join('') : '<span class="chip">the same as the target</span>';
     status();
-    $('lefthead').innerHTML = '<b>' + esc(S.labels.target) + '</b> \u00b7 ' + (S.mode === 'order' ? 'in your order' : 'as it is') + ' \u00b7 read-only';
+    $('lefthead').innerHTML = '<b>' + esc(S.labels.target) + '</b> \u00b7 ' + 'read-only';
   }
 
   // ---- the buttons: one edit, undone with Ctrl+Z ----
@@ -484,7 +456,7 @@
   // ---- next and previous change ----
   function stops() {
     if (!S.marks) return [];
-    const s = S.marks.pieces.filter(p => p.kind !== 'same').map(p => p.b0).concat(S.marks.moves.map(m => m.b0)).concat(S.conflicts.map(c => c.line));
+    const s = S.marks.pieces.filter(p => p.kind !== 'same').filter(p => p.kind !== 'position').map(p => p.b0).concat(S.conflicts.map(c => c.line));
     return [...new Set(s)].sort((a, b) => a - b);
   }
   // the cursor on the first change - so folding starts from there, not from line 1
@@ -642,7 +614,7 @@
         if (S.hide) toFirstChange();
         if (S.marks) draw(S.marks);
         api.postMessage({ type: 'pref', hideIdentical: S.hide });
-      } }, { label: 'Target in literal order', check: S.mode === 'literal', run: () => { S.mode = S.mode === 'order' ? 'literal' : 'order'; S.seq++; api.postMessage({ type: 'mode', mode: S.mode, seq: S.seq, text: R.getValue() }); } }]);
+      } }]);
   }
   function moreItems() {
     return [{ label: 'Keyboard shortcuts', run: () => { $('help').hidden = false; } }]
@@ -672,7 +644,6 @@
   $('viewBtn').innerHTML = ICON.eye + '<span>View</span>' + ICON.chev;
   const saveLabel = t => { $('saveClose').innerHTML = ICON.check + '<span>' + esc(t) + '</span>'; };
   saveLabel('Save & Close');
-  window.addEventListener('resize', drawJoins);
   // the shortcuts: VS Code's own, with Cmd in place of Ctrl on a Mac
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
   const k = t => t.replace(/Ctrl/g, mac ? '\u2318' : 'Ctrl').replace(/Alt/g, mac ? '\u2325' : 'Alt').split(' / ').map(x => x.split('+').map(y => '<kbd>' + y + '</kbd>').join('+')).join(' / ');

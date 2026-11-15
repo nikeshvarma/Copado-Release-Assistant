@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.10.2
+
+- **Needs VS Code 1.90 or later** (May 2024), the first release that runs extensions on Node.js 20. CI tests on Node 20 and 22 - what VS Code runs the extension on from 1.90 to today - and no longer on Node 18, which reached its end of life in April 2025. A test keeps the oldest Node tested and the oldest VS Code supported in step. No change to what the extension does.
+
+## 3.10.1
+
+- **Translations pair by what they translate**: value-set and picklist value translations by their master label (global and standard value sets, decomposed field translations); layout section translations by their section, not by the translated label; quick action translations by their name and aspect. Several changes at once read right instead of one translation seeming renamed into another.
+- **Lightning web component configurations** (`js-meta.xml`): a target configuration is found by its `targets` attribute - a set, however it is written - and a property by its `name`; their order is not meaning, a property's is (it is the property panel's). The merge matches them the same way.
+- **A change inside attributes says what changed**: *property title default: Hello → Hi*, *targetConfig targets: … → …*, instead of an empty label.
+- **Sets are order-free**: a dependent picklist's mappings and each mapping's controlling values, a component's targets.
+
+## 3.10.0
+
+- **No more "Moved".** A block moved within an ordered list is shown as what it is to the file: *Removed* from its place and *Added* at the new one. When nothing inside changed the two rows are linked - *Removed · now at line 24*, *Added by you · from line 6* - and **Restore** or **Undo** on either puts it back in one step, the copy gone. The left pane is always the target exactly as it is; *Target in literal order*, the purple joins and **Move back** are gone. A move is yours unless the feature branch made the same one.
+- **Entries are paired by what identifies them**, also in lists the editor has no rule for: a name-like field every entry has once, unique on both sides (…Name, …Key, …Id, …Reference, identifier) - so several changes at once in Agentforce topics or a newer access list read right. Where values repeat, as in a list view's two filters on one field, position stays the identity. Permission sets' `agentAccesses` (API 63.0), `emailRoutingAddressAccesses` (62.0) and `genComputingSummaryDefAccess` (66.0) have their documented identities.
+- **What is not a change is not shown**: an entry's fields in another order, `<x/>` for `<x></x>`, `&#38;` for `&amp;`, attributes in another order, other line endings; a flow's elements, parameters and field assignments, and a page component's properties, in another order. Order still counts where it is meaning - layout items, related lists, picklist values, list-view filters, visibility criteria, a flow's assignment items, decision rules and screen fields. Order is meaning among siblings of one tag, not between different fields.
+- **A flow element only dragged in Flow Builder** is one quiet *Moved on the canvas* row - its X and Y together, counted apart, passed by F7, undone alone.
+- Checked against Winter '27 (API 68.0): decomposed permission sets, custom labels and workflow rules, and Flow's newest lists, such as `groups`.
+
 ## 3.9.4
 
 - **CI passes in a clone that still holds what the project removed.** Unzipping a new source over a clone never deletes files, so old README pictures and code files stayed - and failed the README test. Now none of them ships: the package leaves out every file in `scripts/removed.txt` and every README picture the README does not show, and the package check makes sure. `npm run tidy` deletes them from the clone, to commit. No change to what the extension does.

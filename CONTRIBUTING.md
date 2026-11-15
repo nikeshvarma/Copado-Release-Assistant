@@ -21,7 +21,7 @@ npm run test:vscode       # on Linux without a display: xvfb-run -a npm run test
 
 Open the folder in VS Code and press **F5** to start an Extension Development Host with the extension loaded. `samples/` has two permission sets to try a merge on.
 
-GitHub Actions runs every one of these on each push and pull request (`.github/workflows/test.yml`): the unit tests on Linux, Windows and macOS with Node 18, 20 and 22; the checks and the package; the browser tests; the VS Code tests on all three systems.
+GitHub Actions runs every one of these on each push and pull request (`.github/workflows/test.yml`): the unit tests on Linux, Windows and macOS with Node 20 and 22; the checks and the package; the browser tests; the VS Code tests on all three systems.
 
 ## Package it
 

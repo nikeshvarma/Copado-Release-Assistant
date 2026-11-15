@@ -12,7 +12,7 @@
   <a href="https://github.com/nikeshvarma/Copado-Release-Assistant/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/nikeshvarma/Copado-Release-Assistant?label=release"></a>
   <a href="https://github.com/nikeshvarma/Copado-Release-Assistant/actions/workflows/test.yml"><img alt="CI" src="https://github.com/nikeshvarma/Copado-Release-Assistant/actions/workflows/test.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-blue"></a>
-  <a href="https://code.visualstudio.com/"><img alt="VS Code 1.85 or later" src="https://img.shields.io/badge/VS%20Code-1.85%20or%20later-007ACC?logo=visualstudiocode"></a>
+  <a href="https://code.visualstudio.com/"><img alt="VS Code 1.90 or later" src="https://img.shields.io/badge/VS%20Code-1.90%20or%20later-007ACC?logo=visualstudiocode"></a>
   <a href="https://developer.salesforce.com/tools/salesforcecli"><img alt="Salesforce CLI v2" src="https://img.shields.io/badge/Salesforce%20CLI-v2-00A1E0?logo=salesforce"></a>
 </p>
 
@@ -42,7 +42,9 @@ The **Components** tab lists every component the promotion's stories committed, 
 
 ### A merge editor built for Salesforce metadata
 
-Metadata XML repeats the same lines everywhere, so line-by-line diffs pair the wrong blocks. The merge editor lines up **element by element**: what the feature branch added, what you changed, what was removed (struck through, where it was) and what moved — each with a one-click action that `Ctrl+Z` undoes. Nothing is merged behind your back: what the feature branch removed or changed is always marked. Unchanged runs fold away, and unsaved work is kept as a draft if the editor closes.
+Metadata XML repeats the same lines everywhere, so line-by-line diffs pair the wrong blocks. The merge editor lines up **element by element**, against the target exactly as it is: what the feature branch added, what you changed, and what was removed — struck through, where it was. A block moved within an ordered list is what it is to the file: removed from its place and added at the new one, each row saying where the other is, and one click puts it back. Every action is undone with `Ctrl+Z`, and nothing is merged behind your back: what the feature branch removed or changed is always marked.
+
+Entries are matched by what identifies them — a field permission by its field, a page action by its value, a flow element by its name — including lists from the newest releases, such as Agentforce agents and topics. What Salesforce reads the same is not shown as a change: an entry's fields in another order, `<x/>` for `<x></x>`, `&#38;` for `&amp;`, other line endings, a flow's elements in another order. A flow element only dragged in Flow Builder is one quiet *Moved on the canvas* row. Unchanged runs fold away, and unsaved work is kept as a draft if the editor closes.
 
 Duplicates and broken XML are caught as you type. A duplicate entry is marked on its own lines with the line it repeats, and removed with one click; identical duplicates are taken out when the merge is prepared. Invalid XML is underlined exactly where it breaks.
 
@@ -69,11 +71,11 @@ The **Manual** tab — always there — merges two versions pasted from Copado's
 
 ## Getting started
 
-**Requirements:** VS Code 1.85 or later, the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) v2 with your orgs logged in, and git 2.38 or later for branch conflicts.
+**Requirements:** VS Code 1.90 or later, the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) v2 with your orgs logged in, and git 2.38 or later for branch conflicts.
 
 1. Download the `.vsix` from the [latest release](https://github.com/nikeshvarma/Copado-Release-Assistant/releases/latest) and install it:
    ```bash
-   code --install-extension copado-release-assistant-3.9.4.vsix
+   code --install-extension copado-release-assistant-3.10.2.vsix
    ```
 2. Open your Salesforce project folder.
 3. Run **Copado: Open Settings** and set **Copado org** — the Salesforce CLI alias of the org where Copado runs.
