@@ -10,6 +10,10 @@ const registry = require('./registry');
  * identity (then only an exact content match counts as a duplicate).
  */
 function keyOf(el, spec) {
+  // an identity held in an attribute - a component's <targetConfig targets="..."> or <property name="...">; a list
+  // of targets is one identity, however it is ordered
+  const attrs = (spec.key || []).map(n => [n, (el.attrs || []).find(a => a.name === n)]).filter(([, a]) => a);
+  if (attrs.length) return { value: attrs.map(([n, a]) => n + '=' + String(a.value).split(',').map(v => v.trim()).filter(Boolean).sort().join(',')).join('|'), kind: 'key' };
   if (!X.hasElementChildren(el)) {
     return { value: X.textOf(el), kind: 'text' };
   }

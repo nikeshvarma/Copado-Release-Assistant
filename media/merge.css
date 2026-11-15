@@ -161,3 +161,9 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .fold-m.hov, .zone.fold.hov .ft { color: var(--vscode-editorLineNumber-activeForeground, var(--vscode-foreground)); }
 .zone.fold.hov .rule { border-top-color: color-mix(in srgb, var(--vscode-foreground) 24%, transparent); }
 .rowclick { position: absolute; left: 0; right: 14px; cursor: pointer; z-index: 4; }
+
+/* a flow element only moved on the canvas: quiet */
+.zone.head.pos { color: var(--vscode-descriptionForeground); background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent); }
+.monaco-editor .pos { background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent); }
+.acts .ib.pos { color: var(--vscode-descriptionForeground); }
+.chip.pos { color: var(--vscode-descriptionForeground); background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }

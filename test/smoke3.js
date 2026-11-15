@@ -1619,27 +1619,34 @@ module.exports = function register(ok, section, h) {
     assert.strictEqual(r.left, r.pieces.map(p => (p.left || []).join('')).join(''));
   };
 
-  ok('a block moved and nothing else: the left pane is the target in your order, nothing to shade - one move, and Move back gives the target exactly', () => {
+  ok('a block moved and nothing else: removed from its place, added by you at the new one - linked, the left pane the target as it is, and either half puts it back in one step', () => {
     const mine = fPage(REGb + APPb + TEAMb() + OWNb);
     const r = MA().align(T4, T4, mine, { type: 'FlexiPage' });
     covers(r, mine);
-    assert.deepStrictEqual(r.pieces.filter(p => p.kind !== 'same'), [], 'nothing to shade');
-    assert.strictEqual(r.left, mine, 'the target in your order is your resolution');
-    assert.deepStrictEqual(r.moves.map(m => [m.label, m.from, m.to, m.inside]), [['fieldInstance RecordTeam_cField', 1, 3, false]]);
-    assert.strictEqual(applyOps(mine, r.moves[0].undo), T4, 'Move back');
+    assert.deepStrictEqual(r.moves, [], 'no moves: what it is to the file');
+    const ch = r.pieces.filter(p => p.kind !== 'same');
+    assert.deepStrictEqual(ch.map(p => [p.kind, p.label.replace(/ \(\d+ lines\)$/, '')]).sort(), [['own', 'fieldInstance RecordTeam_cField'], ['removed', 'fieldInstance RecordTeam_cField']], 'yours: the feature branch did not move it');
+    assert.strictEqual(r.left, T4, 'the left pane is the target, in its own order');
+    const rem = ch.find(p => p.kind === 'removed'), add = ch.find(p => p.kind === 'own');
+    assert.ok(rem.now > 0 && add.was > 0 && rem.now === add.b0 + 1 && add.was === rem.b0 + 1, 'linked: "now at line", "from line"');
+    assert.strictEqual(applyOps(mine, rem.undo), T4, 'Restore: back, and the copy gone');
+    assert.strictEqual(applyOps(mine, add.undo), T4, 'Undo: the same');
   });
 
-  ok('moved and edited: what you edited is what moved; the move and the one changed value are each marked, and both undo to the target', () => {
+
+  ok('moved and edited: removed from its place, added by you at the new one - not linked, as it is not the same - and undoing both gives the target', () => {
     const mine = fPage(REGb + TEAMb('required') + APPb + OWNb);
     const r = MA().align(T4, T4, mine, { type: 'FlexiPage' });
     covers(r, mine);
-    assert.deepStrictEqual(r.moves.map(m => [m.label, m.from, m.to, m.inside]), [['fieldInstance RecordTeam_cField', 1, 2, true]], 'two neighbours swapped: the edited one moved');
-    const changed = r.pieces.filter(p => p.kind !== 'same');
-    assert.deepStrictEqual(changed.map(p => [p.kind, p.label]), [['changed-own', 'uiBehavior: none \u2192 required']]);
-    const once = applyOps(mine, changed[0].undo);
+    const ch = r.pieces.filter(p => p.kind !== 'same');
+    assert.deepStrictEqual(ch.map(p => p.kind).sort(), ['own', 'removed']);
+    assert.ok(ch.every(p => p.now == null && p.was == null), 'not linked: it changed');
+    const add = ch.find(p => p.kind === 'own');
+    const once = applyOps(mine, add.undo);
     const r2 = MA().align(T4, T4, once, { type: 'FlexiPage' });
-    assert.strictEqual(applyOps(once, r2.moves[0].undo), T4);
+    assert.strictEqual(applyOps(once, r2.pieces.find(p => p.kind === 'removed').undo), T4);
   });
+
 
   ok('removed and left out: no lines on your side, the target\u2019s and the feature\u2019s shown where they were; Restore and Add it back put them back exactly', () => {
     const F = fPage(TEAMb() + REGb + APPb + OWNb + fBlock('edit', 'New__c', 'New_cField'));
@@ -2310,7 +2317,8 @@ module.exports = function register(ok, section, h) {
     const item = v => '        <valueListItems>\n            <value>' + v + '</value>\n        </valueListItems>\n';
     const fx = items => '<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + items.map(item).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>main</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
     const r4 = MA().align(fx(['Edit', 'Share', 'Edit']), null, fx(['Edit', 'Edit', 'Share']), { type: 'FlexiPage' });
-    assert.deepStrictEqual([r4.moves.length, r4.pieces.filter(p => p.kind !== 'same').length], [1, 0], 'one block moved - not two, not a change');
+    assert.deepStrictEqual([r4.moves.length, r4.pieces.filter(p => p.kind !== 'same').map(p => p.kind).sort()], [0, ['own', 'removed']], 'one block taken out and added again - linked');
+    assert.ok(r4.pieces.filter(p => p.kind !== 'same').every(p => p.now || p.was));
     // self-closing elements and attributes; a CDATA value changed; no XML declaration
     const T5 = '<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">\n    <labels>\n        <fullName>Hello</fullName>\n        <categories/>\n        <value><![CDATA[Hi & welcome]]></value>\n    </labels>\n</CustomLabels>\n';
     const M5 = T5.replace('Hi & welcome', 'Hello & welcome');
@@ -2343,7 +2351,8 @@ module.exports = function register(ok, section, h) {
     assert.strictEqual(applyOps(applyOps(M6, r6.pieces.find(p => p.kind === 'own').undo), r6.pieces.find(p => p.kind === 'removed').undo), T6, 'Undo and Restore give the target back');
     // actions reordered: one move
     const TR = pg([item('A'), item('B'), item('C')]), MR = pg([item('C'), item('A'), item('B')]);
-    assert.strictEqual(MA().align(TR, TR, MR, { type: 'FlexiPage' }).moves.length, 1);
+    const rr = MA().align(TR, TR, MR, { type: 'FlexiPage' });
+    assert.deepStrictEqual([rr.moves.length, rr.pieces.filter(p => p.kind !== 'same').map(p => p.kind).sort()], [0, ['own', 'removed']], 'reordered actions: one out, one in, linked');
     // the same action twice with different rules: a duplicate to decide, not removed
     const D = require('../src/mergeDuplicates');
     const twice = pg([item('Share'), item('Share', ['1 - Qualification'])]);
@@ -2398,6 +2407,151 @@ module.exports = function register(ok, section, h) {
     const list = require('../scripts/ship').removed(path.join(__dirname, '..'));
     assert.ok(['quickMerge.js', 'treeView.js', 'src/liveMarks.js', 'media/readme/banner.png', 'media/readme/merge.png'].every(f => list.includes(f)), 'the removed files are listed');
     assert.ok(!list.some(f => /^(extension\.js|package\.json|README\.md|media\/readme\/(merge-editor|duplicates|promotion|precheck|manual|components)\.png)$/.test(f)), 'and nothing still used');
+  });
+
+  section('3.10.0: identities');
+
+  ok('a list nothing identifies is paired by a name-like field unique on both sides - several changes at once read right; repeated values keep position', () => {
+    const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+    const say = r => r.pieces.filter(p => p.kind !== 'same').map(p => p.kind + ': ' + p.label.replace(/ \(\d+ lines?\)$/, ''));
+    // an Agentforce planner's topics (GenAiPlannerBundle): no rule - genAiPluginName inferred
+    const gp = list => '<?xml version="1.0" encoding="UTF-8"?>\n<GenAiPlannerBundle ' + NS + '>\n' + list.map(([n, sc]) => '    <genAiPlugins>\n        <genAiPluginName>' + n + '</genAiPluginName>\n        <scope>' + sc + '</scope>\n    </genAiPlugins>\n').join('') + '    <masterLabel>Planner</masterLabel>\n</GenAiPlannerBundle>\n';
+    const T = gp([['Billing', 'a'], ['Orders', 'b'], ['Returns', 'c']]), M = gp([['Billing', 'a2'], ['Returns', 'c2']]);
+    const r = MA().align(T, T, M, { type: 'GenAiPlannerBundle' });
+    covers(r, M);
+    assert.deepStrictEqual(say(r).map(x => x.replace(/: .*?(scope)/, ': $1')), ['changed-own: scope: a \u2192 a2', 'removed: genAiPlugins: Orders, b', 'changed-own: scope: c \u2192 c2'], JSON.stringify(say(r)));
+    // permission sets' newer lists: the documented identities
+    const ps = (tag, key, list) => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet ' + NS + '>\n' + list.map(([v, e]) => '    <' + tag + '>\n        <' + key + '>' + v + '</' + key + '>\n        <enabled>' + e + '</enabled>\n    </' + tag + '>\n').join('') + '    <label>P</label>\n</PermissionSet>\n';
+    for (const [tag, key] of [['agentAccesses', 'agentName'], ['genComputingSummaryDefAccess', 'configName'], ['emailRoutingAddressAccesses', 'name']]) {
+      const TP = ps(tag, key, [['A', 'true'], ['B', 'true'], ['C', 'true']]), MP = ps(tag, key, [['A', 'false'], ['C', 'false']]);
+      const rp = MA().align(TP, TP, MP, { type: 'PermissionSet' });
+      assert.deepStrictEqual(say(rp), ['changed-own: A enabled: true \u2192 false', 'removed: ' + tag + ' B', 'changed-own: C enabled: true \u2192 false'], tag);
+    }
+    // two filters on one field (a list view's date range): nothing inferred - position is the identity, and right
+    const lv = to => '<?xml version="1.0" encoding="UTF-8"?>\n<ListView ' + NS + '>\n    <fullName>Recent</fullName>\n    <filters>\n        <field>CREATED_DATE</field>\n        <operation>greaterOrEqual</operation>\n        <value>LAST_N_DAYS:30</value>\n    </filters>\n    <filters>\n        <field>CREATED_DATE</field>\n        <operation>lessOrEqual</operation>\n        <value>' + to + '</value>\n    </filters>\n    <label>Recent</label>\n</ListView>\n';
+    assert.deepStrictEqual(say(MA().align(lv('TODAY'), lv('TODAY'), lv('YESTERDAY'), { type: 'ListView' })).map(x => x.replace(/: CREATED_DATE /, ': ')), ['changed-own: value: TODAY \u2192 YESTERDAY']);
+  });
+
+  section('3.10.0: no noise');
+
+  ok('what is not a change is not shown: fields of an entry in another order, <x/> and <x></x>, &amp; and &#38;, line endings; order-free lists reordered', () => {
+    const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+    const none = (T, M, type, what) => { const r = MA().align(T, T, M, { type }); covers(r, M); assert.deepStrictEqual(r.pieces.filter(p => p.kind !== 'same').map(p => p.label), [], what); };
+    const ps = body => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet ' + NS + '>\n' + body + '    <label>P</label>\n</PermissionSet>\n';
+    const fp = '    <fieldPermissions>\n        <editable>true</editable>\n        <field>A.x__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+    none(ps(fp), ps('    <fieldPermissions>\n        <field>A.x__c</field>\n        <editable>true</editable>\n        <readable>true</readable>\n    </fieldPermissions>\n'), 'PermissionSet', 'an entry\u2019s fields in another order');
+    none(ps('    <description></description>\n' + fp), ps('    <description/>\n' + fp), 'PermissionSet', '<x></x> and <x/>');
+    none(ps('    <description>R&amp;D</description>\n'), ps('    <description>R&#38;D</description>\n'), 'PermissionSet', 'entities');
+    none(ps(fp), ps(fp).replace(/\n/g, '\r\n'), 'PermissionSet', 'line endings');
+    // a flow\u2019s elements, and a component\u2019s properties, in another order
+    const as = n => '    <assignments>\n        <name>' + n + '</name>\n        <label>' + n + '</label>\n    </assignments>\n';
+    const fl = ns => '<?xml version="1.0" encoding="UTF-8"?>\n<Flow ' + NS + '>\n' + ns.map(as).join('') + '    <label>F</label>\n</Flow>\n';
+    none(fl(['Set_A', 'Set_B']), fl(['Set_B', 'Set_A']), 'Flow', 'flow elements');
+    const prop = (n, v) => '                    <componentInstanceProperties>\n                        <name>' + n + '</name>\n                        <value>' + v + '</value>\n                    </componentInstanceProperties>\n';
+    const fx = props => '<?xml version="1.0" encoding="UTF-8"?>\n<FlexiPage ' + NS + '>\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n' + props.join('') + '                <componentName>force:relatedListSingleContainer</componentName>\n                <identifier>rl</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>main</name>\n        <type>Region</type>\n    </flexiPageRegions>\n    <masterLabel>P</masterLabel>\n</FlexiPage>\n';
+    none(fx([prop('relatedListApiName', 'Orders'), prop('rowsToDisplay', '10')]), fx([prop('rowsToDisplay', '10'), prop('relatedListApiName', 'Orders')]), 'FlexiPage', 'component properties');
+    // ...but a comment added inside an entry is a change, and where order is meaning it still counts
+    const r = MA().align(ps(fp), ps(fp), ps(fp.replace('<editable>', '<!-- for the sales team -->\n        <editable>')), { type: 'PermissionSet' });
+    assert.ok(r.pieces.some(p => p.kind !== 'same'), 'a comment added: a change');
+  });
+
+  ok('a flow element only dragged on the canvas is one quiet row - X and Y together, counted apart, undone alone', () => {
+    const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+    const fl = (x, y, l) => '<?xml version="1.0" encoding="UTF-8"?>\n<Flow ' + NS + '>\n    <assignments>\n        <name>Set_A</name>\n        <label>' + l + '</label>\n        <locationX>' + x + '</locationX>\n        <locationY>' + y + '</locationY>\n    </assignments>\n    <label>F</label>\n</Flow>\n';
+    const T = fl(176, 134, 'Set A'), M = fl(352, 290, 'Set A2');
+    const r = MA().align(T, null, M, { type: 'Flow' });
+    covers(r, M);
+    const ch = r.pieces.filter(p => p.kind !== 'same');
+    assert.deepStrictEqual(ch.map(p => p.kind), ['changed-own', 'position']);
+    assert.strictEqual(ch[1].label, 'locationX: 176 \u2192 352, locationY: 134 \u2192 290');
+    assert.deepStrictEqual([r.counts.position, r.counts.own], [1, 1]);
+    assert.strictEqual(applyOps(M, ch[1].undo), fl(176, 134, 'Set A2'), 'Use target: the position, not the label');
+  });
+
+  section('3.10.0: decomposed formats and Winter \u201927 lists');
+
+  ok('decomposed permission sets, custom labels and workflow rules; Flow groups (68.0); a duplicated agent access', () => {
+    const D = require('../src/mergeDuplicates');
+    const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+    const say = r => r.pieces.filter(p => p.kind !== 'same').map(p => p.kind + ': ' + p.label.replace(/ \(\d+ lines?\)$/, ''));
+    const check = (name, got, ok) => assert.ok(ok, name + ': ' + JSON.stringify(got));
+    // a decomposed permission set: objectSettings/Account.objectSettings-meta.xml - a PermissionSet root with one object's entries
+    const os = (ed, extra) => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet ' + NS + '>\n    <fieldPermissions>\n        <editable>' + ed + '</editable>\n        <field>Account.Region__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n' + (extra || '') + '    <objectPermissions>\n        <allowCreate>true</allowCreate>\n        <allowDelete>false</allowDelete>\n        <allowEdit>true</allowEdit>\n        <allowRead>true</allowRead>\n        <modifyAllRecords>false</modifyAllRecords>\n        <object>Account</object>\n        <viewAllRecords>false</viewAllRecords>\n    </objectPermissions>\n</PermissionSet>\n';
+    let r = MA().align(os('true'), null, os('false'), { type: 'PermissionSet' });
+    check('decomposed objectSettings: one access changed', say(r), JSON.stringify(say(r)) === JSON.stringify(['changed-own: Account.Region__c editable: true \u2192 false']));
+    r = MA().align(os('true'), null, os('true', '    <fieldPermissions>\n        <editable>true</editable>\n        <field>Account.Tier__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n'), { type: 'PermissionSet' });
+    check('decomposed objectSettings: a field added', say(r), say(r).length === 1 && /own: fieldPermissions Account\.Tier__c/.test(say(r)[0]));
+    // a decomposed custom label (labels/Greeting.label-meta.xml)
+    const lab = v => '<?xml version="1.0" encoding="UTF-8"?>\n<CustomLabel ' + NS + '>\n    <fullName>Greeting</fullName>\n    <language>en_US</language>\n    <protected>false</protected>\n    <shortDescription>Greeting</shortDescription>\n    <value>' + v + '</value>\n</CustomLabel>\n';
+    r = MA().align(lab('Hello'), null, lab('Hi'), { type: 'CustomLabel' });
+    check('decomposed CustomLabel: its value changed', say(r), JSON.stringify(say(r)) === JSON.stringify(['changed-own: value: Hello \u2192 Hi']));
+    // a decomposed workflow rule: two criteria on one field (a range), the second changed
+    const wr = v => '<?xml version="1.0" encoding="UTF-8"?>\n<WorkflowRule ' + NS + '>\n    <fullName>Big_Deal</fullName>\n    <active>true</active>\n    <criteriaItems>\n        <field>Opportunity.Amount</field>\n        <operation>greaterThan</operation>\n        <value>1000</value>\n    </criteriaItems>\n    <criteriaItems>\n        <field>Opportunity.Amount</field>\n        <operation>lessThan</operation>\n        <value>' + v + '</value>\n    </criteriaItems>\n    <triggerType>onCreateOnly</triggerType>\n</WorkflowRule>\n';
+    r = MA().align(wr('5000'), null, wr('9000'), { type: 'WorkflowRule' });
+    check('decomposed WorkflowRule: the second of two criteria on one field', say(r), say(r).length === 1 && /value: 5000 \u2192 9000/.test(say(r)[0]));
+    // Flow lists from 61.0 to 68.0: named, order-free
+    const grp = ns => '<?xml version="1.0" encoding="UTF-8"?>\n<Flow ' + NS + '>\n' + ns.map(([n, l]) => '    <groups>\n        <name>' + n + '</name>\n        <label>' + l + '</label>\n    </groups>\n').join('') + '    <label>F</label>\n</Flow>\n';
+    r = MA().align(grp([['G1', 'One'], ['G2', 'Two']]), null, grp([['G2', 'Two'], ['G1', 'Uno']]), { type: 'Flow' });
+    check('Flow groups (68.0): reordered, one relabelled', say(r), say(r).length === 1 && /label: One \u2192 Uno/.test(say(r)[0]));
+    // duplicates on a newly identified list
+    const ag = list => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet ' + NS + '>\n' + list.map(([a, e]) => '    <agentAccesses>\n        <agentName>' + a + '</agentName>\n        <enabled>' + e + '</enabled>\n    </agentAccesses>\n').join('') + '    <label>P</label>\n</PermissionSet>\n';
+    const d = D.inText(ag([['Sales_Agent', 'true'], ['Service_Agent', 'true'], ['Sales_Agent', 'false']]));
+    check('agentAccesses: the same agent twice is a duplicate', d, d.length === 1 && d[0].identical === false);
+  });
+
+  section('3.10.1: translations, component configurations, sets');
+
+  ok('translations pair by what they translate; a component\u2019s configurations by their targets, its properties by name; attribute changes say what changed; sets are order-free', () => {
+    const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+    const X = (root, body) => '<?xml version="1.0" encoding="UTF-8"?>\n<' + root + ' ' + NS + '>\n' + body + '</' + root + '>\n';
+    const say = (T, M, type) => { const r = MA().align(T, null, M, { type }); covers(r, M); return r.pieces.filter(p => p.kind !== 'same').map(p => p.kind + ': ' + p.label.replace(/ \(\d+ lines?\)$/, '')); };
+    // 1 value-set and picklist translations: by masterLabel
+    const vt = list => list.map(([m, t]) => '    <valueTranslation>\n        <masterLabel>' + m + '</masterLabel>\n        <translation>' + t + '</translation>\n    </valueTranslation>\n').join('');
+    for (const type of ['GlobalValueSetTranslation', 'StandardValueSetTranslation']) {
+      const g = say(X(type, vt([['Hot', 'Chaud'], ['Warm', 'Tiede'], ['Cold', 'Froid']])), X(type, vt([['Hot', 'Heiss'], ['Cold', 'Kalt']])), type);
+      assert.ok(g.length === 3 && g.some(x => /^removed: .*Warm/.test(x)) && !g.some(x => /masterLabel/.test(x)), type + ': ' + JSON.stringify(g));
+    }
+    const pv = list => '    <label>Region</label>\n    <name>Region__c</name>\n' + list.map(([m, t]) => '    <picklistValues>\n        <masterLabel>' + m + '</masterLabel>\n        <translation>' + t + '</translation>\n    </picklistValues>\n').join('');
+    const gf = say(X('CustomFieldTranslation', pv([['North', 'Nord'], ['South', 'Sud'], ['East', 'Est']])), X('CustomFieldTranslation', pv([['North', 'Norden'], ['East', 'Osten']])), 'CustomFieldTranslation');
+    assert.ok(gf.length === 3 && gf.some(x => /^removed: .*South/.test(x)), JSON.stringify(gf));
+    // 2 a layout section translation: by its section
+    const secs = list => '    <layouts>\n        <layout>Account Layout</layout>\n' + list.map(([sec, t]) => '        <sections>\n            <label>' + t + '</label>\n            <section>' + sec + '</section>\n        </sections>\n').join('') + '    </layouts>\n';
+    const gs = say(X('CustomObjectTranslation', secs([['Info', 'Infos'], ['System', 'Systeme'], ['Address', 'Adresse']])), X('CustomObjectTranslation', secs([['Info', 'Information'], ['Address', 'Anschrift']])), 'CustomObjectTranslation');
+    assert.ok(gs.length === 3 && gs.filter(x => /^changed-own/.test(x)).length === 2 && gs.some(x => /^removed: sections System/.test(x)), JSON.stringify(gs));
+    // 3 a quick action translation: by name and aspect
+    const qa = list => list.map(([n, asp, l]) => '    <quickActions>\n' + (asp ? '        <aspect>' + asp + '</aspect>\n' : '') + '        <label>' + l + '</label>\n        <name>' + n + '</name>\n    </quickActions>\n').join('');
+    const gq = say(X('CustomObjectTranslation', qa([['New_Case', null, 'Neuer Fall'], ['New_Case', 'Description', 'Einen Fall anlegen']])), X('CustomObjectTranslation', qa([['New_Case', 'Description', 'Fall anlegen']])), 'CustomObjectTranslation');
+    assert.deepStrictEqual(gq, ['removed: quickActions New_Case', 'changed-own: New_Case / Description label: Einen Fall anlegen \u2192 Fall anlegen']);
+    // 4, 5 a component's configurations: by their targets (a set), properties by name; attribute changes named
+    const lwc = o => '<?xml version="1.0" encoding="UTF-8"?>\n<LightningComponentBundle ' + NS + '>\n    <apiVersion>68.0</apiVersion>\n    <targets>\n        <target>lightning__RecordPage</target>\n        <target>lightning__AppPage</target>\n    </targets>\n    <targetConfigs>\n' + o.map(([t, d]) => '        <targetConfig targets="' + t + '">\n            <property name="title" type="String" default="' + d + '"/>\n        </targetConfig>\n').join('') + '    </targetConfigs>\n</LightningComponentBundle>\n';
+    assert.deepStrictEqual(say(lwc([['lightning__RecordPage', 'Record'], ['lightning__AppPage, lightning__HomePage', 'App']]), lwc([['lightning__HomePage,lightning__AppPage', 'Application'], ['lightning__RecordPage', 'Record']]), 'LightningComponentBundle'),
+      ['changed-own: property title default: App \u2192 Application'], 'swapped, targets in another order: only the default');
+    assert.deepStrictEqual(say(lwc([['lightning__RecordPage', 'Record']]), lwc([['lightning__RecordPage, lightning__AppPage', 'Record']]), 'LightningComponentBundle').map(x => x.replace(/\u2026$/, '')),
+      ['changed-own: targetConfig targets: lightning__RecordPage \u2192 lightning__RecordPage, lightning__AppPa']);
+    assert.deepStrictEqual(say(lwc([['lightning__RecordPage', 'Record']]), lwc([['lightning__RecordPage', 'Record']]).replace('<target>lightning__RecordPage</target>\n        <target>lightning__AppPage</target>', '<target>lightning__AppPage</target>\n        <target>lightning__RecordPage</target>'), 'LightningComponentBundle'), [], 'targets: a set');
+    // 6, 7 a dependent picklist's mappings, and each mapping's controlling values: sets
+    const vs = list => '    <fullName>Region__c</fullName>\n    <valueSet>\n' + list.map(([v, cs]) => '        <valueSettings>\n' + cs.map(c => '            <controllingFieldValue>' + c + '</controllingFieldValue>\n').join('') + '            <valueName>' + v + '</valueName>\n        </valueSettings>\n').join('') + '    </valueSet>\n';
+    assert.deepStrictEqual(say(X('CustomField', vs([['North', ['UK', 'IE']], ['South', ['UK']]])), X('CustomField', vs([['South', ['UK']], ['North', ['IE', 'UK']]])), 'CustomField'), [], 'mappings and controlling values in another order');
+    assert.deepStrictEqual(say(X('CustomField', vs([['North', ['UK']]])), X('CustomField', vs([['North', ['UK', 'IE']]])), 'CustomField').length, 1, 'a controlling value added: one change');
+    // concluded right as they were: a login range is both its addresses; approval steps run in order
+    const ip = list => list.map(([s1, e]) => '    <loginIpRanges>\n        <endAddress>' + e + '</endAddress>\n        <startAddress>' + s1 + '</startAddress>\n    </loginIpRanges>\n').join('');
+    const gi = say(X('Profile', ip([['10.0.0.0', '10.0.0.255'], ['192.168.0.0', '192.168.0.255']])), X('Profile', ip([['10.0.0.0', '10.0.0.127'], ['192.168.0.0', '192.168.0.255']])), 'Profile');
+    assert.ok(gi.length >= 1 && gi.every(x => /10\.0\.0/.test(x)), 'only the range that changed: ' + JSON.stringify(gi));
+    const ap = steps => steps.map(n => '    <approvalStep>\n        <label>' + n + '</label>\n        <name>' + n + '</name>\n    </approvalStep>\n').join('');
+    assert.strictEqual(say(X('ApprovalProcess', ap(['Manager', 'Director'])), X('ApprovalProcess', ap(['Director', 'Manager'])), 'ApprovalProcess').length, 2, 'steps swapped: their order is the approval\u2019s');
+  });
+
+  section('3.10.2: the Node versions tested are the ones VS Code runs the extension on');
+
+  ok('the oldest Node.js tested is the one the oldest supported VS Code runs extensions on - and none older', () => {
+    const pkg = require('../package.json');
+    const wf = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'test.yml'), 'utf8');
+    const tested = /node: \[([^\]]+)\]/.exec(wf)[1].split(',').map(n => +n.trim());
+    // VS Code's own Node.js: 1.85-1.89 run extensions on Node 18, 1.90 on Node 20, the releases from 2025 on Node 22
+    const minor = +/\^1\.(\d+)/.exec(pkg.engines.vscode)[1];
+    const oldest = minor >= 101 ? 22 : minor >= 90 ? 20 : 18;
+    assert.strictEqual(Math.min(...tested), oldest, 'VS Code 1.' + minor + ' runs extensions on Node ' + oldest + '; CI tests ' + tested.join(', '));
+    assert.ok(tested.includes(22), 'and today\u2019s VS Code\u2019s');
   });
 
   section('3.0: what is shipped');

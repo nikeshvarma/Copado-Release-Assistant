@@ -43,7 +43,7 @@ function html(webview, media) {
     '<div id="help" hidden role="dialog" aria-label="Keyboard shortcuts"></div>' +
     '<div id="menu" hidden role="menu"></div>' +
     '<div class="heads"><div id="lefthead"></div><div></div><div id="righthead"></div></div>' +
-    '<div class="panes"><div id="left"></div><div id="gap"><div id="joins"></div></div><div id="right"></div></div>' +
+    '<div class="panes"><div id="left"></div><div id="gap"></div><div id="right"></div></div>' +
     '<div class="status" role="status"><span id="stSaved"></span><span id="stMarks"></span><span id="stDups"></span><span id="note"></span><span class="sp"></span><span class="hints">F7 next change \u00b7 F8 next problem \u00b7 Ctrl+S save</span></div>' +
     '<script nonce="' + nonce + '" src="' + attr(u('monaco/vs/loader.js')) + '"></script>' +
     '<script nonce="' + nonce + '" src="' + attr(u('merge.js')) + '"></script></body></html>';
@@ -58,7 +58,7 @@ function marksFor(o, text, mode) {
     left: r.left, mode: r.mode, counts: r.counts, moves: r.moves,
     // duplicates in your resolution as it is - one you add is marked as you type
     dups: MD.inText(text),
-    pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, context: p.context, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature,
+    pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, context: p.context, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature, now: p.now, was: p.was,
       dupRemoved: p.kind === 'removed' && removed.size && p.ghost ? removed.has(MD.flat(p.ghost.join(''))) || undefined : undefined }))
   };
 }

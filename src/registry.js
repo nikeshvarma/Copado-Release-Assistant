@@ -72,6 +72,9 @@ const TYPES = {
       pageAccesses: { key: ['apexPage'], sortable: true },
       recordTypeVisibilities: { key: ['recordType'], sortable: true },
       tabSettings: { key: ['tab'], sortable: true },
+      agentAccesses: { key: ['agentName'], sortable: true },              // API 63.0
+      emailRoutingAddressAccesses: { key: ['name'], sortable: true },     // API 62.0
+      genComputingSummaryDefAccess: { key: ['configName'], sortable: true }, // API 66.0
       userPermissions: { key: ['name'], sortable: true }
     }
   },
@@ -148,8 +151,9 @@ const TYPES = {
     order: ['fullName'],
     collections: {
       'valueSet/valueSetDefinition/value': { key: ['fullName'], sortable: false },
-      'valueSet/valueSettings': { key: ['valueName'], sortable: false },
-      'valueSet/valueSettings/controllingFieldValue': { sortable: false },
+      // a dependent picklist's mappings, each by its value - and the controlling values of each: sets, not sequences
+      'valueSet/valueSettings': { key: ['valueName'], sortable: false, orderFree: true },
+      'valueSet/valueSettings/controllingFieldValue': { sortable: false, orderFree: true },
       'lookupFilter/filterItems': { key: ['field', 'operation', 'value', 'valueField'], sortable: false }
     }
   },
@@ -205,7 +209,8 @@ const TYPES = {
       // an item is the component or field it holds: matched by its identifier, so a changed component is merged, not added twice
       'flexiPageRegions/itemInstances': { key: ['componentInstance/identifier', 'fieldInstance/identifier'], sortable: false },
       componentInstances: { noDedupe: true },
-      componentInstanceProperties: { key: ['name'], sortable: false },
+      // read by name: their order is not meaning (orderFree is for comparing only - formatting keeps their order)
+      componentInstanceProperties: { key: ['name'], sortable: false, orderFree: true },
       // an action or a field in a list is its value: matched by it, so a shortened visibility rule is an edit, not a move
       valueListItems: { key: ['value'], sortable: false },
       quickActionInstances: { noDedupe: true },
@@ -237,10 +242,16 @@ const TYPES = {
       customLabels: { key: ['name'], sortable: true },
       customTabs: { key: ['name'], sortable: true },
       flowDefinitions: { key: ['fullName'], sortable: true },
-      quickActions: { key: ['name'], sortable: true },
+      quickActions: { key: ['name', 'aspect'], sortable: true },
       reportTypes: { key: ['name'], sortable: true }
     }
   },
+
+  // a decomposed object translation's field (objectTranslations/X/Y.fieldTranslation-meta.xml)
+  CustomFieldTranslation: { strict: false, collections: { picklistValues: { key: ['masterLabel'], sortable: false, orderFree: true } } },
+  // a picklist value's translation is the master label it translates
+  GlobalValueSetTranslation: { strict: false, collections: { valueTranslation: { key: ['masterLabel'], sortable: false, orderFree: true } } },
+  StandardValueSetTranslation: { strict: false, collections: { valueTranslation: { key: ['masterLabel'], sortable: false, orderFree: true } } },
 
   CustomObjectTranslation: {
     strict: true,
@@ -249,8 +260,10 @@ const TYPES = {
       'fields/picklistValues': { key: ['masterLabel'], sortable: true },
       fieldSets: { key: ['name'], sortable: true },
       layouts: { key: ['layout'], sortable: true },
-      'layouts/sections': { key: ['label'], sortable: true },
-      quickActions: { key: ['name'], sortable: true },
+      // a section translation belongs to its section: label is the translation
+      'layouts/sections': { key: ['section'], sortable: true },
+      // one action, one entry per aspect it translates (its label, its description)
+      quickActions: { key: ['name', 'aspect'], sortable: true },
       recordTypes: { key: ['name'], sortable: true },
       sharingReasons: { key: ['name'], sortable: true },
       standardFields: { key: ['name'], sortable: true },
@@ -331,6 +344,34 @@ const TYPES = {
   Flow: {
     strict: false,
     collections: {
+      // a flow runs by its connectors: the order of its elements is not meaning (named, so each is matched by its name)
+      actionCalls: { key: ['name'], sortable: false, orderFree: true },
+      apexPluginCalls: { key: ['name'], sortable: false, orderFree: true },
+      assignments: { key: ['name'], sortable: false, orderFree: true },
+      collectionProcessors: { key: ['name'], sortable: false, orderFree: true },
+      customErrors: { key: ['name'], sortable: false, orderFree: true },
+      decisions: { key: ['name'], sortable: false, orderFree: true },
+      dynamicChoiceSets: { key: ['name'], sortable: false, orderFree: true },
+      exitRules: { key: ['name'], sortable: false, orderFree: true },
+      experiments: { key: ['name'], sortable: false, orderFree: true },
+      groups: { key: ['name'], sortable: false, orderFree: true },
+      loops: { key: ['name'], sortable: false, orderFree: true },
+      orchestratedStages: { key: ['name'], sortable: false, orderFree: true },
+      recordCreates: { key: ['name'], sortable: false, orderFree: true },
+      recordDeletes: { key: ['name'], sortable: false, orderFree: true },
+      recordLookups: { key: ['name'], sortable: false, orderFree: true },
+      recordRollbacks: { key: ['name'], sortable: false, orderFree: true },
+      recordUpdates: { key: ['name'], sortable: false, orderFree: true },
+      screens: { key: ['name'], sortable: false, orderFree: true },
+      steps: { key: ['name'], sortable: false, orderFree: true },
+      subflows: { key: ['name'], sortable: false, orderFree: true },
+      transforms: { key: ['name'], sortable: false, orderFree: true },
+      waits: { key: ['name'], sortable: false, orderFree: true },
+      // parameters and field assignments are read by name or field
+      inputParameters: { key: ['name'], sortable: false, orderFree: true },
+      outputParameters: { key: ['name'], sortable: false, orderFree: true },
+      inputAssignments: { key: ['field'], sortable: false, orderFree: true },
+      outputAssignments: { key: ['assignToReference'], sortable: false, orderFree: true },
       'processMetadataValues': { key: ['name'], sortable: false },
       'choices': { key: ['name'], sortable: true },
       'constants': { key: ['name'], sortable: true },
@@ -366,8 +407,10 @@ const TYPES = {
     strict: false,
     collections: {
       targets: { sortable: false },
-      'targets/target': { sortable: false },
-      'targetConfigs/targetConfig': { key: ['targets'], sortable: false },
+      'targets/target': { sortable: false, orderFree: true },
+      // a target configuration is found by its targets: their order is not meaning. A property's is - it is the
+      // order of the fields in Lightning App Builder's property panel
+      'targetConfigs/targetConfig': { key: ['targets'], sortable: false, orderFree: true },
       property: { key: ['name'], sortable: false },
       objects: { sortable: true },
       'objects/object': { sortable: true }
