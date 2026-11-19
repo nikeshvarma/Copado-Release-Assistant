@@ -21,6 +21,14 @@ for (const n of names) if (/^extension\/(test|\.github|scripts|dist)\//.test(n) 
 // nothing the project has removed, and no README picture the README does not show - whatever the clone held
 const ship = require('./ship').keep(path.resolve(__dirname, '..'));
 for (const n of names) if (n.startsWith('extension/') && !ship(n.slice('extension/'.length))) problems.push('left over, should not ship: ' + n);
+// the README's pictures over https, each one in the repository - VS Code's extension page shows no other kind
+const readme = entries.find(e => e.name === 'extension/README.md').data.toString('utf8');
+for (const [, src] of readme.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) {
+  if (!/^https:\/\//.test(src)) { problems.push('a README picture VS Code will not show (not https): ' + src); continue; }
+  const local = (/\/raw\/HEAD\/(.+)$/.exec(src) || [])[1];
+  if (local && !fs.existsSync(path.resolve(__dirname, '..', local))) problems.push('a README picture not in the repository: ' + local);
+}
+for (const n of names) if (/^extension\/media\/readme\//.test(n)) problems.push('should not ship - linked from the repository: ' + n);
 const m = entries.find(e => e.name === 'extension.vsixmanifest').data.toString('utf8');
 if (!m.includes('Version="' + pkg.version + '"') || !m.includes('Publisher="' + pkg.publisher + '"')) problems.push('the manifest does not match package.json');
 const shipped = JSON.parse(entries.find(e => e.name === 'extension/package.json').data.toString('utf8'));

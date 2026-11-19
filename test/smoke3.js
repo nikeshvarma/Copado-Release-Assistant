@@ -2915,6 +2915,21 @@ module.exports = function register(ok, section, h) {
     } finally { rmTree(root); }
   });
 
+  section('3.16.6: the README in VS Code');
+
+  ok('the packaged README links its pictures over https from the repository - VS Code\u2019s extension page shows no picture from the extension\u2019s folder', () => {
+    const { readmeForPackage } = require('../scripts/ship');
+    const repo = { type: 'git', url: 'https://github.com/owner/repo.git' };
+    const md = '![The editor](media/readme/code.png)\n![Badge](https://img.shields.io/badge/a-b-blue)\n<img src="./media/readme/x.png" alt="x">\n[Features](#features)\n';
+    assert.strictEqual(readmeForPackage(md, repo), '![The editor](https://github.com/owner/repo/raw/HEAD/media/readme/code.png)\n![Badge](https://img.shields.io/badge/a-b-blue)\n<img src="https://github.com/owner/repo/raw/HEAD/media/readme/x.png" alt="x">\n[Features](#features)\n');
+    assert.throws(() => readmeForPackage(md, { url: 'git@github.com:owner/repo.git' }), /must be https:\/\/github\.com/);
+    // this project's own README: every picture it shows is in the repository, and none left relative once packaged
+    const own = readmeForPackage(fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8'), require('../package.json').repository);
+    const pics = [...own.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map(m => m[1]);
+    assert.ok(pics.length >= 8 && pics.every(u => /^https:\/\//.test(u)), JSON.stringify(pics.filter(u => !/^https/.test(u))));
+    for (const u of pics.filter(u => /\/raw\/HEAD\//.test(u))) assert.ok(fs.existsSync(path.join(__dirname, '..', u.split('/raw/HEAD/')[1])), u);
+  });
+
   section('3.0: what is shipped');
 
   ok('the package: every command registered and contributed, every setting read, the Command Palette short, nothing removed left behind', () => {
