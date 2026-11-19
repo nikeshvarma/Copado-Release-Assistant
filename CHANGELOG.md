@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.20.0
+
+- **Two panels show each version once**: the target's lines stay on the left, where they are, lit, with **Accept target** beside them; under the conflict only the feature's version, the words that differ lit on both sides - not the target's again in grey. Two rows shorter per conflict, the panes level.
+- **A removal looks like one**: a feature version that removes lines says *removes these lines* before you choose; accepted, the row says **Removed** and the lines are struck through in red. Where only the feature added lines, accepting the target says **Left out**, struck through in grey. **Resolved**, in green, only ever means lines that are in your file - in one panel, two or three.
+- **`cmr.borrow.sourceOrg`**: the org the pre-check borrows missing components from - a Salesforce CLI alias or username, used as it is, nothing asked. Empty: the promotion's source environment's login, asked for once, as before.
+
+## 3.19.1
+
+- Clean-up: what earlier versions left behind is gone. The merge editor's Manual-only ways out (*Copy result*, *Save as file*, *Swap the two sides*) - the Manual tab compares since 3.16, so none could be reached - and with them **Ctrl+S in a comparison**, which still copied the right side to the clipboard: it now does nothing, there being nothing to save. The promotion page's merge function, passed along but never called since 3.18. Every start's full text sent to the editor with each file, kept only for *Start from*. Styles for the removed clash cards, the comparison's header tools and the old start page.
+- **Merge in Release Assistant…** is now **Compare in Release Assistant…** - it opens a comparison.
+- The README, CONTRIBUTING and `samples/README.txt` describe the extension as it is: three panels, formatting in the right-click menu for the types whose entries add up, code's checks once its conflicts are resolved, the Manual tab's comparison - no commands that no longer exist. Tests whose names claimed what is gone are named for what they check.
+
+## 3.19.0
+
+- **Borrowing for the pre-check**: when a pre-check stops at what the target does not have - a field, a class, a flow - it is read from Salesforce's own errors and listed, each with what needs it (custom names only, never a guess - an ambiguous Apex message is left as it is). **Add to pre-check** fetches the ticked ones from the source org, read-only, into a scratch project of its own - never the open one - and runs the pre-check again with them in its package, so the next errors show; **Add components…** picks any others by type and name from the source org, saying which the target has already. Borrowed components are for the pre-check alone: never deployed, never added to the story, the resolution or the promotion - the pre-check says the promotion still needs them, each one can be removed, and how many errors went since the last round is said. Up to 5 rounds. The source org's login is asked for once, as the target's is.
+
+## 3.18.0
+
+- **Three panels, Copado's own** - the default for a promotion's files, code and metadata alike: *Conflicts in Promotion branch*, *Resolution*, *Conflicts in Feature branch*, each branch named as Copado's conflict file names it (`HEAD`, `origin/feature/US-...`). The three stay level, the words that differ are lit within a line, **→** and **←** take a side's lines into the resolution and **Accept both** sits between; what was taken is marked. **View › Layout**: one panel, two or three, remembered (`cmr.merge.codeView`).
+- **The promotion page never merges two rebuilt sides** - the same fix 3.17.0 made in the merge editor. A permission set's, profile's, label's or translation's suggestion is the target with the feature added (resolved by itself with `cmr.promotion.autoResolve`); every other file's conflicts are yours, never suggested, never resolved automatically. The page's clash choices are gone with it - nothing is left for them to pick.
+- The page's summary leaves out what there is none of (*0 to review*).
+
+## 3.17.0
+
+- **A promotion's metadata comes from Copado's conflict file, as its code does** - nothing read from a branch, nothing merged again. Git's merge is kept as it is, and each of its blocks is a conflict, never decided for you: both versions shown, **Accept target**, **Accept feature** or **Accept both**, **⋯ › Accept all** too; the target's side of the file beside it. Fixed with it: a merge could show a duplicate, and **Accept feature** change nothing - the editor rebuilt each branch's file from Copado's and merged the two again, element by element, though outside its blocks each already held git's merge.
+- **Permission sets, profiles, muting permission sets, labels and translations**: Copado's conflict file too - inside each block the target's entries kept as they are, the feature's added beside their kind, or applied where it changed one, each marked and undoable; nothing to resolve, nothing removed. If git cut through an entry, the file's blocks are conflicts to choose, and it says so.
+- **Removed**: *Start from* (the View menu, `cmr.merge.startFrom`) - there is one start, Copado's file; the common ancestor fetched from the repository (`cmr.merge.useAncestor`) - git's merge already used one. The repository is read by the **Compare** tab only. The **Branch conflicts** tool still merges element by element, with git's own merge-base.
+- Invalid XML is underlined once a file's conflicts are resolved; the left panel names the target.
+
 ## 3.16.6
 
 - Fixed: the README's pictures showed broken in VS Code's extension page. That page shows images only over https - never from the extension's own folder - so a picture linked relatively, as the README is written for GitHub, cannot load there. The packaged README now links each picture from the repository (`https://github.com/<owner>/<repo>/raw/HEAD/...`, as vsce does); the README in the repository is unchanged. The pictures are no longer shipped in the extension (about 1 MB smaller), and the package check fails on a picture that is not https or not in the repository.

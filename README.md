@@ -24,13 +24,13 @@
   <a href="#development">Development</a>
 </p>
 
-![The merge editor: an edited value, a block moved - removed from its place, added at the new one - and a removed block struck through](media/readme/merge-editor.png)
+![The merge editor in three panels: a Lightning page's conflict - the promotion branch's side, the resolution, the feature branch's side, with Accept promotion, Accept both and Accept feature](media/readme/merge-editor.png)
 
 ## Features
 
 ### Promotion conflicts, resolved without losing anything
 
-Open a promotion that stopped on a merge conflict — by its number, a user story or its Copado link, in the **Promotions** tab's one box — and every conflicted file is fetched at once. Metadata is merged for you to review — never resolved on its own — and code opens in the same merge editor, merged by its members - only what both branches changed is a choice for you. Upload all resolutions in one step, read back from Copado, with undo.
+Open a promotion that stopped on a merge conflict — by its number, a user story or its Copado link, in the **Promotions** tab's one box — and every conflicted file is fetched at once: **Copado's own conflict files**, nothing read from a branch. Metadata and code open in the same merge editor with git's merge kept as it is, each of its conflicts yours to choose. Upload all resolutions in one step, read back from Copado, with undo.
 
 ![A promotion's conflict files, each with what happened and what to do](media/readme/promotion.png)
 
@@ -42,33 +42,33 @@ The **Components** tab lists every component the promotion's stories committed, 
 
 ### A merge editor built for Salesforce metadata and code
 
-Metadata XML repeats the same lines everywhere, so line-by-line diffs pair the wrong blocks. The merge editor lines up **element by element**, against the target exactly as it is: what the feature branch added, what you changed, and what was removed — struck through, where it was. A block moved within an ordered list is what it is to the file: removed from its place and added at the new one, each row saying where the other is, and one click puts it back. Every action is undone with `Ctrl+Z`, and nothing is merged behind your back: what the feature branch removed or changed is always marked.
+Everything comes from **Copado's conflict file**, as Copado's own merge made it: git had the common ancestor, so whatever only one story changed is already merged — the feature's deletions applied, other stories' work kept — and stays as it is. Only git's **conflicts** are marked, metadata and code alike: both versions shown — the target's greyed out, the feature's in its colour — and neither in your resolution until you choose **Accept target**, **Accept feature** or **Accept both**. A resolved conflict says so, in green, still a click from changing; **⋯ › Accept all target** or **Accept all feature** resolves every one at once. It opens in **Copado's own three panels** — *Conflicts in Promotion branch*, *Resolution*, *Conflicts in Feature branch*, each branch named as Copado's file names it — level with each other, the words that differ lit within a line; **→** and **←** take a side's lines into the resolution, **Accept both** sits between. **View › Layout** switches to one panel or two, and remembers it (`cmr.merge.codeView`); each version is shown once — in two panels, the target's lines stay on the left, with **Accept target** beside them, and only the feature's version sits under the conflict. Every choice is undone with `Ctrl+Z`.
 
-Entries are matched by what identifies them — a field permission by its field, a page action by its value, a flow element by its name — including lists from the newest releases, such as Agentforce agents and topics. What Salesforce reads the same is not shown as a change: an entry's fields in another order, `<x/>` for `<x></x>`, `&#38;` for `&amp;`, other line endings, a flow's elements in another order. A flow element only dragged in Flow Builder is one quiet *Moved on the canvas* row. Unchanged runs fold away, and unsaved work is kept as a draft if the editor closes.
+**Permission sets, profiles, labels and translations** — files whose entries add up — need no choosing: inside each of git's blocks the target's entries are kept as they are, and the feature's are added beside their kind, or applied where it changed one — each marked, each undoable, nothing removed. Entries are matched by what identifies them: a field permission by its field, a user permission by its name. If git cut through the middle of an entry, the file's blocks are conflicts to choose instead, and the editor says so.
 
-With the **common ancestor** — Copado's own, or the merge-base of the feature branch and the destination branch, fetched from the connected repository — the editor knows what each branch did since: the target's own later additions and changes need no mark, and what the feature removed or changed says so. An entry renamed but otherwise unchanged is one change: *Renamed labels: Greeting → Welcome*.
-
-Duplicates and broken XML are caught as you type. A duplicate entry is marked on its own lines with the line it repeats, and removed with one click; identical duplicates are taken out when the merge is prepared. Invalid XML is underlined exactly where it breaks.
+Broken XML is underlined exactly where it breaks. For permission sets, profiles, labels and translations a duplicate entry is marked on its own lines with the line it repeats, and **Format and Order Metadata** and **Remove Duplicate Entries** are in the right-click menu.
 
 ![A duplicate marked in the merge editor](media/readme/duplicates.png)
 
-It is an editor you can work in all day: the parent elements stay pinned as you scroll, elements fold (the target with them), matching tags light up and an opening tag closes itself, **⋯ › Format XML** puts the file in Salesforce's order, and **View** has zoom, word wrap that keeps both panes level, and a divider to drag.
+It is an editor you can work in all day: the parent elements stay pinned as you scroll, elements fold (the target with them), matching tags light up and an opening tag closes itself, **Format and Order Metadata** in the right-click menu puts a permission set or profile in Salesforce's order, and **View** has zoom, word wrap that keeps the panes level, and a divider to drag.
 
 ### Code, too
 
-A promotion's **Apex**, **Lightning web component** JavaScript, HTML and CSS, **Visualforce** and **Aura** conflicts open in the same editor, from **Copado's conflict file** as git merged it. Git had the common ancestor, so everything only one story changed is already merged — the feature's deletions applied, other stories' work kept — and shown as plain text. Only the **conflicts** are marked: both versions shown — the target's greyed out, the feature's in its colour — neither in your resolution until you choose **Accept target**, **Accept feature** or **Accept both**. Once you choose, its row says *Resolved*, in green, the version you chose marked — still a click from changing. A version with nothing in it is a choice too: the other's lines struck through, in green. **⋯ › Accept all target** or **Accept all feature** resolves every conflict at once — one step, Ctrl+Z undoes it. The conflict markers are never shown. Saving with one not resolved warns first. **View › One panel / Two panel** shows it alone or beside the target (`cmr.merge.codeView`). Brackets that do not balance and a member defined twice are underlined as you type. VS Code's own conflict view is a setting away.
+A promotion's **Apex**, **Lightning web component** JavaScript, HTML and CSS, **Visualforce** and **Aura** conflicts open in the same editor, from **Copado's conflict file** as git merged it. Git had the common ancestor, so everything only one story changed is already merged — the feature's deletions applied, other stories' work kept — and shown as plain text. Only the **conflicts** are marked: both versions shown — the target's greyed out, the feature's in its colour — neither in your resolution until you choose **Accept target**, **Accept feature** or **Accept both**. Once you choose, its row says *Resolved*, in green, the version you chose marked — still a click from changing. A version with nothing in it is a choice too: a feature version that removes lines says so, and once accepted the row says **Removed**, the lines struck through in red — or, where only the feature added, **Left out**, struck through in grey. Green only ever means lines that are in your file. **⋯ › Accept all target** or **Accept all feature** resolves every conflict at once — one step, Ctrl+Z undoes it. The conflict markers are never shown. Saving with one not resolved warns first. It opens in the same three panels as metadata — **View › Layout** switches to one or two (`cmr.merge.codeView`). Brackets that do not balance and a member defined twice are underlined once its conflicts are resolved. VS Code's own conflict view is a setting away.
 
-![Apex in the merge editor: Copado's conflict file, two conflicts with both versions shown and Accept target, Accept feature, Accept both](media/readme/code.png)
+![Apex in three panels: Copado's conflict file, a conflict between the promotion branch's side and the feature branch's](media/readme/code.png)
 
 ### Validate before Copado does
 
 Check a promotion's resolutions, or a user story straight from its feature branch, against the target org — check-only, nothing deploys. Errors point to the right line, with suggested fixes.
 
-![A pre-check: the steps, the errors with their files, the log](media/readme/precheck.png)
+When a pre-check stops at something the target does not have — a field, a class — what is missing is read from the errors and listed, each with what needs it. **Add to pre-check** borrows it from the source org, read-only, and runs the pre-check again, so the errors it was hiding show; **Add components…** picks any others by type and name. Borrowed components are for the pre-check alone — never deployed, never added to the story or the promotion — and the pre-check says the promotion still needs them.
+
+![A failed pre-check: what the target is missing, to add from the source org, above the errors](media/readme/precheck.png)
 
 ### Compare two versions, with or without Copado
 
-The **Manual** tab — always there — compares two versions pasted from Copado's conflict screen, or any two files, side by side: nothing merged, **both sides editable**. For permission sets, profiles, labels and translations — whose entries add up — **Format and Order Metadata** and **Remove Duplicate Entries** in the right-click menu work on either side, so order and formatting drop away and only real differences are left. What only the other side has is shown struck through, in red. Each comparison starts from exactly the two versions shown — **Clear both** empties them at once. It also builds a `package.xml` from a Copado commit file. Right-click an XML file → **Merge in Release Assistant…** to start from it.
+The **Manual** tab — always there — compares two versions pasted from Copado's conflict screen, or any two files, side by side: nothing merged, **both sides editable**. For permission sets, profiles, labels and translations — whose entries add up — **Format and Order Metadata** and **Remove Duplicate Entries** in the right-click menu work on either side, so order and formatting drop away and only real differences are left. What only the other side has is shown struck through, in red. Each comparison starts from exactly the two versions shown — **Clear both** empties them at once. It also builds a `package.xml` from a Copado commit file. Right-click an XML file → **Compare in Release Assistant…** to start from it.
 
 ![The Manual tab: two versions to compare, a package from a commit file](media/readme/manual.png)
 
@@ -94,7 +94,7 @@ For permission sets, profiles, labels and translations, the extension's own **Fo
 
 1. Download the `.vsix` from the [latest release](https://github.com/nikeshvarma/Copado-Release-Assistant/releases/latest) and install it:
    ```bash
-   code --install-extension copado-release-assistant-3.16.6.vsix
+   code --install-extension copado-release-assistant-3.20.0.vsix
    ```
 2. Open your Salesforce project folder.
 3. Run **Copado: Open Settings** and set **Copado org** — the Salesforce CLI alias of the org where Copado runs.
@@ -117,12 +117,11 @@ Every behaviour has a setting — **Copado: Open Settings** lists them all. The 
 | Setting | What it does |
 | --- | --- |
 | `cmr.copado.org` | The org where Copado runs |
-| `cmr.merge.startFrom` | Where a merge starts — `auto` uses the merged result for permission sets and profiles, the feature branch's file for everything else |
 | `cmr.merge.removeDuplicates` | Remove identical duplicates when a merge is prepared |
-| `cmr.merge.useAncestor` | For metadata: use the common ancestor — Copado's, or the repository's merge-base — to show what each branch did since |
 | `cmr.merge.codeIn` | Open code conflicts in the merge editor, or VS Code's own conflict view |
-| `cmr.merge.codeView` | Code in one panel, or two (beside the target) |
+| `cmr.merge.codeView` | A promotion's file in one panel, two, or three — Copado's own (the default) |
 | `cmr.storage.keepDays` | Working files older than this many days are removed by themselves (14; 0 never) |
+| `cmr.borrow.sourceOrg` | The org the pre-check borrows missing components from (a CLI alias); empty: asked for once |
 | `cmr.promotion.autoResolve` | Resolve files that need no decision automatically (off by default) |
 
 **Write Recommended Settings to Workspace** shares a team's settings through `.vscode/settings.json`.

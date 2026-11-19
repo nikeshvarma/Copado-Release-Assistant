@@ -35,8 +35,7 @@ button { font: inherit; color: inherit; }
 /* ---- the bar on top: where you are, which Copado org */
 .globalbar { display: flex; align-items: stretch; gap: 16px; padding: 0 16px; min-height: 40px; border-bottom: 1px solid var(--line); background: var(--panel); white-space: nowrap; }
 .globalbar > * { align-self: center; }
-.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; }
-.brand img { width: 20px; height: 20px; border-radius: var(--r-s); }
+
 .navs { display: flex; align-self: stretch; gap: 4px; }
 .nav { position: relative; background: none; border: 0; padding: 0 10px; color: var(--muted); cursor: pointer; font-weight: 500; }
 .nav:hover { color: var(--text); }
@@ -150,15 +149,6 @@ button { font: inherit; color: inherit; }
 
 /* a real clash: both values, one choice */
 .clash { margin-bottom: 14px; }
-.clash .what { font-weight: 600; margin-bottom: 9px; }
-.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.side { border: 1px solid var(--line-strong); border-radius: var(--r-l); padding: 10px 12px; cursor: pointer; background: var(--canvas); }
-.side:hover { border-color: var(--accent); }
-.side.pick { border-color: var(--accent); background: var(--vscode-list-inactiveSelectionBackground); }
-.side .lbl { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
-.side .lbl .radio { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-block; flex: none; }
-.side.pick .lbl .radio { border: 4px solid var(--accent); }
-.side .mono { overflow-wrap: anywhere; }
 
 /* the action bar at the bottom of a file */
 .footer { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; margin: 0 -26px; padding: 10px 26px; border-top: 1px solid var(--line); background: var(--panel); }
@@ -169,21 +159,10 @@ button { font: inherit; color: inherit; }
 .start { width: 100%; max-width: 720px; margin: 0 auto; padding: 52px 28px 40px; }
 .start h1 { font-size: 24px; font-weight: 650; letter-spacing: -0.015em; margin: 0 0 6px; }
 .start .lead { max-width: 64ch; color: var(--muted); }
-.big-input { display: flex; gap: 8px; margin: 22px 0 8px; }
-.big-input .field { flex: 1; display: flex; align-items: center; gap: 9px; padding: 0 12px; height: 40px; background: var(--sunken); border: 1px solid var(--vscode-input-border, var(--line-strong)); border-radius: var(--r-l); }
-.big-input .field:focus-within { border-color: var(--accent); }
-.big-input input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--vscode-input-foreground, var(--text)); font: inherit; font-size: 14px; }
-.big-input .btn { height: 40px; padding: 0 18px; border-radius: var(--r-l); }
-.start .hint { font-size: 12px; color: var(--muted); }
+
 .section-title { margin: 30px 0 8px; font-size: 13px; font-weight: 600; }
 .recent { border: 1px solid var(--line); border-radius: var(--r-l); overflow: hidden; }
-.rcard { display: grid; grid-template-columns: 76px 132px minmax(0, 1fr) auto 84px; align-items: center; gap: 14px; padding: 11px 14px; border-top: 1px solid var(--line); }
-.rcard .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.rcard .btn { justify-self: end; }
-.rcard:first-child { border-top: 0; }
-.rcard:hover { background: var(--vscode-list-hoverBackground); }
-.rcard b { font-weight: 600; }
-.rcard .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+
 .tools .links { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---- views that scroll as a whole */
@@ -211,7 +190,7 @@ button { font: inherit; color: inherit; }
 .jobs { border: 1px solid var(--line); border-radius: var(--r-l); overflow: hidden; }
 .job { display: grid; grid-template-columns: 1fr auto 120px 72px; align-items: center; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--line); }
 .job:first-child { border-top: 0; }
-.job.d1 { padding-left: 36px; background: var(--panel); } .job.d2 { padding-left: 58px; font-size: 12px; background: var(--panel); }
+ 
 .job .jn { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .job > .muted:last-of-type { white-space: nowrap; text-align: right; font-size: 12px; }
 .job .jerr { grid-column: 1 / -1; color: var(--vscode-errorForeground, var(--bad)); white-space: pre-wrap; }
@@ -476,3 +455,24 @@ button.crow { cursor: pointer; } button.crow:hover { background: var(--vscode-li
 .ctopt { display: flex; align-items: center; gap: 7px; } .ctopt svg { width: 14px; height: 14px; }
 .cbx { width: 14px; height: 14px; border: 1px solid var(--vscode-checkbox-border, var(--line)); border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; }
 .ctfoot { padding: 4px 10px; border-top: 1px solid var(--line); }
+
+/* borrowing for the pre-check */
+.bwcard { border-color: color-mix(in srgb, var(--vscode-charts-blue) 45%, transparent); }
+.bwcard h3, .bwmiss h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 13px; }
+.bwcard h3 { color: var(--vscode-charts-blue); } .bwmiss { border-color: color-mix(in srgb, var(--warn) 45%, transparent); } .bwmiss h3 { color: var(--warn); }
+.bwcard h3 svg, .bwmiss h3 svg, .bwgone svg { width: 14px; height: 14px; }
+.bwchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; } .bwchips .link { margin-left: 8px; }
+.bwx { background: none; border: 0; padding: 0 0 0 4px; color: inherit; cursor: pointer; display: inline-flex; } .bwx svg { width: 11px; height: 11px; }
+.bwwarn { color: var(--warn); } .bwgone { margin-top: 6px; color: var(--ok); display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.missrow { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-top: 1px solid var(--line); cursor: pointer; }
+.missrow .chip { min-width: 96px; text-align: center; justify-content: center; }
+.bwlink { margin: 6px 0 10px; }
+.bshade { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 30; }
+.bmodal { position: fixed; z-index: 31; left: 50%; top: 10%; transform: translateX(-50%); width: min(820px, 92vw); max-height: 78vh; display: flex; flex-direction: column;
+  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border, var(--line)); border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.bmh, .bmf { display: flex; align-items: center; gap: 10px; padding: 10px 14px; } .bmh { border-bottom: 1px solid var(--line); } .bmf { border-top: 1px solid var(--line); }
+.bmb { padding: 10px 14px; overflow: auto; } .bmb .row { display: flex; gap: 8px; } .bmb select { padding: 4px 8px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--line)); border-radius: 4px; }
+.bmb .cfilter { flex: 1; } .bmnote { margin: 8px 0 4px; }
+.bres { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--line); cursor: pointer; } .bres.sel { background: color-mix(in srgb, var(--vscode-charts-blue) 10%, transparent); }
+/* a job's depth, built as "job d" + depth */
+.job.d1 { padding-left: 36px; background: var(--panel); } .job.d2 { padding-left: 58px; font-size: 12px; background: var(--panel); }

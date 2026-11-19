@@ -49,7 +49,7 @@ function store(dir) {
 /**
  * Settles the code conflict blocks that need no decision: both sides the same,
  * or (with the common ancestor) only one side changed. Returns the text with
- * only the real clashes still marked, and how many remain.
+ * only the real conflicts still marked, and how many remain.
  */
 function settleCodeBlocks(text) {
   const lines = String(text).split(/(?<=\n)/);
@@ -88,7 +88,7 @@ function settleCodeBlocks(text) {
  * review and accept (state 'review', suggestion), and code keeps every
  * conflict block for you to decide.
  */
-async function autoResolve(rel, conflictedText, merge, auto) {
+async function autoResolve(rel, conflictedText, auto) {
   const on = auto !== false;
   const parts = P.splitConflicts(conflictedText);
   if (!parts.ok) return { state: 'error', note: parts.reason, kind: 'code' };
@@ -96,23 +96,14 @@ async function autoResolve(rel, conflictedText, merge, auto) {
   if (!parts.blocks) return Object.assign(meta, on ? { state: 'auto', note: 'no conflict markers' } : { state: 'review', suggestion: true, note: 'no conflict markers - check it and accept' },
     { kind: kindOf(rel), sides: parts, merged: conflictedText });
   if (kindOf(rel) === 'xml') {
-    let r = null;
-    try { r = await merge(parts.ours, parts.theirs, parts.base); } catch (e) { r = { ok: false, error: e.message }; }
-    if (r && r.ok) {
-      // what the merge kept that the feature branch does not have, where order matters (a page's items, a
-      // layout's sections, a flow's elements): the feature may have removed it - yours to decide, so this
-      // is neither resolved automatically nor offered to accept in one click
-      const checked = featureLacks(parts.ours, parts.theirs, r.mergedText);
-      const lacks = checked == null ? 1 : checked;
-      return Object.assign(meta, { kind: 'xml', sides: parts, merged: r.mergedText, conflicts: r.conflicts, clashes: r.clashes || [], featureLacks: lacks,
-        state: r.conflicts || lacks || !on ? 'review' : 'auto', suggestion: !r.conflicts && !lacks && !on,
-        note: r.conflicts ? r.conflicts + ' real conflict' + (r.conflicts === 1 ? '' : 's') + ' to review'
-          : checked == null ? 'not checked for what the feature branch removed - review in merge'
-          : lacks ? lacks + ' block' + (lacks === 1 ? '' : 's') + ' the feature branch does not have - review in merge'
-          : on ? 'resolved automatically' : 'a suggested merge - review it and accept' });
-    }
-    // sides that are not valid XML on their own: resolve like code
-    meta.note = 'merged as text (' + ((r && r.error) || 'not valid XML on its own') + ')';
+    // never a merge of ours: the two sides were rebuilt from Copado's file, each holding git's merge already.
+    // Files whose entries add up - the target's entries kept, the feature's added; every other one, its conflicts yours
+    const type = (/<([A-Za-z][\w]*)[\s>]/.exec(String(conflictedText).replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, '')) || [])[1] || null;
+    const u = require('./mergeStart').ADDITIVE.has(type) ? require('./unionMerge').resolve(conflictedText, type) : null;
+    if (u && u.ok) return Object.assign(meta, { kind: 'xml', sides: parts, merged: u.text, conflicts: 0,
+      state: on ? 'auto' : 'review', suggestion: !on, note: on ? 'resolved: the target kept, the feature added' : 'the target kept, the feature added - review it and accept' });
+    return Object.assign(meta, { kind: 'xml', sides: parts, merged: conflictedText, conflicts: parts.blocks, state: 'review', suggestion: false,
+      note: parts.blocks + ' conflict' + (parts.blocks === 1 ? '' : 's') + ' to resolve' + (u ? ' (' + u.reason + ')' : '') });
   }
   // with auto off, every block stays for you to decide
   const s = on ? settleCodeBlocks(conflictedText) : { text: conflictedText, remaining: parts.blocks, settled: 0 };
@@ -121,14 +112,6 @@ async function autoResolve(rel, conflictedText, merge, auto) {
     note: (meta.note ? meta.note + '; ' : '') + (s.remaining ? s.remaining + ' block' + (s.remaining === 1 ? '' : 's') + ' to resolve' + (s.settled ? ', ' + s.settled + ' settled' : '') : 'every block settled automatically') });
 }
 
-/** Blocks the merge kept from the target that the feature branch does not have, where order matters (src/mergeAlign.js). */
-function featureLacks(target, feature, merged) {
-  try {
-    const type = (X.parse(target).root || {}).name || null;
-    const r = require('./mergeAlign').align(target, feature, merged, { type });
-    return r.hold ? null : (r.counts.kept || 0);
-  } catch (e) { return null; }   // could not tell: not offered as safe
-}
 
 function kindOf(rel) { return /\.xml$/i.test(rel) ? 'xml' : 'code'; }
 
@@ -140,7 +123,7 @@ function kindOf(rel) { return /\.xml$/i.test(rel) ? 'xml' : 'code'; }
  * files resolved in Copado meanwhile are marked and never overwritten; your
  * local resolutions of unchanged files are kept.
  */
-async function sync(api, s, promotion, merge, opts) {
+async function sync(api, s, promotion, opts) {
   const o = opts || {};
   const st = s.load() || { files: {} };
   Object.assign(st, { id: promotion.id, name: promotion.name, status: promotion.status || st.status, from: promotion.from, to: promotion.to,
@@ -164,7 +147,7 @@ async function sync(api, s, promotion, merge, opts) {
   }
   const results = await Promise.all(fetch.map(async ({ a, n, previous }) => {
     const text = (await api.download('Attachment', a.Id)).toString('utf8');
-    const r = await autoResolve(n.path, text, merge, o.autoResolve);
+    const r = await autoResolve(n.path, text, o.autoResolve);
     s.write('conflicted', n.path, text);
     if (r.sides) {
       s.write('promotion', n.path, r.sides.ours);
@@ -177,7 +160,7 @@ async function sync(api, s, promotion, merge, opts) {
     if (mine != null && previous.state === 'resolved') s.write('resolved', n.path + '.mine', mine);
     s.write('resolved', n.path, r.merged != null ? r.merged : text);
     st.files[n.path] = { attachmentId: a.Id, attachmentName: a.Name, story: n.story, modified: a.LastModifiedDate, kind: r.kind, state: r.state,
-      blocks: r.blocks || 0, conflicts: r.conflicts || 0, clashes: r.clashes || [], featureLacks: r.featureLacks || 0, autoState: r.state, suggestion: !!r.suggestion, labels: r.labels, hasBase: !!r.hasBase, note: (previous.state === 'resolved' ? 'changed in Copado - fetched again; your earlier resolution is in resolved/' + n.path + '.mine. ' : '') + (r.note || '') };
+      blocks: r.blocks || 0, conflicts: r.conflicts || 0, autoState: r.state, suggestion: !!r.suggestion, labels: r.labels, hasBase: !!r.hasBase, note: (previous.state === 'resolved' ? 'changed in Copado - fetched again; your earlier resolution is in resolved/' + n.path + '.mine. ' : '') + (r.note || '') };
     return n.path;
   }));
   // resolved automatically by an earlier run, with auto now off: back to you, as a suggestion
@@ -422,84 +405,16 @@ function componentAt(rel) {
 
 
 
-/* ------------------------------------------------------------ choices and activity */
+/* ------------------------------------------------------------ activity */
 
-const escapeXml = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/**
- * Applies a choice for each real clash to the automatic result - the same rule
- * as the merge view: the clash's line becomes <tag>value</tag>, indent kept.
- * choices: { [index]: 'target' | 'incoming' }. Returns { text, applied, moved }.
- */
 /** Where each line starts, for offsets <-> line numbers. */
 function lineStarts(src) { const out = [0]; for (let i = 0; i < src.length; i++) if (src[i] === '\n') out.push(i + 1); return out; }
 
-/**
- * Puts your choice into each real clash: the whole element is replaced - from
- * its opening tag to its own end tag, however many lines its value takes - so
- * a value that spans lines leaves nothing of the old one behind. The element
- * is found by the parser, starting on the clash's line (0-based); a clash that
- * cannot be found there is reported as moved, for the merge editor instead.
- */
-function applyChoices(text, clashes, choices) {
-  const src = String(text);
-  const doc = require('./xmlParser').parse(src);
-  const starts = lineStarts(src);
-  const els = [];
-  (function walk(n) { for (const c of (n && n.children) || []) if (c.name) { els.push(c); walk(c); } })(doc.doc || { children: doc.root ? [doc.root] : [] });
-  const edits = [], moved = [];
-  (clashes || []).forEach((c, i) => {
-    const side = choices && choices[i];
-    if (!side) return;
-    const from = starts[c.line], to = c.line + 1 < starts.length ? starts[c.line + 1] : src.length;
-    const el = from == null ? null : els.find(e => e.name === c.tag && e.start >= from && e.start < to && e.end > e.start);
-    if (!el || edits.some(x => el.start < x.end && x.start < el.end)) { moved.push(i); return; }
-    edits.push({ start: el.start, end: el.end, text: '<' + c.tag + '>' + escapeXml(side === 'target' ? c.target : c.incoming) + '</' + c.tag + '>' });
-  });
-  let out = src;
-  for (const e of edits.slice().sort((x, y) => y.start - x.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end);
-  return { text: out, applied: edits.length, moved };
-}
-
-/** What applyChoices did up to 3.0.5 - one line per value. Kept only to recognise the files it broke, for repairChoices. */
-function oneLineChoices(text, clashes, choices) {
-  const lines = String(text).split(/(?<=\n)/);
-  (clashes || []).forEach((c, i) => {
-    const side = choices && choices[i];
-    const ln = lines[c.line];
-    if (!side || ln == null || ln.indexOf('<' + c.tag + '>') === -1) return;
-    const eol = (/\r?\n$/.exec(ln) || [''])[0];
-    lines[c.line] = ln.match(/^\s*/)[0] + '<' + c.tag + '>' + escapeXml(side === 'target' ? c.target : c.incoming) + '</' + c.tag + '>' + eol;
-  });
-  return lines.join('');
-}
-
-/**
- * Rebuilds resolutions that the one-line version of applyChoices broke - a
- * chosen value that spanned lines left the rest of the old value, end tag and
- * all. Only a file that is exactly what that version produced from its
- * merged file and your recorded choices is rebuilt, so a file you edited is
- * never touched. Returns the paths rebuilt.
- */
-function repairChoices(s, st, X) {
-  const fixed = [];
-  for (const [rel, e] of Object.entries(st.files || {})) {
-    if (e.state !== 'resolved' || e.revising || !e.choices || !e.clashes || !e.clashes.length) continue;
-    const resolved = s.read('resolved', rel), merged = s.read('merged', rel);
-    if (resolved == null || merged == null || !wellFormed(resolved, X)) continue;
-    if (oneLineChoices(merged, e.clashes, e.choices) !== resolved) continue;
-    const r = applyChoices(merged, e.clashes, e.choices);
-    if (r.moved.length || wellFormed(r.text, X)) continue;
-    s.write('resolved', rel, r.text);
-    e.note = (e.note || 'your choices') + ' - rebuilt: the earlier version broke a value that spans lines';
-    fixed.push(rel);
-  }
-  return fixed;
-}
 
 /** Adds an entry to the promotion's activity, newest last, at most 300. */
 function logEvent(st, kind, text, detail) {
   st.events = (st.events || []).concat([{ at: new Date().toISOString(), kind, text, detail: detail || '' }]).slice(-300);
 }
 
-module.exports = { decodeName, applyChoices, repairChoices, logEvent, store, settleCodeBlocks, autoResolve, sync, gates, wellFormed, uploadedHealth, startRevision, cancelRevision, readyFiles, uploadAll, lastBatch, undoBatch, componentOf, READY };
+module.exports = { decodeName, logEvent, store, settleCodeBlocks, autoResolve, sync, gates, wellFormed, uploadedHealth, startRevision, cancelRevision, readyFiles, uploadAll, lastBatch, undoBatch, componentOf, READY };

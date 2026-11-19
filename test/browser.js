@@ -52,7 +52,7 @@ async function eventually(fn, ms) {
 // a choice in the toolbar's View menu, or its \u22ef menu
 const menu = async (p, btn, label) => { await p.click('#' + btn); await p.click('.dmenu:not([hidden]) .mi:has-text("' + label + '")'); };
 const checks = [];
-const ok = (name, fn) => checks.push([name, fn]);
+const ok = (name, fn) => { if (!process.env.ONLY || name.includes(process.env.ONLY)) checks.push([name, fn]); };
 
 ok('a block moved and another removed: removed from its place and added at the new one, linked; the left pane is the target as it is; Restore puts it back in one step; Ctrl+S saves', async () => {
   const mine = page(REG + APP + TEAM());
@@ -112,7 +112,7 @@ const PT = panelPage([['Edit'], ['NewCase', true], ['LogACall', true], ['Delete'
 const both = PT;   // what merging keeps: everything the target has
 const qa = Object.assign({}, base, { file: 'Case_Record_Page.flexipage-meta.xml', target: PT, incoming: PF, starts: { merged: both, feature: PF, target: PT } });
 
-ok('what the feature branch removed is marked, whatever the start: still here - Remove; started from the feature - Restore; Start from switches in one undoable step', async () => {
+ok('what the feature branch removed is marked, whatever the start: still here - Remove; started from the feature - Restore; no Start from to choose - one start', async () => {
   await run(Object.assign({}, qa, { text: both, start: 'merged' }), async (p, h) => {
     let a = await look(p);
     assert.strictEqual(a.chips, '2 not taken from the feature');
@@ -123,13 +123,6 @@ ok('what the feature branch removed is marked, whatever the start: still here - 
     await click(p, 'Remove'); await eventually(async () => assert.deepStrictEqual((await look(p)).buttons, ['Restore', 'Remove']));
     await click(p, 'Remove');
     await eventually(() => assert.strictEqual(h.text(), PF, 'Remove twice: the feature branch\u2019s version'));
-    // Start from: the target, in one step; Ctrl+Z goes back
-    await menu(p, 'viewBtn', 'Target branch (HEAD)');
-    await eventually(() => assert.strictEqual(h.text(), PT));
-    // the menu leaves you in the editor: Ctrl+Z straight away
-    assert.ok(await p.evaluate(() => !!document.activeElement.closest('#right')), 'still in the editor');
-    await p.keyboard.press('Control+z');
-    await eventually(() => assert.strictEqual(h.text(), PF, 'Ctrl+Z: back to what you had'));
     assert.deepStrictEqual(h.errors, []);
   });
   await run(Object.assign({}, qa, { text: PF, start: 'feature' }), async (p, h) => {
@@ -137,7 +130,7 @@ ok('what the feature branch removed is marked, whatever the start: still here - 
     assert.deepStrictEqual(a.rows, ['Not in feature', 'Not in feature']);
     assert.deepStrictEqual(a.buttons, ['Restore', 'Restore']);
     await p.click('#viewBtn');
-    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), '\u2713The feature branch | Target branch (HEAD) | Merged (both) | Word wrap | Zoom in | Zoom out | Reset zoom | Hide identical lines', 'Start from and the view, in one menu');
+    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), 'Word wrap | Zoom in | Zoom out | Reset zoom | Hide identical lines', 'no Start from');
     await p.keyboard.press('Escape');
     assert.deepStrictEqual(h.errors, []);
   });
@@ -475,15 +468,17 @@ ok('a promotion\u2019s code: only the conflicts marked - both versions shown, ne
   });
 });
 
-ok('a conflict whose feature version is empty: Accept feature resolves it - the target\u2019s lines struck through in green; Accept all target and Accept all feature, one step each', async () => {
+ok('a conflict whose feature version is empty: it says it removes the lines; Accept feature removes them - Removed, the target\u2019s lines struck through in red; Accept all target and Accept all feature, one step each', async () => {
   const CM = require('../src/codeMerge');
   const f = 'public class A {\n    void a() {\n        x();\n<<<<<<< HEAD\n        // retry\n        retry();\n=======\n>>>>>>> feature\n    }\n    void b() {\n<<<<<<< HEAD\n        one();\n=======\n        two();\n>>>>>>> feature\n    }\n}\n';
   const g = CM.fromConflictFile(f);
   await run({ labels: { target: 'uat', merged: 'Your resolution' }, theirs: 'feature/US-0012345', short: 'the feature', typeName: null, file: 'A.cls', language: 'apex', target: f, incoming: f, text: g.text, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
     assert.strictEqual((await look(p)).chips, '2 conflicts to resolve');
+    // before choosing: the feature's version says what it does
+    assert.ok((await p.$$eval('#right .zone.alt .alt-t', n => n.map(x => x.textContent))).some(t => /Feature \u00b7 removes these lines/.test(t)));
     await p.$$eval('.acts button[title="Accept feature"]', b => b[0].click());
-    await eventually(async () => { const a = await look(p); assert.deepStrictEqual([a.chips, a.rows], ['1 conflict to resolve1 resolved', ['Resolved', 'Conflict']]); });
-    assert.deepStrictEqual(await p.$$eval('#right .zone.ghost.dropped .gl', n => n.map(x => x.textContent.trim())), ['// retry', 'retry();'], 'the target\u2019s lines, struck through in green');
+    await eventually(async () => { const a = await look(p); assert.deepStrictEqual([a.chips, a.rows], ['1 conflict to resolve1 resolved', ['Removed', 'Conflict']]); });
+    assert.deepStrictEqual(await p.$$eval('#right .zone.ghost.gone .gl', n => n.map(x => x.textContent.trim())), ['// retry', 'retry();'], 'the target\u2019s lines, struck through in red - removed');
     assert.strictEqual(h.text(), g.text, 'nothing put in - the feature has nothing here');
     // every conflict at once: one step, Ctrl+Z undoes it
     await menu(p, 'moreBtn', 'Accept all target');
@@ -498,14 +493,97 @@ ok('a conflict whose feature version is empty: Accept feature resolves it - the 
   });
 });
 
-ok('a comparison - Manual, Compare: both sides editable, each formatted on its own, compared again as either changes; Save as file for either side; nothing merged', async () => {
+ok('three panels, Copado\u2019s own: the promotion branch\u2019s side, your resolution, the feature branch\u2019s side - named as Copado\u2019s file names them, level, the words that differ lit; \u2190 takes the feature\u2019s lines in, resolved', async () => {
+  const CM = require('../src/codeMerge');
+  const f = '<template>\n    <div>\n<<<<<<< HEAD\n=======\n        <p>{loadError}</p>\n        <p>{hint}</p>\n>>>>>>> origin/feature/US-0012345\n        <!-- READ -->\n<<<<<<< HEAD\n        <b class="old">Name</b>\n=======\n        <b class="new">Name</b>\n>>>>>>> origin/feature/US-0012345\n        <i>after</i>\n    </div>\n</template>\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'Target branch (HEAD)', merged: 'Your resolution' }, theirs: 'feature', short: 'the feature', typeName: null, file: 'card.html', language: 'html', target: T, incoming: F, text: g.text,
+    codeView: 'threePanes', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    assert.ok(await p.evaluate(() => document.body.classList.contains('three') && getComputedStyle(document.getElementById('feat')).display !== 'none'), 'three panels');
+    assert.deepStrictEqual(await p.$$eval('#lefthead, #righthead, #feathead', n => n.map(x => x.textContent)), ['Conflicts in Promotion branch \u00b7 HEAD', 'Resolution \u00b7 editable', 'Conflicts in Feature branch \u00b7 origin/feature/US-0012345']);
+    assert.strictEqual((await look(p)).chips, '2 conflicts to resolve');
+    // level: the line after each conflict at the same height in all three
+    const tops = () => p.evaluate(() => { const [Le, Re, Fe] = window.monaco.editor.getEditors(); const at = (e, t) => e.getTopForLineNumber(e.getModel().getLinesContent().findIndex(l => l.includes(t)) + 1); return ['READ', 'after'].map(t => [at(Le, t), at(Re, t), at(Fe, t)]); });
+    for (const [a, b, c] of await tops()) assert.ok(a === b && b === c, JSON.stringify(await tops()));
+    // the words that differ, lit on each side
+    assert.ok(await p.$('#left .w3t') && await p.$('#feat .w3f'), 'the words that differ');
+    // \u2190: the feature's lines in - resolved, its arrow shown chosen; still level
+    await p.$$eval('.acts button[title="Accept feature"]', b => b[0].click());
+    await eventually(() => assert.ok(h.text().includes('{loadError}') && h.text().includes('{hint}')));
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved', 'Conflict']));
+    assert.strictEqual(await p.$$eval('.acts button.arw.on', n => n.map(x => x.title).join()), 'Accept feature');
+    for (const [a, b, c] of await tops()) assert.ok(a === b && b === c, 'still level: ' + JSON.stringify(await tops()));
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.strictEqual(h.text(), g.text, 'Ctrl+Z'));
+    // the layout, chosen in View
+    await p.click('#viewBtn');
+    assert.ok((await p.$$eval('#viewMenu .mi', n => n.map(x => x.textContent))).includes('\u2713Three panel'));
+    await p.keyboard.press('Escape');
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('two panels: each version once - the target\u2019s on the left, where it is, Accept target beside it; the feature\u2019s under the conflict, the words that differ lit; level; an addition left out says so, struck through in grey', async () => {
+  const CM = require('../src/codeMerge');
+  const f = 'public class A {\n    void a() {\n<<<<<<< HEAD\n        logic = \'and\';\n=======\n        logic = \'1 AND NOT 2\';\n>>>>>>> origin/feature/US-0012345\n    }\n<<<<<<< HEAD\n=======\n    // Setup helpers\n>>>>>>> origin/feature/US-0012345\n    void b() {\n    }\n}\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'Target branch (HEAD)', merged: 'Your resolution' }, theirs: 'feature', short: 'the feature', typeName: null, file: 'A.cls', language: 'apex', target: T, incoming: F, text: g.text,
+    codeView: 'twoPanes', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    // the feature's version only, on the right - the target's is on the left
+    assert.deepStrictEqual(await p.$$eval('#right .zone.alt .alt-t b', n => n.map(x => x.textContent)), ['Feature', 'Feature']);
+    assert.ok(await p.$('#left .w3t') && await p.$('#right .zone.alt .w3f'), 'the words that differ, lit on both sides');
+    const level = () => p.evaluate(() => { const [Le, Re] = window.monaco.editor.getEditors(); const at = (e, t) => e.getTopForLineNumber(e.getModel().getLinesContent().findIndex(l => l.includes(t)) + 1); return [at(Le, 'void b()'), at(Re, 'void b()')]; });
+    const [a, b] = await level(); assert.strictEqual(a, b, 'level after the conflicts');
+    // each button once per conflict, and each does what it says: the feature's lines from Accept feature
+    assert.deepStrictEqual(await p.$$eval('.acts button', n => { const c = {}; n.forEach(x => { c[x.title] = (c[x.title] || 0) + 1; }); return c; }), { 'Accept target': 2, 'Accept feature': 2, 'Accept both': 2 });
+    await p.$$eval('.acts button[title="Accept feature"]', n => n[0].click());
+    await eventually(() => assert.ok(h.text().includes("logic = '1 AND NOT 2';") && !h.text().includes("logic = 'and';"), 'Accept feature: the feature\u2019s line'));
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.strictEqual(h.text(), g.text));
+    // Accept target: beside the target's lines, on the left
+    await p.$$eval('.acts button[title="Accept target"]', n => n[0].click());
+    await eventually(() => assert.ok(h.text().includes("logic = 'and';")));
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved', 'Conflict']));
+    // the second: only the feature added lines - Accept target leaves them out: said, struck through in grey
+    await p.$$eval('.acts button[title="Accept target"]', n => n[1].click());
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved', 'Left out']));
+    assert.deepStrictEqual(await p.$$eval('#right .zone.ghost.leftout .gl', n => n.map(x => x.textContent.trim())), ['// Setup helpers']);
+    const [a2, b2] = await level(); assert.strictEqual(a2, b2, 'still level');
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('three panels, a removal: the feature\u2019s side says it removes the lines; accepted, the resolution says Removed - struck through in red under its row; level throughout', async () => {
+  const CM = require('../src/codeMerge');
+  const f = 'public class A {\n    void a() {\n        x();\n<<<<<<< HEAD\n        // retry\n        retry();\n=======\n>>>>>>> origin/feature/US-0012345\n    }\n    void b() {\n    }\n}\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'T', merged: 'R' }, theirs: 'feature', short: 'the feature', typeName: null, file: 'A.cls', language: 'apex', target: T, incoming: F, text: g.text, codeView: 'threePanes', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    const level = () => p.evaluate(() => window.monaco.editor.getEditors().map(e => e.getTopForLineNumber(e.getModel().getLinesContent().findIndex(l => l.includes('void b()')) + 1)));
+    const flat = a => a.every(x => x === a[0]);
+    assert.ok(flat(await level()), JSON.stringify(await level()));
+    assert.strictEqual(await p.$$eval('#feat .zone.alt .alt-t', n => n.map(x => x.textContent.trim()).join()), '\u25be Feature \u00b7 removes these lines');
+    await p.$$eval('.acts button[title="Accept feature"]', b => b[0].click());
+    await eventually(async () => assert.deepStrictEqual(await p.$$eval('#right .zone.head b', n => n.map(x => x.textContent)), ['Removed']));
+    assert.deepStrictEqual(await p.$$eval('#right .zone.ghost.gone .gl', n => n.map(x => x.textContent.trim())), ['// retry', 'retry();']);
+    // under its row, not above it
+    assert.ok(await p.evaluate(() => { const row = document.querySelector('#right .zone.head'), st = document.querySelector('#right .zone.ghost.gone'); return row.getBoundingClientRect().top < st.getBoundingClientRect().top; }));
+    assert.ok(flat(await level()), 'still level: ' + JSON.stringify(await level()));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a comparison - Manual, Compare: both sides editable, each formatted on its own, compared again as either changes; nothing saved, nothing merged', async () => {
   const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
   const ps = b => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + b + '    <label>P</label>\n</PermissionSet>\n';
   const A = ps(fp('A.b__c') + fp('A.a__c')), B = ps(fp('A.a__c') + fp('A.b__c'));
   await run({ labels: { target: 'uat', incoming: 'feature/US-0012345', merged: 'feature/US-0012345' }, theirs: 'feature/US-0012345', typeName: 'PermissionSet', file: 'P.permissionset-meta.xml', plain: true, target: A, incoming: B, text: B }, async (p, h) => {
     const a = await look(p);
     assert.ok(/difference/.test(a.chips) && a.buttons.length === 0, 'differences, nothing to move across: ' + a.chips);
-    assert.ok(await p.evaluate(() => !window.monaco.editor.getEditors().every(e => !e.getOption(window.monaco.editor.EditorOption.readOnly)) === false), 'both sides editable');
+    // the two sides shown - the left and the right - both editable (the third, Copado's feature side, is not shown here)
+    assert.deepStrictEqual(await p.evaluate(() => window.monaco.editor.getEditors().slice(0, 2).map(e => e.getOption(window.monaco.editor.EditorOption.readOnly))), [false, false], 'both sides editable');
     // the other side formatted - sorted as Salesforce writes it: the same as this one
     await p.click('#left .view-lines', { button: 'right' });
     await p.$$eval('#menu .mi', n => n.find(x => /Format and Order Metadata/.test(x.textContent)).click());
@@ -531,7 +609,7 @@ ok('a comparison - Manual, Compare: both sides editable, each formatted on its o
   // code and a component's files: side by side, coloured, no errors
   for (const [file, language, a, b] of [['opsCard.js', 'javascript', 'export default class X {\n    a() { return 1; }\n}\n', 'export default class X {\n    a() { return 2; }\n}\n'], ['opsCard.html', 'html', '<template>\n    <p>{title}</p>\n</template>\n', '<template>\n    <p class="big">{title}</p>\n</template>\n'], ['opsCard.css', 'css', '.big {\n    color: red;\n}\n', '.big {\n    color: blue;\n}\n']]) {
     await run({ labels: { target: 'uat', incoming: 'feature/US-0012345', merged: 'feature/US-0012345' }, theirs: 'feature/US-0012345', typeName: null, file, language, plain: true, target: a, incoming: b, text: b }, async (p, h) => {
-      await eventually(async () => assert.strictEqual(await p.evaluate(() => window.monaco.editor.getModels().map(x => x.getLanguageId()).join()), 'cmr-' + language + ',cmr-' + language));
+      await eventually(async () => assert.strictEqual(await p.evaluate(() => window.monaco.editor.getModels().slice(0, 2).map(x => x.getLanguageId()).join()), 'cmr-' + language + ',cmr-' + language));
       await eventually(async () => assert.ok(/1 difference/.test((await look(p)).chips), language));
       await eventually(async () => assert.strictEqual((await look(p)).counter, '1 of 1', language + ': F7 goes through the differences'));
       assert.deepStrictEqual((await look(p)).rows, ['Differs'], language + ': the kind alone');

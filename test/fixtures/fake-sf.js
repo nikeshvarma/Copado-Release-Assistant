@@ -40,6 +40,27 @@ const say = t => process.stdout.write(t);
   }
   if (cmd.startsWith('org display') && process.env.FAKE_SF_COUNT) require('fs').appendFileSync(process.env.FAKE_SF_COUNT, 'display\n');
   if (cmd.startsWith('org display')) return done({ status: 0, result: { accessToken: process.env.FAKE_SF_TOKEN || '00D000000000001!fake', instanceUrl: process.env.FAKE_SF_INSTANCE || 'http://127.0.0.1:9', apiVersion: '62.0' } }, 0);
+  // the components of a type an org has: the source org (qa) two fields more than the target (uat)
+  if (cmd === 'org list metadata') {
+    const org = flag('--target-org'), type = flag('--metadata-type');
+    const has = { CustomField: org === 'uat' ? ['Invoice__c.Due_Date__c'] : ['Invoice__c.Due_Date__c', 'Invoice__c.Region__c', 'Invoice__c.Tax_Rate__c'], ApexClass: org === 'uat' ? ['InvoiceService'] : ['InvoiceService', 'TaxCalculator'] }[type] || [];
+    return done({ status: 0, result: has.map(n => ({ fullName: n, type })) });
+  }
+  // a retrieve that writes what the manifest names, as source files - when a test asks for it
+  if (cmd === 'project retrieve start' && process.env.FAKE_SF_WRITE) {
+    const fs = require('fs'), path = require('path');
+    const xml = fs.readFileSync(path.resolve(process.cwd(), flag('--manifest')), 'utf8');
+    for (const [, body] of xml.matchAll(/<types>([\s\S]*?)<\/types>/g)) {
+      const type = /<name>([^<]+)<\/name>/.exec(body)[1];
+      for (const [, n] of body.matchAll(/<members>([^<]+)<\/members>/g)) {
+        const base = path.join(process.cwd(), 'force-app', 'main', 'default');
+        const put = (rel, text) => { const f = path.join(base, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+        if (type === 'CustomField') { const [o, f] = n.split('.'); put('objects/' + o + '/fields/' + f + '.field-meta.xml', '<CustomField xmlns="http://soap.sforce.com/2006/04/metadata"><fullName>' + f + '</fullName></CustomField>\n'); }
+        else if (type === 'ApexClass') { put('classes/' + n + '.cls', 'public class ' + n + ' {}\n'); put('classes/' + n + '.cls-meta.xml', '<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata"><apiVersion>62.0</apiVersion></ApexClass>\n'); }
+      }
+    }
+    process.stdout.write('Retrieved Source\n'); process.exit(0);
+  }
   if (cmd === 'org list') return done({ status: 0, result: { nonScratchOrgs: [{ alias: 'qa', username: 'me@example.com.qa', isSandbox: true }] } }, 0);
 
   if (cmd === 'project retrieve start' && !json && process.env.FAKE_SF_STYLE === 'frames') {

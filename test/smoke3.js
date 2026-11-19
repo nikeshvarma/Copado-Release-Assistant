@@ -475,7 +475,7 @@ module.exports = function register(ok, section, h) {
       release.activate({ subscriptions: { push() {} }, secrets: { get: async k => secrets.get(k), store: async (k, v) => secrets.set(k, v), delete: async k => secrets.delete(k) },
         workspaceState: { get: (k, d) => state.has(k) ? state.get(k) : d, update: async (k, v) => state.set(k, v) }, extensionUri: vs.Uri.file(root) }, {
         output: { appendLine: l => out.push(l), show() {}, clear() {} }, storageDir, resolveProject: () => ({ root }), writeTemp: async (n, t) => { const f = path.join(root, '.copado', 'tmp', n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return vs.Uri.file(f); },
-        startSession: async () => {}, promoMerge: async () => ({ ok: false }), copadoApi: () => api });
+        startSession: async () => {}, copadoApi: () => api });
       const hp = release.helpers;
       // the repository is not connected: its address comes from Copado's Git Repository record; only a token is asked for
       vs.answers.info.push({ re: /^Connect .*owner\/repo - the address is from Copado/, v: 'Connect Repository' });
@@ -645,7 +645,8 @@ module.exports = function register(ok, section, h) {
     page.state({ copadoOrg: 'copado', recent: [], current: cur, validation: null });
     const t = page.text();
     assert.ok(/class="row sel" data-sel="force-app\/main\/default\/permissionsets\/Ops\.permissionset-meta\.xml"/.test(page.html), 'the file shown on the right is highlighted in the list from the start');
-    assert.ok(t.includes('Back-promotion') && t.includes('Back-promoted from prod (main)') && t.includes('Target branch (HEAD)') && !/back-promoted from prod\u2019s/i.test(t) && !/Feature \(/.test(t), t);
+    // the file's details name both sides for what they are - a back-promotion's source, not a feature
+    assert.ok(t.includes('Back-promotion') && /Back-promoted from prod\s+main/.test(t) && t.includes('HEAD') && !/back-promoted from prod\u2019s/i.test(t) && !/Feature \(/.test(t), t);
     assert.ok(t.includes('no login for uat'));
   });
 
@@ -665,7 +666,7 @@ module.exports = function register(ok, section, h) {
     ui.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => d, update: async () => {} } }, {
       output: { appendLine() {} }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf', environmentOrgs: { uat: 'uatAlias' } }), cmd: (id, fn) => { vs.registered[id] = fn; },
       requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => api,
-      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: async () => ({ ok: false }), startSession: async () => {} },
+      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), startSession: async () => {} },
       orgList: async () => [], credentialsFor: async () => [], orgForEnvironment: async (c, r, id, name) => name + 'Alias',
       runBranchCheck: async o => { calls.branch = o; }, validatePromotionBranch: async o => { calls.promoBranch = o; }, onValidation: () => ({ dispose() {} }), validationStatus: () => null,
       showCopadoErrors: async f => f, readinessReport: async o => { calls.readiness = o; }, sfcli: { openPath: async () => {} }
@@ -734,7 +735,7 @@ module.exports = function register(ok, section, h) {
       const [release] = loadWith(vs, ['../release', '../promotionUi', '../lifecycleUi', '../releasePage']);
       release.activate({ subscriptions: { push() {} }, secrets: { get: async () => undefined, store: async () => {}, delete: async () => {} },
         workspaceState: { get: (k, d) => d, update: async () => {} }, extensionUri: vs.Uri.file(root) }, {
-        output: { appendLine() {}, show() {}, clear() {} }, resolveProject: () => ({ root }), startSession: async () => {}, promoMerge: async () => ({ ok: false }), copadoApi: () => api,
+        output: { appendLine() {}, show() {}, clear() {} }, resolveProject: () => ({ root }), startSession: async () => {}, copadoApi: () => api,
         storageDir: async sub => { const d = path.join(root, '.copado', sub || ''); fs.mkdirSync(d, { recursive: true }); return vs.Uri.file(d); },
         writeTemp: async (n, t) => { const f = path.join(root, '.copado', 'tmp', n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return vs.Uri.file(f); } });
       const hp = release.helpers;
@@ -760,7 +761,7 @@ module.exports = function register(ok, section, h) {
 
   const libs = () => ({ X: require('../src/xmlParser'), duplicates: require('../src/duplicates'), rules: require('../src/rules') });
 
-  ok('the upload gate: XML must be well-formed the way Salesforce reads it - also an XML file that was merged as text', async () => {
+  ok('the upload gate: XML must be well-formed the way Salesforce reads it - also a file whose blocks git cut through an entry', async () => {
     const W = require('../src/promotionWork');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra gate '));
     try {
@@ -779,10 +780,10 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(W.gates(s, 'force-app/main/default/classes/A.cls', { kind: 'code' }, libs()).ok, false, 'no file, no upload');
       s.write('resolved', 'force-app/main/default/classes/A.cls', 'public class A {');
       assert.strictEqual(W.gates(s, 'force-app/main/default/classes/A.cls', { kind: 'code' }, libs()).ok, true, 'Apex is not XML');
-      // the automatic pass: sides that are not valid XML fall back to text - and the gate holds the result back
+      // git cut through an entry: its blocks are conflicts, still metadata - and the gate holds a broken result back
       const conflicted = ps('<<<<<<< HEAD\n    <label>Ops</label>\n</PermissionSet>\n=======\n    <label>Ops 2</label>\n>>>>>>> feature\n');
-      const r = await W.autoResolve(rel, conflicted, async () => ({ ok: false, error: 'not valid XML' }));
-      assert.strictEqual(r.kind, 'code', 'merged as text');
+      const r = await W.autoResolve(rel, conflicted);
+      assert.deepStrictEqual([r.kind, r.state, r.suggestion], ['xml', 'review', false], 'its conflicts yours');
       s.write('resolved', rel, r.merged.replace(/<<<<<<<[^\n]*\n|=======\n|>>>>>>>[^\n]*\n/g, '').replace('</PermissionSet>\n', ''));
       assert.ok(!W.gates(s, rel, { kind: r.kind, state: 'auto' }, libs()).ok, 'the old gate would have let this through to Copado');
     } finally { rmTree(dir); }
@@ -848,7 +849,7 @@ module.exports = function register(ok, section, h) {
     ui.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => d, update: async () => {} } }, {
       output: { appendLine() {} }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf', environmentOrgs: {} }), cmd: (id, fn) => { vs.registered[id] = fn; },
       requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => api,
-      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: async () => ({ ok: false }), startSession: async () => {} },
+      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), startSession: async () => {} },
       orgList: async () => [], credentialsFor: async () => [], orgForEnvironment: async () => null, runBranchCheck: async () => {}, validatePromotionBranch: async () => {},
       onValidation: () => ({ dispose() {} }), validationStatus: () => null, showCopadoErrors: async f => f.map(x => Object.assign({ file: null, fixes: [] }, x)), readinessReport: async () => {}, sfcli: { openPath: async () => {} }
     });
@@ -1014,82 +1015,6 @@ module.exports = function register(ok, section, h) {
     assert.ok(z('.scrim') > 0 && lifted.every(v => v <= z('.scrim')), 'nothing paints over the dialog');
   });
 
-  ok('a chosen value replaces the whole element - also a value that spans lines, which the earlier version left half behind', () => {
-    const W = require('../src/promotionWork');
-    const X = require('../src/xmlParser');
-    const merged = '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <description>First line of the description\nand its second line\nand a third</description>\n' +
-      '    <hasActivationRequired>false</hasActivationRequired>\n    <label>Ops</label>\n</PermissionSet>\n';
-    const clashes = [{ line: 2, tag: 'description', target: 'Promotion text', incoming: 'Feature text\nover two lines & <more>' }, { line: 6, tag: 'label', target: 'Ops', incoming: 'Ops 2' }];
-    const r = W.applyChoices(merged, clashes, { 0: 'incoming', 1: 'incoming' });
-    assert.strictEqual(r.applied, 2);
-    assert.strictEqual(W.wellFormed(r.text, X), null, 'well-formed');
-    assert.ok(r.text.includes('    <description>Feature text\nover two lines &amp; &lt;more&gt;</description>\n    <hasActivationRequired>') && r.text.includes('<label>Ops 2</label>') && !/second line|a third/.test(r.text), r.text);
-    assert.deepStrictEqual(W.applyChoices(merged, [{ line: 4, tag: 'description', target: 'x', incoming: 'y' }], { 0: 'target' }).moved, [0], 'not on that line: left for the merge editor');
-    assert.strictEqual(W.applyChoices(merged, clashes, {}).text, merged, 'no choice, no change');
-  });
-
-  ok('resolutions the one-line choices broke are rebuilt from your recorded choices - never a file you edited', () => {
-    const W = require('../src/promotionWork');
-    const X = require('../src/xmlParser');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra repair '));
-    try {
-      const s = W.store(dir);
-      const merged = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <description>Line one\nline two</description>\n    <label>Ops</label>\n</PermissionSet>\n';
-      const clashes = [{ line: 1, tag: 'description', target: 'Promotion text', incoming: 'Feature text' }];
-      const choices = { 0: 'target' };
-      const broken = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <description>Promotion text</description>\nline two</description>\n    <label>Ops</label>\n</PermissionSet>\n';
-      const files = {};
-      for (const [name, resolved, extra] of [['A', broken, {}], ['B', broken.replace('Ops', 'Ops edited by hand'), {}], ['C', merged, {}], ['D', broken, { revising: { from: 'copado' } }]]) {
-        const rel = 'force-app/main/default/permissionsets/' + name + '.permissionset-meta.xml';
-        s.write('merged', rel, merged); s.write('resolved', rel, resolved);
-        files[rel] = Object.assign({ state: 'resolved', kind: 'xml', clashes, choices, note: 'your choices: promotion' }, extra);
-      }
-      const st = { files };
-      assert.ok(W.wellFormed(broken, X), 'what the earlier version produced is broken');
-      const fixed = W.repairChoices(s, st, X);
-      assert.deepStrictEqual(fixed.map(r => path.basename(r)), ['A.permissionset-meta.xml'], 'only the file exactly as the old code left it');
-      const a = s.read('resolved', fixed[0]);
-      assert.strictEqual(W.wellFormed(a, X), null);
-      assert.ok(a.includes('<description>Promotion text</description>\n    <label>Ops</label>') && !a.includes('line two'));
-      assert.ok(/rebuilt: the earlier version broke a value that spans lines/.test(st.files[fixed[0]].note));
-      assert.ok(s.read('resolved', 'force-app/main/default/permissionsets/B.permissionset-meta.xml').includes('edited by hand'), 'your edit is left alone');
-      assert.deepStrictEqual(W.repairChoices(s, st, X), [], 'and once is enough');
-    } finally { rmTree(dir); }
-  });
-
-  ok('opening a promotion rebuilds what the one-line choices broke, and says so', async () => {
-    const W = require('../src/promotionWork');
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra rebuild '));
-    const api = require('./fixtures/failed-org').failedOrg();
-    const vs = fakeCode(root, {});
-    const [ui] = loadWith(vs, ['../promotionUi']);
-    const out = [];
-    ui.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => d, update: async () => {} } }, {
-      output: { appendLine: l => out.push(l) }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf', environmentOrgs: {} }), cmd: (id, fn) => { vs.registered[id] = fn; },
-      requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => api,
-      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: async () => ({ ok: false }), startSession: async () => {} },
-      orgList: async () => [], credentialsFor: async () => [], orgForEnvironment: async () => null, runBranchCheck: async () => {}, validatePromotionBranch: async () => {},
-      onValidation: () => ({ dispose() {} }), validationStatus: () => null, showCopadoErrors: async f => f, readinessReport: async () => {}, sfcli: { openPath: async () => {} }
-    });
-    const realTimeout = global.setTimeout;
-    global.setTimeout = () => 0;
-    try {
-      // a resolution made with 3.0.5: your choice, written over one line of a two-line description
-      const s = W.store(path.join(root, '.copado', 'promotions', 'P0042'));
-      const rel = 'force-app/main/default/permissionsets/Ops_Seeded.permissionset-meta.xml';
-      const merged = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <description>Line one\nline two</description>\n</PermissionSet>\n';
-      s.write('merged', rel, merged);
-      s.write('resolved', rel, '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <description>Chosen</description>\nline two</description>\n</PermissionSet>\n');
-      s.save({ id: 'P42', name: 'P0042', files: { [rel]: { state: 'resolved', kind: 'xml', clashes: [{ line: 1, tag: 'description', target: 'Chosen', incoming: 'Other' }], choices: { 0: 'target' }, note: 'your choices: promotion' } } });
-      await ui.act('open', { ref: 'P0042' });
-      const snap = await ui.snapshot();
-      assert.strictEqual(s.read('resolved', rel), '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <description>Chosen</description>\n</PermissionSet>\n');
-      assert.ok(snap.current.plan.ready.some(x => x.rel === rel) && !snap.current.plan.held.some(x => x.rel === rel), 'ready to upload again, not held back');
-      assert.ok(snap.current.state.events.some(e => /Rebuilt 1 resolution from your choices/.test(e.text) && /Ops_Seeded/.test(e.detail)));
-      assert.ok(out.some(l => /rebuilt .*Ops_Seeded.* from your choices/.test(l)));
-    } finally { global.setTimeout = realTimeout; await ui.act('stopWatch', {}); rmTree(root); }
-  });
-
   ok('a run that succeeded shows no component errors - and a list of what was deployed is not an error', async () => {
     const J = require('../src/jobs');
     const api = require('./fixtures/failed-org').failedOrg();
@@ -1126,27 +1051,27 @@ module.exports = function register(ok, section, h) {
 
   section('3.0.8: nothing resolved without you; the pre-check on the page');
 
-  ok('resolving automatically is off by default: a clean merge is only a suggestion, code keeps every block, earlier automatic ones come back to you', async () => {
+  ok('resolving automatically is off by default: a layout\u2019s conflict is never a suggestion, code keeps every block, earlier automatic ones come back to you', async () => {
     const W = require('../src/promotionWork');
     const xml = 'force-app/main/default/layouts/A.layout-meta.xml', cls = 'force-app/main/default/classes/A.cls';
     const conflicted = '<Layout>\n<<<<<<< HEAD\n<a>1</a>\n=======\n<a>1</a>\n>>>>>>> feature\n</Layout>\n';
-    const clean = async () => ({ ok: true, mergedText: '<Layout>\n<a>1</a>\n</Layout>\n', conflicts: 0, clashes: [] });
-    const off = await W.autoResolve(xml, conflicted, clean, false);
-    assert.deepStrictEqual([off.state, off.suggestion, off.merged], ['review', true, '<Layout>\n<a>1</a>\n</Layout>\n'], 'the merge is offered, not taken');
-    const on = await W.autoResolve(xml, conflicted, clean, true);
-    assert.deepStrictEqual([on.state, !!on.suggestion], ['auto', false], 'with the setting on, as before');
+    // a layout's conflicts are yours - never a suggested merge, never resolved automatically, whatever the setting
+    const off = await W.autoResolve(xml, conflicted, false);
+    assert.deepStrictEqual([off.state, off.suggestion, off.merged], ['review', false, conflicted], 'nothing offered for you');
+    const on = await W.autoResolve(xml, conflicted, true);
+    assert.deepStrictEqual([on.state, !!on.suggestion], ['review', false], 'not even with the setting on');
     const code = '<<<<<<< HEAD\nx\n=======\nx\n>>>>>>> f\n';
-    const c0 = await W.autoResolve(cls, code, clean, false);
+    const c0 = await W.autoResolve(cls, code, false);
     assert.deepStrictEqual([c0.state, c0.merged, c0.conflicts], ['code', code, 1], 'even a block both sides agree on stays for you');
-    assert.strictEqual((await W.autoResolve(cls, code, clean, true)).state, 'auto');
-    assert.deepStrictEqual([(await W.autoResolve(xml, '<Layout/>', clean, false)).state], ['review'], 'no markers: still yours to accept');
+    assert.strictEqual((await W.autoResolve(cls, code, true)).state, 'auto');
+    assert.deepStrictEqual([(await W.autoResolve(xml, '<Layout/>', false)).state], ['review'], 'no markers: still yours to accept');
     // a promotion fetched before, with automatic results: back to review
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra auto '));
     try {
       const s = W.store(dir);
       s.save({ id: 'P1', files: { [xml]: { state: 'auto', attachmentId: 'X', modified: 'm' }, [cls]: { state: 'resolved' } } });
       const api = { query: async () => [], download: async () => Buffer.from('') };
-      const r = await W.sync(api, s, { id: 'P1', name: 'P1' }, clean, { autoResolve: false });
+      const r = await W.sync(api, s, { id: 'P1', name: 'P1' }, { autoResolve: false });
       assert.deepStrictEqual([r.returned, r.state.files[xml].state, r.state.files[xml].suggestion, r.state.files[cls].state], [1, 'review', true, 'resolved'], 'your own resolution stays yours');
     } finally { rmTree(dir); }
     // the page: a suggestion to accept
@@ -1187,12 +1112,13 @@ module.exports = function register(ok, section, h) {
       const secrets = new Map([['cmr.repoToken:' + new URL(g.base).host, 'gh-token']]);
       release.activate({ subscriptions: { push() {} }, secrets: { get: async k => secrets.get(k), store: async () => {}, delete: async () => {} },
         workspaceState: { get: (k, d) => d, update: async () => {} }, extensionUri: vs.Uri.file(root) }, {
-        output: { appendLine() {}, show() { shown++; }, clear() {} }, resolveProject: () => ({ root }), startSession: async () => {}, promoMerge: async () => ({ ok: false }), copadoApi: () => api,
+        output: { appendLine() {}, show() { shown++; }, clear() {} }, resolveProject: () => ({ root }), startSession: async () => {}, copadoApi: () => api,
         storageDir: async sub => { const d = path.join(root, '.copado', sub || ''); fs.mkdirSync(d, { recursive: true }); return vs.Uri.file(d); },
         writeTemp: async (n, x) => { const f = path.join(root, '.copado', 'tmp', n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, x); return vs.Uri.file(f); } });
       await ui.act('open', { ref: 'P0004' });
       let snap = await ui.snapshot();
-      assert.deepStrictEqual(Object.values(snap.current.state.files).map(e => e.state).sort(), ['code', 'code'], 'nothing resolved without you - not even the permission set');
+      // nothing resolved without you: code waits, a permission set is offered - the target with the feature added - never taken
+      assert.deepStrictEqual(Object.values(snap.current.state.files).map(e => e.state + (e.suggestion ? ' (suggested)' : '')).sort(), ['code', 'review (suggested)'], 'nothing resolved without you');
       // you resolve the permission set; the class stays unresolved
       const store = path.join(root, '.copado', 'promotions', 'P0004', 'resolved');
       const mine = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <label>MY RESOLUTION</label>\n</PermissionSet>\n';
@@ -1221,6 +1147,45 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(shown, 0, 'the Output panel never opened');
       assert.ok(!vs.log.commands.slice(commandsBefore).some(c => c[0] === 'cmrDeployView.focus'), 'nor did the Deploy Check panel take the focus');
       assert.ok(snap.current.state.events.some(e => e.text === 'Pre-check: validation failed'));
+      // what uat lacks, read from the errors - and borrowed from the source org for the pre-check alone
+      assert.deepStrictEqual(pc.missing, [{ type: 'CustomField', name: 'Invoice__c.Region__c', needs: ['permission set Sales_User'] }]);
+      // the source org's login, asked for once - as for the target
+      vs.answers.pick.push({ re: /Copado environment "dev2".*borrowed for the pre-check/, v: items => items.find(i => /qa/.test(i.label || i.description || '')) || items[0] });
+      vs.answers.pick.push({ re: /which test classes/, v: items => items });
+      vs.answers.input.push({ re: /other test classes/, v: '' });
+      process.env.FAKE_SF_WRITE = '1';
+      try { await ui.act('borrow', { items: pc.missing.map(m => ({ type: m.type, name: m.name })) }); } finally { delete process.env.FAKE_SF_WRITE; }
+      snap = await ui.snapshot();
+      const bw = snap.current.state.borrow, pc2 = snap.current.precheck;
+      assert.ok(bw && pc2 && pc2.result, 'borrowed, and the pre-check run again: ' + JSON.stringify({ state: pc2 && pc2.state, picks: vs.log.picks.slice(-4).map(x => x.o && (x.o.title || x.o.placeHolder)), info: vs.log.info.slice(-3), warn: vs.log.warn.slice(-3), inputs: vs.log.inputs.slice(-2).map(x => x.title || x.prompt) }));
+      assert.deepStrictEqual([bw.items.map(b => b.type + ' ' + b.name), bw.items[0].files, bw.round], [['CustomField Invoice__c.Region__c'], ['force-app/main/default/objects/Invoice__c/fields/Region__c.field-meta.xml'], 2]);
+      assert.ok(fs.existsSync(path.join(ws, 'force-app', 'main', 'default', 'objects', 'Invoice__c', 'fields', 'Region__c.field-meta.xml')), 'in the pre-check\u2019s package');
+      assert.ok(/<members>Invoice__c\.Region__c<\/members>/.test(fs.readFileSync(path.join(ws, 'manifest', 'package.xml'), 'utf8')), 'and in its manifest');
+      assert.ok(!fs.existsSync(path.join(root, 'force-app', 'main', 'default', 'objects', 'Invoice__c')), 'never in your project');
+      assert.deepStrictEqual([pc2.missing, pc2.borrowed.map(b => b.name), pc2.round], [[], ['Invoice__c.Region__c'], 2], 'borrowed: no longer missing');
+      // the picker: a type's components in the source org
+      await ui.act('borrowList', { type: 'CustomField', q: 'tax' });
+      assert.deepStrictEqual((await ui.snapshot()).current.borrowList.items.map(i => i.name), ['Invoice__c.Tax_Rate__c']);
+      // the page: what is missing, to add - and what is borrowed, said for what it is
+      const bpage = runPage();
+      const cur = (await ui.snapshot()).current;
+      bpage.state({ copadoOrg: 'copado', recent: [], current: Object.assign({}, cur, { precheck: Object.assign({}, cur.precheck, { missing: pc.missing }) }), validation: null });
+      bpage.click({ tab: 'Pre-check' });
+      const bt = bpage.text();
+      const to = cur.promotion.to, from = cur.promotion.from;
+      for (const w of ['Missing in ' + to + ' \u2013 1 component', 'Invoice__c.Region__c', 'used by permission set Sales_User', 'Add 1 to pre-check', 'Add components\u2026', 'Borrowed from ' + from, 'for this pre-check only', 'The promotion still needs them in ' + to]) assert.ok(bt.includes(w), w + ' | ' + bt.slice(0, 300));
+      bpage.click({ a: 'borrow' });
+      assert.deepStrictEqual(bpage.posted.filter(m => m.name === 'borrow').pop().payload, { items: [{ type: 'CustomField', name: 'Invoice__c.Region__c' }] });
+      bpage.click({ a: 'borrowPick' });
+      assert.ok(/Add components from/.test(bpage.text()) && bpage.posted.some(m => m.name === 'borrowList'), 'the picker, asking the source org');
+      // removed: gone from the next pre-check
+      await ui.act('unborrow', { key: 'CustomField:Invoice__c.Region__c' });
+      assert.strictEqual((await ui.snapshot()).current.state.borrow, null);
+      // the source org set in Settings: used as it is - nothing asked
+      vs.config['cmr.borrow.sourceOrg'] = 'qa';
+      const asked = vs.log.picks.length;
+      await ui.act('borrowList', { type: 'ApexClass', q: '' });
+      assert.deepStrictEqual([vs.log.picks.length, (await ui.snapshot()).current.borrowList.items.map(i => i.name)], [asked, ['InvoiceService', 'TaxCalculator']]);
       // the page
       const page = runPage();
       page.state({ copadoOrg: 'copado', recent: [], current: snap.current, validation: null });
@@ -1358,7 +1323,7 @@ module.exports = function register(ok, section, h) {
     ui.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => d, update: async () => {} } }, {
       output: { appendLine() {} }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf', environmentOrgs: {} }), cmd: (id, fn) => { vs.registered[id] = fn; },
       requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => api,
-      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: async () => ({ ok: true, mergedText: feature, conflicts: 0, clashes: [] }), startSession: async (a, b, c, o) => { sessions.push(o); } },
+      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), startSession: async (a, b, c, o) => { sessions.push(o); } },
       orgList: async () => [], credentialsFor: async () => [], orgForEnvironment: async () => null, runBranchCheck: async () => {}, validatePromotionBranch: async () => {},
       onValidation: () => ({ dispose() {} }), validationStatus: () => null, showCopadoErrors: async f => f, readinessReport: async () => {}, sfcli: { openPath: async () => {} }
     });
@@ -1453,7 +1418,7 @@ module.exports = function register(ok, section, h) {
     ui.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => d, update: async () => {} } }, {
       output: { appendLine() {} }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf', environmentOrgs: {} }), cmd: (id, fn) => { vs.registered[id] = fn; },
       requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => { if (!loginOk) throw new Error('Your Salesforce session expired - log in again with sf org login web'); return api; },
-      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: async () => ({ ok: false }), startSession: async () => {} },
+      deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), startSession: async () => {} },
       orgList: async () => [], credentialsFor: async () => [], orgForEnvironment: async () => null, runBranchCheck: async () => {}, validatePromotionBranch: async () => {},
       onValidation: () => ({ dispose() {} }), validationStatus: () => null, showCopadoErrors: async f => f, readinessReport: async () => {}, sfcli: { openPath: async () => {} }
     });
@@ -1798,24 +1763,11 @@ module.exports = function register(ok, section, h) {
     for (const k of ['feature', 'target', 'merged']) assert.strictEqual(startFor('FlexiPage', k), k);
     const pkg = require('../package.json').contributes.configuration;
     const all = Object.assign({}, ...(Array.isArray(pkg) ? pkg : [pkg]).map(c => c.properties));
-    assert.deepStrictEqual([all['cmr.merge.startFrom'].default, all['cmr.merge.startFrom'].enum], ['auto', ['auto', 'feature', 'target', 'merged']]);
+    // no setting for it: a promotion starts from Copado's conflict file; this is for Branch conflicts only
+    assert.strictEqual(all['cmr.merge.startFrom'], undefined);
   });
 
-  ok('the promotion page: a merge that keeps what the feature branch does not have is never accepted in one click, nor resolved automatically; one it cannot check, neither', async () => {
-    const W = require('../src/promotionWork');
-    const conflicted = '<<<<<<< HEAD\n' + HT + '=======\n' + HF + '>>>>>>> feature/x\n';
-    const merge = async (x, y, z) => { const j = engine(x, y); return { ok: j.ok, mergedText: j.mergedText, conflicts: 0 }; };
-    for (const auto of [false, true]) {
-      const r = await W.autoResolve('force-app/main/default/flexipages/Case.flexipage-meta.xml', conflicted, merge, auto);
-      assert.deepStrictEqual([r.state, r.suggestion, r.featureLacks, r.note], ['review', false, 2, '2 blocks the feature branch does not have - review in merge'], 'auto ' + auto);
-    }
-    // nothing the feature lacks: a suggestion, as before
-    const same = '<<<<<<< HEAD\n' + HF + '=======\n' + HT + '>>>>>>> feature/x\n';
-    const s2 = await W.autoResolve('force-app/main/default/flexipages/Case.flexipage-meta.xml', same, merge, false);
-    assert.deepStrictEqual([s2.state, s2.suggestion, s2.featureLacks], ['review', true, 0]);
-  });
-
-  ok('the merge editor opens where the rule says - a page on the feature branch\u2019s file, a permission set on the merge - with Start from offering the others', async () => {
+  ok('a merge of two branches\u2019 files (Branch conflicts) opens where the rule says - a page on the feature branch\u2019s file, a permission set on the merge; only where it started is sent, not every start\u2019s text', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra sf '));
     try {
       const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
@@ -1832,8 +1784,7 @@ module.exports = function register(ok, section, h) {
       const page = await open('Case.flexipage-meta.xml', HT, HF);
       assert.strictEqual(page.start, 'feature');
       assert.ok(!/NewCase/.test(page.text), 'the feature branch\u2019s file: its removals count');
-      assert.deepStrictEqual(Object.keys(page.starts).sort(), ['feature', 'merged', 'target']);
-      assert.ok(/NewCase/.test(page.starts.merged) && /NewCase/.test(page.starts.target));
+      assert.strictEqual(page.starts, undefined, 'no start to choose: their texts are not sent');
       assert.deepStrictEqual(page.marks.pieces.filter(p => p.kind !== 'same').map(p => [p.kind, !!p.notInFeature]), [['removed', true], ['removed', true]], 'the target\u2019s two shown, with Restore');
       const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
       const ps = l => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + l.map(fp).join('') + '</PermissionSet>\n';
@@ -2113,7 +2064,7 @@ module.exports = function register(ok, section, h) {
 
   section('3.8.0: the Manual tab');
 
-  ok('the Manual tab: two versions pasted or chosen, what each is, merged in the merge editor as a manual merge; a package from a commit; shown while Copado is not connected, or always, or opened for a file', async () => {
+  ok('the Manual tab: two versions pasted or chosen, what each is, compared side by side; a package from a commit; shown while Copado is not connected, or always, or opened for a file', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra man '));
     try {
       const vs = fakeCode(root, {});
@@ -2166,13 +2117,13 @@ module.exports = function register(ok, section, h) {
       await M.act('manual.package');
       assert.strictEqual(packaged.length, 1);
       assert.ok(/OpsService/.test(fs.readFileSync(packaged[0][0].fsPath, 'utf8')));
-      // Merge in Release Assistant: the file as the target, the tab opened whatever the setting
+      // Compare in Release Assistant: the file as the target, the tab opened whatever the setting
       const f = path.join(root, 'Case.layout-meta.xml'); fs.writeFileSync(f, T.replace('A', 'C'));
       await reg['cmr.manual.mergeWith'](vs.Uri.file(f));
       assert.deepStrictEqual([M.snapshot().target.name, pages], ['Case.layout-meta.xml', ['Manual']]);
       const pkg = require('../package.json');
       assert.ok(pkg.contributes.menus['explorer/context'].some(m => m.command === 'cmr.manual.mergeWith' && /\.xml/.test(m.when)), 'on an XML file\u2019s right-click');
-      assert.strictEqual(pkg.contributes.commands.find(c => c.command === 'cmr.manual.mergeWith').title, 'Merge in Release Assistant\u2026');
+      assert.strictEqual(pkg.contributes.commands.find(c => c.command === 'cmr.manual.mergeWith').title, 'Compare in Release Assistant\u2026');
     } finally { rmTree(root); }
   });
 
@@ -2551,22 +2502,7 @@ module.exports = function register(ok, section, h) {
 
   section('3.11.0: the common ancestor');
 
-  ok('the merge-base of two branches, and a file as it was there - for each provider, from the connected repository', async () => {
-    const R = require('../src/repoHost');
-    const file = 'force-app/main/default/flexipages/Account.flexipage-meta.xml';
-    const g = await h.fakeGitHosts({ baseFiles: { [file]: '<FlexiPage>base</FlexiPage>' }, branches: ['feature/US-0012345', 'uat'] });
-    try {
-      for (const [provider, url, token] of [['azure', g.base + '/org/Proj/_git/repo', 'az-token'], ['github', g.base + '/owner/repo', 'gh-token'],
-        ['gitlab', g.base + '/group/repo', 'gl-token'], ['bitbucket', g.base + '/ws/repo', 'me@example.com:bb-token']]) {
-        const host = R.createHost(R.parseRepoUrl(url, provider), token);
-        const sha = await host.mergeBase('feature/US-0012345', 'uat');
-        assert.strictEqual(sha, 'b'.repeat(40), provider + ': the merge-base');
-        assert.strictEqual((await host.readFileAt(sha, file)).toString(), '<FlexiPage>base</FlexiPage>', provider + ': the file at it');
-        assert.strictEqual(await host.readFileAt(sha, 'force-app/main/default/classes/New.cls'), null, provider + ': a file that was not there');
-      }
-      await assert.rejects(R.createHost(R.parseRepoUrl(g.base + '/owner/repo', 'github'), 'gh-token').readFileAt('main', file), /not a commit/);
-    } finally { g.server.close(); }
-  });
+
 
   ok('with the common ancestor, what each branch did since: the target\u2019s own later addition or change is no mark; what the feature removed or changed says so', () => {
     const it = v => '                        <valueListItems>\n                            <value>' + v + '</value>\n                        </valueListItems>\n';
@@ -2585,24 +2521,7 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual(d.map(p => [p.kind, !!p.byFeature]), [['differs', true]], 'the feature changed it, you kept the target\u2019s: it says so');
   });
 
-  ok('the merge editor takes the ancestor from the session - and not when cmr.merge.useAncestor is off', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra anc '));
-    try {
-      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
-      const it = v => '        <valueListItems>\n            <value>' + v + '</value>\n        </valueListItems>\n';
-      const pg = items => '<?xml version="1.0" encoding="UTF-8"?>\n<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + items.map(it).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
-      for (const on of [true, false]) {
-        const mv = await realMergeView(root, on ? {} : { 'cmr.merge.useAncestor': false });
-        await mv.deps().startSession(mv.vs.Uri.file(put('t.flexipage-meta.xml', pg(['Edit', 'Share', 'Clone']))), mv.vs.Uri.file(put('f.flexipage-meta.xml', pg(['Edit', 'Share']))), mv.vs.Uri.file(put('o.flexipage-meta.xml', pg(['Edit', 'Share']))),
-          { applyToUri: mv.vs.Uri.file(put('r.flexipage-meta.xml', '')), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', startFrom: pg(['Edit', 'Share', 'Clone']) });
-        const w = mv.webviews[mv.webviews.length - 1];
-        await w.send({ type: 'ready' });
-        const kinds = w.last('init').marks.pieces.filter(p => p.kind !== 'same').map(p => p.kind);
-        assert.deepStrictEqual(kinds, on ? [] : ['kept'], on ? 'with the ancestor: the target\u2019s own addition, no mark' : 'off: compared as branches only');
-        w.panel.dispose();
-      }
-    } finally { rmTree(root); }
-  });
+
 
   ok('renamed: gone and come back alike but for its name is one change - not when only flags are alike, nor when it was only its name', () => {
     const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
@@ -2681,7 +2600,7 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual(C.problems('<template><p>{x}</p></template>\n', 'html'), [], 'templates: no bracket checks');
   });
 
-  ok('a promotion\u2019s code opens on Copado\u2019s conflict file - the conflict to resolve in one panel or two; saving with it unresolved warns first', async () => {
+  ok('a promotion\u2019s code opens on Copado\u2019s conflict file - the conflict to resolve in one panel, two or three; saving with it unresolved warns first', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra code '));
     try {
       const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
@@ -2928,6 +2847,105 @@ module.exports = function register(ok, section, h) {
     const pics = [...own.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map(m => m[1]);
     assert.ok(pics.length >= 8 && pics.every(u => /^https:\/\//.test(u)), JSON.stringify(pics.filter(u => !/^https/.test(u))));
     for (const u of pics.filter(u => /\/raw\/HEAD\//.test(u))) assert.ok(fs.existsSync(path.join(__dirname, '..', u.split('/raw/HEAD/')[1])), u);
+  });
+
+  section('3.17.0: everything from Copado\u2019s conflict file');
+
+  const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+  const psConflict = '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n' + fp('Invoice__c.Region__c', 'false') + fp('Invoice__c.Legacy_Total__c', 'true') + '    <label>Sales Ops</label>\n=======\n' + fp('Invoice__c.Region__c', 'true') + fp('Invoice__c.Tax_Rate__c', 'true') + '    <label>Sales Operations</label>\n>>>>>>> feature/US-0012345\n</PermissionSet>\n';
+
+  ok('a permission set from Copado\u2019s conflict file: in each block the target\u2019s entries as they are, the feature\u2019s added beside their kind or applied - a block git cut through an entry is not resolved this way', () => {
+    const U = require('../src/unionMerge');
+    const r = U.resolve(psConflict, 'PermissionSet');
+    assert.ok(r.ok);
+    const lines = r.text.split('\n').map(l => l.trim()).filter(l => /<field>|<editable>|<label>/.test(l));
+    assert.deepStrictEqual(lines, ['<editable>true</editable>', '<field>Invoice__c.Region__c</field>', '<editable>true</editable>', '<field>Invoice__c.Legacy_Total__c</field>', '<editable>true</editable>', '<field>Invoice__c.Tax_Rate__c</field>', '<label>Sales Operations</label>'],
+      'the feature\u2019s change applied, the target\u2019s entry kept, the feature\u2019s added with its kind, one label - the feature\u2019s');
+    assert.ok(!/^(<{7}|={7}|>{7})/m.test(r.text), 'no markers');
+    const cut = '<PermissionSet>\n<<<<<<< HEAD\n    <fieldPermissions>\n        <editable>false</editable>\n=======\n    <fieldPermissions>\n        <editable>true</editable>\n>>>>>>> feature\n        <field>A.b__c</field>\n    </fieldPermissions>\n</PermissionSet>\n';
+    assert.deepStrictEqual(U.resolve(cut, 'PermissionSet'), { ok: false, reason: 'git\u2019s conflict at line 2 is not whole entries' });
+  });
+
+  ok('a promotion\u2019s metadata opens on Copado\u2019s conflict file: no merge of ours - a page\u2019s blocks conflicts to choose, beside the target; a permission set\u2019s resolved as the target and the feature; no branch read', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra copado '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const item = (v, f) => '    <valueListItems>\n        <value>' + v + '</value>\n        <visibilityRule>\n            <booleanFilter>' + f + '</booleanFilter>\n        </visibilityRule>\n    </valueListItems>\n';
+      const page = '<?xml version="1.0" encoding="UTF-8"?>\n<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n' + item('A', '1') + '    <valueListItems>\n        <value>CustomButton.Quote.Create_Agreement</value>\n        <visibilityRule>\n<<<<<<< HEAD\n            <booleanFilter>1 OR 2</booleanFilter>\n=======\n            <booleanFilter>(1 OR 2) AND 3</booleanFilter>\n>>>>>>> feature/US-0012345\n        </visibilityRule>\n    </valueListItems>\n</FlexiPage>\n';
+      const sides = t => [t.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), t.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1')];
+      const mv = await realMergeView(root, {});
+      const [T, F] = sides(page), r = put('r.xml', page);
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.xml', T)), mv.vs.Uri.file(put('f.xml', F)), null, { applyToUri: mv.vs.Uri.file(r), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', copado: true, conflictText: page, startFrom: null });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const init = w.last('init');
+      assert.ok(!/^(<{7}|={7}|>{7})/m.test(init.text) && init.text.includes('Create_Agreement') && !init.text.includes('booleanFilter>1 OR 2') && !init.text.includes('AND 3'), 'git\u2019s merge, the block taken out - neither version in');
+      assert.strictEqual((init.text.match(/<valueListItems>/g) || []).length, 2, 'no duplicate: nothing merged again');
+      // three panels by default - Copado's: both branches' sides beside the resolution, each named as Copado's file names it
+      assert.deepStrictEqual([init.marks.git, init.marks.three, init.marks.left, init.marks.feat, init.marks.rows.map(x => x.kind + (x.needs ? ' needs you' : '')), init.marks.counts.needs, init.gitLabels], [true, true, T, F, ['conflict needs you'], 1, { ours: 'HEAD', theirs: 'feature/US-0012345' }]);
+      // Accept feature: its line in, resolved - saved as it is
+      const withF = init.text.replace('        <visibilityRule>\n        </visibilityRule>', '        <visibilityRule>\n            <booleanFilter>(1 OR 2) AND 3</booleanFilter>\n        </visibilityRule>');
+      await w.send({ type: 'text', seq: 7, text: withF });
+      assert.deepStrictEqual(w.last('marks').marks.rows.map(x => x.kind + ' ' + x.chosen), ['conflict feature']);
+      await w.send({ type: 'save', close: true, text: withF });
+      assert.strictEqual(fs.readFileSync(r, 'utf8'), withF, 'saved');
+      // a permission set: the target as it is, the feature added - nothing to resolve
+      const [PT, PF] = sides(psConflict), pr = put('p.xml', psConflict);
+      await mv.deps().startSession(mv.vs.Uri.file(put('pt.xml', PT)), mv.vs.Uri.file(put('pf.xml', PF)), null, { applyToUri: mv.vs.Uri.file(pr), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', copado: true, conflictText: psConflict, startFrom: null });
+      const w2 = mv.webviews[mv.webviews.length - 1];
+      await w2.send({ type: 'ready' });
+      const i2 = w2.last('init');
+      assert.strictEqual(i2.text, require('../src/unionMerge').resolve(psConflict, 'PermissionSet').text);
+      assert.ok(!i2.marks.git && i2.marks.pieces.some(x => x.kind !== 'same'), 'the feature\u2019s changes marked, each undoable');
+      assert.ok(!(i2.marks.rows || []).some(x => x.kind === 'conflict'), 'nothing to resolve');
+      // a permission set git cut through an entry: its blocks conflicts, said
+      // (a value inside one entry is whole: the feature's applied in it - a cut leaves an entry open on a side)
+      const cut = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n    <fieldPermissions>\n        <editable>false</editable>\n=======\n    <fieldPermissions>\n        <editable>true</editable>\n>>>>>>> feature\n        <field>A.b__c</field>\n    </fieldPermissions>\n</PermissionSet>\n';
+      const [CT, CF] = sides(cut);
+      const before = mv.webviews.length;
+      await mv.deps().startSession(mv.vs.Uri.file(put('ct.xml', CT)), mv.vs.Uri.file(put('cf.xml', CF)), null, { applyToUri: mv.vs.Uri.file(put('c.xml', cut)), applyOnSave: true, openAfterApply: false, copado: true, conflictText: cut, startFrom: null });
+      assert.ok(mv.vs.log.info.some(m => /not whole entries/.test(m)), 'said: ' + JSON.stringify(mv.vs.log.info.concat(mv.vs.log.error)));
+      assert.strictEqual(mv.webviews.length, before + 1, 'opened: ' + JSON.stringify(mv.vs.log.error));
+      const w3 = mv.webviews[mv.webviews.length - 1];
+      await w3.send({ type: 'ready' });
+      assert.deepStrictEqual([w3.last('init').marks.git, w3.last('init').marks.counts.needs], [true, 1]);
+    } finally { rmTree(root); }
+  });
+
+  ok('the promotion page never merges two rebuilt sides: a permission set\u2019s suggestion is the target with the feature added; a page\u2019s conflicts are yours - never suggested, never resolved automatically', async () => {
+    const W = require('../src/promotionWork');
+    const ps = await W.autoResolve('force-app/main/default/permissionsets/P.permissionset-meta.xml', psConflict, false);
+    assert.deepStrictEqual([ps.kind, ps.state, ps.suggestion, ps.conflicts, ps.merged], ['xml', 'review', true, 0, require('../src/unionMerge').resolve(psConflict, 'PermissionSet').text]);
+    assert.strictEqual((await W.autoResolve('force-app/main/default/permissionsets/P.permissionset-meta.xml', psConflict, true)).state, 'auto', 'with resolving automatically on: resolved');
+    const page = '<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n    <a>1</a>\n=======\n    <a>1</a>\n>>>>>>> feature\n</FlexiPage>\n';
+    for (const on of [false, true]) {
+      const r = await W.autoResolve('force-app/main/default/flexipages/P.flexipage-meta.xml', page, on);
+      assert.deepStrictEqual([r.kind, r.state, r.suggestion, r.conflicts, r.merged], ['xml', 'review', false, 1, page], 'a page: its conflict yours - auto ' + on);
+    }
+  });
+
+  ok('borrowing for the pre-check: what the target lacks, read from Salesforce\u2019s own messages - custom names only, never a guess; a manifest for them; what a retrieve wrote, at its project path', async () => {
+    const B = require('../src/borrow');
+    const got = B.missingFrom([
+      { type: 'ApexClass', fullName: 'InvoiceService', problem: 'Variable does not exist: Region__c' },
+      { type: 'ApexClass', fullName: 'InvoiceService', problem: 'Invalid type: TaxCalculator' },
+      { type: 'Layout', fullName: 'Invoice__c-Invoice Layout', problem: 'In field: field - no CustomField named Invoice__c.Region__c found' },
+      { type: 'Flow', fullName: 'Invoice_Approval', problem: 'The field "Tax_Rate__c" for the object "Invoice__c" doesn\u2019t exist.' },
+      { type: 'ApexClass', fullName: 'X', problem: 'Invalid type: String' },
+      { type: 'Layout', fullName: 'Account-A', problem: 'In field: field - no CustomField named Account.Industry found' },
+      { type: 'PermissionSet', fullName: 'Ops', problem: 'Entity of type \'ApexClass\' named \'RefundService\' cannot be found' }]);
+    assert.deepStrictEqual(got.map(m => m.type + ' ' + m.name + ' <- ' + m.needs.join(', ')), ['ApexClass TaxCalculator <- class InvoiceService', 'CustomField Invoice__c.Region__c <- layout Invoice__c-Invoice Layout', 'CustomField Invoice__c.Tax_Rate__c <- flow Invoice_Approval', 'ApexClass RefundService <- permission set Ops'],
+      'an ambiguous message, a standard field, a standard type: none taken for missing');
+    assert.ok(/<members>Invoice__c\.Region__c<\/members>\n        <members>Invoice__c\.Tax_Rate__c<\/members>\n        <name>CustomField<\/name>/.test(B.manifestFor(got, '62.0')));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra borrow '));
+    try {
+      fs.mkdirSync(path.join(dir, 'force-app', 'main', 'default', 'classes'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'force-app', 'main', 'default', 'classes', 'TaxCalculator.cls'), 'x');
+      assert.deepStrictEqual(B.collect(dir, 'force-app').map(f => f.rel), ['force-app/main/default/classes/TaxCalculator.cls']);
+      // the source org's components of a type, through the CLI
+      const sf = h.fakeSf(dir);
+      assert.deepStrictEqual(await require('../src/sfcli').listMetadata(sf, { type: 'CustomField', org: 'qa', cwd: dir }), ['Invoice__c.Due_Date__c', 'Invoice__c.Region__c', 'Invoice__c.Tax_Rate__c']);
+    } finally { rmTree(dir); }
   });
 
   section('3.0: what is shipped');

@@ -17,7 +17,7 @@
   const saved = vscode.getState() || {};
   const NAVS = ['Promotions', 'Stories', 'Manual', 'Compare'];
   const navs = () => NAVS;
-  const ui = { nav: NAVS.includes(saved.nav) ? saved.nav : 'Promotions', href: '', sel: saved.sel || null, tab: saved.tab || 'Files', filter: '', modal: false, setStatus: true, choices: saved.choices || {}, busy: false,
+  const ui = { nav: NAVS.includes(saved.nav) ? saved.nav : 'Promotions', href: '', sel: saved.sel || null, tab: saved.tab || 'Files', filter: '', modal: false, setStatus: true, busy: false,
     ref: '', sref: saved.sref || '', asked: {}, earlier: false, setRecreate: true };
   let data = null;
 
@@ -27,7 +27,7 @@
   const lact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'life', name, payload: payload || {} });
   const mact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'manual', name, payload: payload || {} });
   const cact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'compare', name, payload: payload || {} });
-  const keep = () => vscode.setState({ nav: ui.nav, sel: ui.sel, tab: ui.tab, choices: ui.choices, sref: ui.sref });
+  const keep = () => vscode.setState({ nav: ui.nav, sel: ui.sel, tab: ui.tab, sref: ui.sref });
   const ago = iso => { if (!iso) return ''; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
   const time = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   const day = iso => iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
@@ -70,6 +70,49 @@
 
   /* ------------------------------------------------------------ the pre-check, followed on the page */
 
+  // ---- borrowing for the pre-check: what the target lacks, from the source org - for the pre-check alone ----
+  const TYPE_WORDS = { CustomField: 'Custom field', CustomObject: 'Object', ApexClass: 'Apex class', ApexTrigger: 'Apex trigger', Flow: 'Flow', Layout: 'Layout', FlexiPage: 'Lightning page',
+    RecordType: 'Record type', ValidationRule: 'Validation rule', LightningComponentBundle: 'Lightning web component', AuraDefinitionBundle: 'Aura component', PermissionSet: 'Permission set',
+    CustomPermission: 'Custom permission', CustomLabel: 'Custom label', StaticResource: 'Static resource', ApexPage: 'Visualforce page', ApexComponent: 'Visualforce component', QuickAction: 'Quick action',
+    CustomMetadata: 'Custom metadata record', ListView: 'List view' };
+  const bkey = m => m.type + ':' + m.name;
+  function borrowCards(cur, pc) {
+    const bw = cur.borrow, to = cur.promotion.to || 'the target', from = cur.promotion.from || 'the source org';
+    let out = '';
+    if (bw && bw.items && bw.items.length) {
+      out += '<div class="card bwcard"><h3>' + I.copy + 'Borrowed from ' + esc(from) + ' \u2013 ' + plural(bw.items.length, 'component') + ', for this pre-check only</h3>' +
+        '<div class="bwchips">' + bw.items.map(b => '<span class="chip info ichip">' + esc(b.name) + '<button class="bwx" data-a="unborrow" data-key="' + esc(bkey(b)) + '" title="Remove" aria-label="Remove ' + esc(b.name) + '">' + I.x + '</button></span>').join('') +
+        '<span class="spacer"></span><button class="link" data-a="borrowPick">Add components\u2026</button><button class="link" data-a="unborrowAll">Clear all</button></div>' +
+        '<div class="muted small">Never deployed, never added to the story or the promotion. <b class="bwwarn">The promotion still needs them in ' + esc(to) + '</b> \u2013 commit them to the story, or promote the story that has them.' + (pc && pc.round > 1 ? ' Round ' + pc.round + ' of 5.' : '') + '</div>' +
+        (pc && pc.gone && pc.state !== 'running' ? '<div class="bwgone">' + I.check + plural(pc.gone, 'error') + ' gone since the last round</div>' : '') + '</div>';
+    }
+    const miss = pc && pc.state !== 'running' && pc.result && !pc.result.success ? (pc.missing || []) : [];
+    if (miss.length) {
+      const on = m => (ui.bsel || {})[bkey(m)] !== false, n = miss.filter(on).length;
+      out += '<div class="card bwmiss"><h3>' + I.warn + 'Missing in ' + esc(to) + ' \u2013 ' + plural(miss.length, 'component') + '</h3>' +
+        '<div class="muted small">Found in the errors. Add them from <b>' + esc(from) + '</b> to run the pre-check again and see what else fails \u2013 check-only, nothing deployed.</div>' +
+        miss.map(m => '<label class="missrow"><input type="checkbox" data-bsel="' + esc(bkey(m)) + '"' + (on(m) ? ' checked' : '') + '><span class="chip">' + esc(TYPE_WORDS[m.type] || m.type) + '</span><span class="mono">' + esc(m.name) + '</span>' +
+          (m.needs && m.needs.length ? '<span class="muted small">\u00b7 used by ' + esc(m.needs.slice(0, 3).join(', ')) + (m.needs.length > 3 ? '\u2026' : '') + '</span>' : '') + '</label>').join('') +
+        '<div class="row"><button class="btn primary" data-a="borrow"' + (n ? '' : ' disabled') + '>Add ' + n + ' to pre-check</button><button class="btn secondary" data-a="borrowPick">Add components\u2026</button><span class="spacer"></span><span class="muted small">from the source org, read-only</span></div></div>';
+    } else if (pc && pc.result && !pc.result.success && !(bw && bw.items && bw.items.length)) {
+      out += '<div class="bwlink"><button class="link" data-a="borrowPick">Add components from ' + esc(from) + '\u2026</button></div>';
+    }
+    return out + (ui.bpick ? pickerView(cur) : '');
+  }
+  function pickerView(cur) {
+    const L = cur.borrowList, type = ui.btype || 'CustomField', chosen = ui.bchosen || {};
+    const items = L && L.type === type ? L.items : null, n = Object.keys(chosen).length;
+    const missing = new Set(((cur.precheck || {}).missing || []).map(m => m.type + ':' + m.name.toLowerCase()));
+    return '<div class="bshade" data-a="borrowClose"></div><div class="bmodal" role="dialog" aria-label="Add components">' +
+      '<div class="bmh"><b>Add components from ' + esc(cur.promotion.from || 'the source org') + '</b><span class="spacer"></span><button class="bwx" data-a="borrowClose" aria-label="Close">' + I.x + '</button></div>' +
+      '<div class="bmb"><div class="row" style="margin-top:0"><select id="btype" aria-label="Type">' + Object.keys(TYPE_WORDS).map(t => '<option value="' + t + '"' + (t === type ? ' selected' : '') + '>' + esc(TYPE_WORDS[t]) + '</option>').join('') + '</select>' +
+      '<input id="bq" class="cfilter" placeholder="Search" value="' + esc(ui.bq || '') + '" aria-label="Search"></div>' +
+      (items == null ? '<div class="muted small bmnote">Reading the source org\u2026</div>' : '<div class="muted small bmnote">' + L.total + ' in ' + esc(L.from) + (L.total > 100 ? ' \u2013 the first 100' : '') + '</div>' +
+        items.map(i => { const k = type + ':' + i.name; return '<label class="bres' + (chosen[k] ? ' sel' : '') + '"><input type="checkbox" data-bpick="' + esc(k) + '"' + (chosen[k] ? ' checked' : '') + '><span class="mono">' + esc(i.name) + '</span><span class="spacer"></span>' +
+          (missing.has(type + ':' + i.name.toLowerCase()) ? '<span class="chip warn">found in the errors</span>' : i.inTarget ? '<span class="muted small">in ' + esc(cur.promotion.to || 'the target') + ' already</span>' : '') + '</label>'; }).join('')) +
+      '</div><div class="bmf"><span class="chip info">' + n + ' chosen</span><span class="spacer"></span><button class="btn secondary" data-a="borrowClose">Cancel</button><button class="btn primary" data-a="borrowAdd"' + (n ? '' : ' disabled') + '>Add ' + n + ' to pre-check</button></div></div>';
+  }
+
   function precheckView(cur) {
     const pc = cur.precheck;
     const ready = cur.plan.ready.length + Object.values(cur.state.files).filter(e => e.state === 'uploaded' || e.state === 'copado').length;
@@ -95,7 +138,7 @@
         '<div class="sect">Files</div><div class="usedlist">' + pc.used.map(u => '<button class="usedrow" data-sel="' + esc(u.rel) + '" data-go="Files"><span class="okc">' + I.check + '</span><span class="grow"><b>' + esc(base(u.rel)) + '</b><small>' + esc(u.from) + '</small></span></button>').join('') +
         pc.leftOut.map(u => '<button class="usedrow off" data-sel="' + esc(u.rel) + '" data-go="Files"><span class="muted">' + I.dot + '</span><span class="grow"><b>' + esc(base(u.rel)) + '</b><small>left out \u2013 ' + esc(u.reason) + '</small></span></button>').join('') + '</div>' +
         '<div class="muted small" style="margin-top:6px">Everything else in the promotion comes from ' + esc((pc.branches || []).join(', ') || 'the stories\u2019 branches') + '.</div></div>' +
-      '<div>' + (r ? (r.success ? '<div class="pcok">' + I.check + '<span>No errors' + (pc.target && pc.target.tests ? ', all tests passed' : '') + '.</span></div>'
+      '<div>' + borrowCards(cur, pc) + (r ? (r.success ? '<div class="pcok">' + I.check + '<span>No errors' + (pc.target && pc.target.tests ? ', all tests passed' : '') + '.</span></div>'
         : '<div class="sect">' + (r.cliError ? 'Salesforce could not validate' : plural(problems, 'error')) + '</div>' +
           (r.cliError ? '<div class="card bad"><div>' + esc(r.cliError) + '</div></div>' : '') +
           '<div class="errs">' + r.failures.map(f => '<div class="err"><div class="errh"><b>' + esc(f.type + ' ' + f.fullName) + '</b>' + (f.line ? ' <span class="muted">line ' + f.line + '</span>' : '') + '<span class="spacer"></span>' +
@@ -196,26 +239,16 @@
     const held = (cur.plan.held || []).find(x => x.rel === rel);
     const L = e.labels || {}, S = sides(cur);
     let body = '';
-    if (e.state === 'review' && e.clashes && e.clashes.length) {
-      const ch = ui.choices[rel] || {};
-      body += e.clashes.map((c, i) => '<div class="clash"><div class="what">' + esc(c.where || c.tag) + (c.label ? ' \u203a ' + esc(c.label) : '') + ' \u203a ' + esc(c.tag) + '</div><div class="sides">' +
-        '<div class="side ' + (ch[i] === 'target' ? 'pick' : '') + '" data-choose="' + i + '" data-side="target"><div class="lbl"><span class="radio"></span>' + esc(S.ours) + (L.ours ? ' (' + esc(L.ours) + ')' : '') + '</div><span class="mono">' + esc(c.target) + '</span></div>' +
-        '<div class="side ' + ((ch[i] || 'incoming') === 'incoming' ? 'pick' : '') + '" data-choose="' + i + '" data-side="incoming"><div class="lbl"><span class="radio"></span>' + esc(S.theirs) + (L.theirs ? ' (' + esc(L.theirs) + ')' : '') + '</div><span class="mono">' + esc(c.incoming) + '</span></div></div>' +
-        '<div class="muted" style="margin-top:8px;font-size:12px">Changed on both sides' + (e.hasBase ? ' since the common ancestor' : '') + ' \u2013 pick the value to keep.</div></div>').join('');
-    } else {
-      if (why.length) body += '<div class="card bad"><h3>' + I.warn + (inCopado ? 'Copado will trip on this resolution' : 'Found in Copado\u2019s latest run') + '</h3>' + why.slice(0, 6).map(w => '<div class="mono why">' + esc(w) + '</div>').join('') +
-        (inCopado ? '<div class="muted" style="margin-top:8px">Edit again fetches the resolution as it is in Copado; uploading replaces it there. Then tick Re-create promotion branch so Copado uses it.</div>' : '') + '</div>';
-      body += '<div class="card"><h3>' + I.sparkles + 'What happened</h3>' + esc(explain(e)) + '</div>';
-    }
+    if (why.length) body += '<div class="card bad"><h3>' + I.warn + (inCopado ? 'Copado will trip on this resolution' : 'Found in Copado\u2019s latest run') + '</h3>' + why.slice(0, 6).map(w => '<div class="mono why">' + esc(w) + '</div>').join('') +
+      (inCopado ? '<div class="muted" style="margin-top:8px">Edit again fetches the resolution as it is in Copado; uploading replaces it there. Then tick Re-create promotion branch so Copado uses it.</div>' : '') + '</div>';
+    body += '<div class="card"><h3>' + I.sparkles + 'What happened</h3>' + esc(explain(e)) + '</div>';
     body += '<div class="card"><h3>' + I.info + 'Details</h3><div class="kv"><span class="k">' + esc(S.ours) + '</span><span title="What the target environment has - Copado made the promotion branch from it">' + esc(L.ours || '\u2014') + '</span><span class="k">' + esc(S.theirs) + '</span><span>' + esc(L.theirs || '\u2014') +
       '</span><span class="k">Your resolution</span><span>becomes the promotion branch\u2019s file when you upload it' +
-      '</span><span class="k">Merge</span><span>' + (e.kind === 'xml' ? (e.hasBase ? 'three-way, with the common ancestor' : 'two-way') : 'code blocks') + '</span><span class="k">Checks</span><span>' +
+      '</span><span class="k">From</span><span>' + 'Copado\u2019s conflict file' + '</span><span class="k">Checks</span><span>' +
       (held ? '<span style="color:var(--vscode-charts-red)">' + I.x + ' ' + esc(held.reason) + '</span>' : g === 'ready' || g === 'done' ? '<span style="color:var(--vscode-charts-green)">' + I.check + ' ready to upload</span>' : '\u2014') + '</span></div></div>';
     const btns = inCopado ? '<button class="btn ' + (why.length ? 'primary' : 'secondary') + '" data-a="revise" title="Fetch the resolution as it is in Copado and change it - uploading replaces it there">' + I.code + 'Edit again</button>'
       : e.revising ? '<button class="btn primary" data-a="review">' + I.code + 'Open the file</button>'
       : e.state === 'review' && e.suggestion ? '<button class="btn primary" data-a="accept" title="Use the suggested merge as your resolution">' + I.check + 'Accept the suggestion</button><button class="btn secondary" data-a="review">' + I.merge + 'Review in merge</button>'
-      : e.state === 'review' && e.clashes && e.clashes.length
-      ? '<button class="btn primary" data-a="choose">' + I.check + 'Accept choices</button><button class="btn secondary" data-a="review">' + I.merge + 'Open in merge</button>'
       : e.state === 'code' || e.state === 'error' ? '<button class="btn primary" data-a="review">' + I.code + 'Resolve in editor</button>'
       : '<button class="btn secondary" data-a="review">' + I.merge + 'Review in merge</button>' + (e.state === 'auto' ? '<button class="btn ghost" data-a="accept">' + I.check + 'Accept</button>' : '');
     return '<div class="detail"><div class="grow-area"><h2>' + (e.kind === 'code' ? I.code : I.file) + esc(base(rel)) + ' <span class="chip ' + chipKind + '">' + esc(chipText) + '</span></h2>' +
@@ -622,7 +655,7 @@
   };
 
   app.addEventListener('click', ev => {
-    const t = ev.target.closest('[data-a],[data-sel],[data-tab],[data-tool],[data-choose],[data-nav],[data-l],[data-m],[data-c],[data-cpick],[data-cmore],[data-ctopen],[data-ctype],[data-ctclear]');
+    const t = ev.target.closest('[data-a],[data-sel],[data-tab],[data-tool],[data-nav],[data-l],[data-m],[data-c],[data-cpick],[data-cmore],[data-ctopen],[data-ctype],[data-ctclear]');
     // a click outside an open list closes it
     if ((ui.copen || ui.ctopen) && !ev.target.closest('.cbox')) { ui.copen = null; ui.cq = {}; ui.ctopen = false; if (!t) { render(); return; } }
     if (!t) return;
@@ -646,7 +679,6 @@
     }
     if (t.dataset.sel) { ui.sel = t.dataset.sel; if (t.dataset.go) ui.tab = t.dataset.go; keep(); return render(); }
     if (t.dataset.tab) { ui.tab = t.dataset.tab; keep(); return render(); }
-    if (t.dataset.choose != null) { const m = ui.choices[ui.sel] = ui.choices[ui.sel] || {}; m[t.dataset.choose] = t.dataset.side; keep(); return render(); }
     const a = t.dataset.a, rel = ui.sel;
     if (a === 'precheck') { ui.tab = 'Pre-check'; keep(); render(); }
     if (a === 'open') return openRef();
@@ -659,19 +691,32 @@
     if (a === 'toggleRecreate') { ui.setRecreate = !ui.setRecreate; return render(); }
     if (a === 'earlier') { ui.earlier = !ui.earlier; return render(); }
     if (a === 'compFilter') { ui.compFilter = t.dataset.v; return render(); }
+    if (a === 'borrow') { const miss = (data.current.precheck || {}).missing || []; return act('borrow', { items: miss.filter(m => (ui.bsel || {})[bkey(m)] !== false).map(m => ({ type: m.type, name: m.name })) }); }
+    if (a === 'borrowPick') { ui.bpick = true; ui.bchosen = {}; ui.bq = ''; render(); return act('borrowList', { type: ui.btype || 'CustomField', q: '' }); }
+    if (a === 'borrowClose') { ui.bpick = false; return render(); }
+    if (a === 'borrowAdd') { const items = Object.keys(ui.bchosen || {}).map(k => ({ type: k.slice(0, k.indexOf(':')), name: k.slice(k.indexOf(':') + 1) })); ui.bpick = false; render(); return act('borrow', { items }); }
+    if (a === 'unborrow') return act('unborrow', { key: t.dataset.key });
+    if (a === 'unborrowAll') return act('unborrowAll');
     if (a === 'compFold') { ui.compFold = Object.assign({}, ui.compFold, { [t.dataset.v]: !(ui.compFold || {})[t.dataset.v] }); return render(); }
     if (a === 'recreate') return act('recreate', { value: t.dataset.value === '1' });
     if (a === 'revise') { if (t.dataset.rel) { ui.sel = t.dataset.rel; ui.tab = 'Files'; keep(); render(); } return act('revise', { rel: t.dataset.rel || rel }); }
-    if (a === 'choose') {
-      const e = data.current.state.files[rel], m = Object.assign({}, ui.choices[rel] || {});
-      (e.clashes || []).forEach((c, i) => { if (!m[i]) m[i] = 'incoming'; });
-      return act('choose', { rel, choices: m });
-    }
+
     if (a === 'home') { ui.sel = null; ui.modal = false; ui.tab = 'Files'; keep(); render(); return act('home'); }
     act(a, { rel });
   });
   document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && ui.modal) { ui.modal = false; render(); } });
 
+  // borrowing: the boxes, and the picker's type and search
+  document.addEventListener('change', e => {
+    const x = e.target;
+    if (x.dataset && x.dataset.bsel) { ui.bsel = Object.assign({}, ui.bsel, { [x.dataset.bsel]: x.checked }); return render(); }
+    if (x.dataset && x.dataset.bpick) { const c = Object.assign({}, ui.bchosen); if (x.checked) c[x.dataset.bpick] = true; else delete c[x.dataset.bpick]; ui.bchosen = c; return render(); }
+    if (x.id === 'btype') { ui.btype = x.value; render(); act('borrowList', { type: x.value, q: ui.bq || '' }); }
+  });
+  document.addEventListener('input', e => {
+    if (e.target.id !== 'bq') return;
+    ui.bq = e.target.value; clearTimeout(ui.bqT); ui.bqT = setTimeout(() => act('borrowList', { type: ui.btype || 'CustomField', q: ui.bq }), 250);
+  });
   window.addEventListener('message', ev => {
     const m = ev.data || {};
     if (m.type === 'state') {

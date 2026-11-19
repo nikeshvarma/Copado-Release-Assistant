@@ -32,7 +32,7 @@ async function run(o, script, opts) {
   await p.exposeFunction('__toHost', async m => {
     sent.push(m);
     const reply = r => p.evaluate(r => window.postMessage(r, '*'), r);
-    if (m.type === 'ready') await reply({ type: 'init', title: (o.plain ? 'Compare' : 'Merge') + ' \u00b7 ' + o.file, labels: o.labels, theirs: o.theirs, short: o.short, mode: 'order', text, savedText: o.savedText || null, starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, language: o.language || 'xml', plain: !!o.plain, tidy: !o.language && require('../src/mergeStart').ADDITIVE.has(o.typeName), marks: MP.marksFor(o, text, 'order'), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
+    if (m.type === 'ready') await reply({ type: 'init', title: (o.plain ? 'Compare' : 'Merge') + ' \u00b7 ' + o.file, labels: o.labels, theirs: o.theirs, short: o.short, mode: 'order', text, savedText: o.savedText || null, starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, language: o.language || 'xml', plain: !!o.plain, gitLabels: o.gitLabels || null, tidy: !o.language && require('../src/mergeStart').ADDITIVE.has(o.typeName), marks: MP.marksFor(o, text, 'order'), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
     // VS Code's clipboard, as the extension answers it
     else if (m.type === 'clipboard') state.clip = m.text;
     else if (m.type === 'paste') {
@@ -63,7 +63,7 @@ async function run(o, script, opts) {
   });
   await p.addInitScript(() => { window.acquireVsCodeApi = () => ({ postMessage: m => window.__toHost(m), setState() {}, getState() { return null; } }); });
   await p.goto('file://' + file);
-  await p.waitForFunction(() => document.querySelectorAll('.monaco-editor').length === 2 && document.querySelector('#chips').textContent, null, { timeout: 30000 });
+  await p.waitForFunction(() => document.querySelectorAll('.monaco-editor').length === 3 && document.querySelector('#chips').textContent, null, { timeout: 30000 });
   await p.waitForTimeout(400);
   const out = await script(p, { sent, errors, text: () => text, state, clip: () => state.clip, setClip: t => { state.clip = t; } });
   await b.close();

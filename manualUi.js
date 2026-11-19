@@ -2,7 +2,7 @@
 
 /**
  * The page's Manual tab - always there, with or without Copado access: two versions pasted, dropped or chosen,
- * merged in the merge editor; a package from a Copado commit file. Merge in Release Assistant opens it with a file.
+ * compared side by side; a package from a Copado commit file. Compare in Release Assistant opens it with a file.
  * The texts stay here; the page gets what each is (its type, its lines, valid or not) and its first lines.
  */
 const vscode = require('vscode');
@@ -108,7 +108,7 @@ async function packageFromCommit() {
   await deps.generatePackage([f]);
 }
 
-/** Merge in Release Assistant: the Manual tab, with this file as the target. */
+/** Compare in Release Assistant: the Manual tab, with this file as the target. */
 async function mergeWith(uri) {
   if (uri && uri.fsPath) sides.target = { name: path.basename(uri.fsPath), text: Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8') };
   changed.fire();
