@@ -36,16 +36,4 @@ function decodeFileName(fileName) {
   return { type: mm[1], name: mm[2], hash: Buffer.from(text, 'utf8').toString('base64'), copy };
 }
 
-/** The hash Copado would use for a component. */
-function hashFor(type, name) {
-  return Buffer.from(type + ':' + name, 'utf8').toString('base64');
-}
-
-/** The root element of an XML document, or null. */
-function rootOf(text) {
-  const s = String(text).replace(/^\uFEFF/, '').replace(/<\?[\s\S]*?\?>/g, '').replace(/<!--[\s\S]*?-->/g, '');
-  const m = /<([A-Za-z_][\w.:-]*)/.exec(s);
-  return m ? m[1].replace(/^.*:/, '') : null;
-}
-
-module.exports = { decodeFileName, hashFor, rootOf };
+module.exports = { decodeFileName };

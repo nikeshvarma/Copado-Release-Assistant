@@ -1,8 +1,8 @@
 {
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
-  "description": "Copado release work for Salesforce metadata: resolve promotion conflicts, validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
-  "version": "3.10.2",
+  "description": "Copado release work for Salesforce metadata and code: resolve promotion conflicts - metadata element by element, Apex and Lightning web components by member - validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
+  "version": "3.16.5",
   "publisher": "nikeshvarma",
   "license": "MIT",
   "repository": {
@@ -35,7 +35,9 @@
     "package.xml",
     "validation",
     "three-way",
-    "sfdx"
+    "sfdx",
+    "apex",
+    "lwc"
   ],
   "main": "./extension.js",
   "activationEvents": [
@@ -190,6 +192,11 @@
         "command": "cmr.manual.mergeWith",
         "title": "Merge in Release Assistant…",
         "category": "Copado"
+      },
+      {
+        "command": "cmr.storage.clean",
+        "title": "Clean Working Files",
+        "category": "Copado Release Assistant"
       }
     ],
     "menus": {
@@ -386,6 +393,12 @@
             "default": ".copado",
             "order": 3,
             "markdownDescription": "The extension's own working folder, inside the project: merge views, branch versions and the retrieve-only manifest. It contains a `.gitignore` of `*`, so nothing in it is ever committed and your project's `.gitignore` is left alone. Never use a package directory such as `force-app`."
+          },
+          "cmr.storage.keepDays": {
+            "type": "number",
+            "default": 14,
+            "minimum": 0,
+            "markdownDescription": "Working files the extension fetched - branch comparisons, promotion files, manual merges, reports - are removed by themselves once nothing in them has changed for this many days. Never the open merge’s, nor a promotion’s with resolutions not uploaded to Copado yet. `0`: never; **Clean Working Files** empties it all at once."
           }
         }
       },
@@ -422,7 +435,7 @@
               "merged"
             ],
             "enumDescriptions": [
-              "The merged result for permission sets, profiles, labels, translations and objects - files often retrieved in part, where an entry the feature branch lacks is not a removal; the feature branch's file for everything else (pages, layouts, flows...), so its removals count.",
+              "The merged result for permission sets, profiles, labels and translations - files often retrieved in part, where an entry the feature branch lacks is not a removal; the feature branch's file for everything else (objects, pages, layouts, flows, code...), so its removals count.",
               "The feature branch's file as it is.",
               "The target branch's file as it is.",
               "Both branches combined: nothing of the target is dropped."
@@ -468,6 +481,40 @@
             "default": "first",
             "description": "Which occurrence survives when duplicates are removed.",
             "order": 7
+          },
+          "cmr.merge.useAncestor": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "markdownDescription": "For **metadata**: use the common ancestor when it is known - Copado’s own, or the merge-base of the feature branch and the destination branch from the connected repository - so the merge editor marks what each branch did since. Code needs none: Copado’s conflict file is git’s merge, made with it."
+          },
+          "cmr.merge.codeIn": {
+            "type": "string",
+            "enum": [
+              "mergeEditor",
+              "vscode"
+            ],
+            "default": "mergeEditor",
+            "order": 6,
+            "enumDescriptions": [
+              "The merge editor: Copado’s conflict file as git merged it - each conflict shown both ways, Accept target, Accept feature or Accept both; the markers never shown.",
+              "VS Code’s own conflict view, with Accept Current, Incoming or Both."
+            ],
+            "markdownDescription": "Where a promotion’s **code** conflicts open - Apex, JavaScript, a component’s template, CSS, Visualforce and Aura."
+          },
+          "cmr.merge.codeView": {
+            "type": "string",
+            "enum": [
+              "onePane",
+              "twoPanes"
+            ],
+            "default": "onePane",
+            "order": 7,
+            "enumDescriptions": [
+              "One panel: your resolution - Copado’s conflict file, its conflicts marked.",
+              "Two panel: the target beside your resolution, the same conflicts over it."
+            ],
+            "markdownDescription": "How the merge editor shows **code**. Switch it in the editor’s **View** menu – that changes this setting. Metadata is always shown in two panels."
           }
         }
       },

@@ -15,14 +15,17 @@ let panel = null;
 let ui = null;
 let life = null;
 let manual = null;
+let compare = null;
 let ctx = null;
 
-function activate(context, promotionUi, lifecycleUi, cmd, manualUi) {
+function activate(context, promotionUi, lifecycleUi, cmd, manualUi, compareUi) {
   ui = promotionUi;
   life = lifecycleUi;
   manual = manualUi || null;
   ctx = context;
   if (manual) manual.onChange(() => push());
+  compare = compareUi || null;
+  if (compare) compare.onChange(() => push());
   cmd('cmr.page.open', () => show());
   ui.onChange(() => push());
   if (life) life.onChange(() => push());
@@ -56,6 +59,7 @@ async function push(extra) {
     const data = await ui.snapshot();
     if (life) data.life = life.snapshot();
     if (manual) data.manual = manual.snapshot();
+    if (compare) data.compare = compare.snapshot();
     panel.webview.postMessage(Object.assign({ type: 'state', data }, extra || {}));
   } catch (e) { /* the page will ask again */ }
 }
@@ -82,6 +86,7 @@ async function onMessage(m) {
       if (panel) panel.webview.postMessage({ type: 'nav', nav: 'Promotions' });
     } else if (m.scope === 'life') await life.act(m.name, m.payload || {});
     else if (m.scope === 'manual' && manual) await manual.act(m.name, m.payload || {});
+    else if (m.scope === 'compare' && compare) await compare.act(m.name, m.payload || {});
     else await ui.act(m.name, m.payload || {});
   } catch (e) {
     vscode.window.showErrorMessage(e && e.message ? e.message : String(e));

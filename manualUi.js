@@ -6,6 +6,7 @@
  * The texts stay here; the page gets what each is (its type, its lines, valid or not) and its first lines.
  */
 const vscode = require('vscode');
+const fs = require('fs');
 const path = require('path');
 const X = require('./src/xmlParser');
 
@@ -51,6 +52,7 @@ async function act(name, p) {
     case 'manual.dropUri': { const u = vscode.Uri.parse(String(o.uri)); sides[side] = { name: path.basename(u.fsPath), text: Buffer.from(await vscode.workspace.fs.readFile(u)).toString('utf8') }; break; }
     case 'manual.pick': { const f = await pickFile({ 'Metadata XML': ['xml'], 'All files': ['*'] }, side === 'target' ? 'The target - keeps everything' : 'The incoming version - merged in'); if (f) sides[side] = f; break; }
     case 'manual.clear': sides[side] = null; break;
+    case 'manual.clearBoth': sides.target = null; sides.incoming = null; break;
     case 'manual.swap': { const t = sides.target; sides.target = sides.incoming; sides.incoming = t; break; }
     case 'manual.merge': await merge(); break;
     case 'manual.again': if (last && last.target && last.incoming) { sides.target = last.target; sides.incoming = last.incoming; await merge(); } break;
@@ -71,7 +73,12 @@ async function merge() {
     const d = describe(sides[s].name, sides[s].text);
     if (!d.valid) { vscode.window.showWarningMessage('The ' + (s === 'target' ? 'target' : 'incoming version') + ' is not valid XML: ' + d.problem); return; }
   }
-  const dir = await deps.storageDir('manual');
+  // a folder of its own for these two versions: another pair can never be read in their place - VS Code keeps a file
+  // it has opened in memory - and unsaved changes come back only for the very same two
+  const fingerprint = require('crypto').createHash('sha1').update(sides.target.text + '\u0000' + sides.incoming.text).digest('hex').slice(0, 12);
+  const root = await deps.storageDir('manual');
+  const dir = vscode.Uri.joinPath(root, fingerprint);
+  prune(root.fsPath, fingerprint);
   const type = describe(null, sides.target.text).type || 'metadata';
   // the file's own name - the merge editor's tab says it - or one from the type for pasted text
   const base = sides.target.name ? sides.target.name.replace(/[^\w .%()-]+/g, '_').replace(/^(?!.*\.xml$)(.*)$/i, '$1.xml') : type + '-meta.xml';
@@ -80,7 +87,16 @@ async function merge() {
   await vscode.workspace.fs.writeFile(i, Buffer.from(sides.incoming.text, 'utf8'));
   last = { type, at: new Date().toISOString(), target: sides.target, incoming: sides.incoming };
   await deps.startSession(t, i, null, { manual: true, applyOnSave: false, openAfterApply: false, theirs: 'the incoming version',
-    labels: { target: 'Target', incoming: 'Incoming', merged: 'Result' } });
+    labels: { target: 'Target', incoming: 'Incoming', merged: 'Incoming' } });
+}
+
+/** Earlier merges' folders: the ten most recent kept, the rest removed. */
+function prune(root, keep) {
+  try {
+    const dirs = fs.readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory() && /^[0-9a-f]{12}$/.test(d.name) && d.name !== keep)
+      .map(d => ({ d: path.join(root, d.name), t: fs.statSync(path.join(root, d.name)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const x of dirs.slice(9)) fs.rmSync(x.d, { recursive: true, force: true });
+  } catch (e) { /* nothing to prune */ }
 }
 
 /** package.xml from a pasted or chosen Copado commit file, the same way as from the right-click. */

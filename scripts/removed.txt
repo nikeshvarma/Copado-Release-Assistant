@@ -28,3 +28,4 @@ scripts/readme-images.js
 src/drift.js
 src/liveMarks.js
 treeView.js
+src/quickPair.js

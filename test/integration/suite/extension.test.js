@@ -76,17 +76,17 @@ test('Merge in Release Assistant opens the page on its Manual tab, with the file
   assert.deepStrictEqual([snap.show, snap.target && snap.target.name, snap.target && snap.target.type, snap.target && snap.target.valid], [true, 'resolution.xml', 'PermissionSet', true]);
 });
 
-test('a manual merge opens the merge editor on the two versions merged; closing its tab ends the merge', async () => {
+test('the Manual tab compares: the two versions side by side, nothing merged; closing its tab ends it', async () => {
   const manual = (await vscode.extensions.getExtension(ID).activate()).manualUi;   // the extension's own module
   const feature = fs.readFileSync(path.join(root(), 'conflict', 'metadata', 'feature.xml'), 'utf8');
   await manual.act('manual.set', { side: 'incoming', text: feature, name: 'feature.xml' });
   await manual.act('manual.merge');
-  const tab = await until(() => editorTabs()[0], 'the merge editor', 30000);
-  assert.ok(/Merge \u00b7 resolution\.xml/.test(tab.label), tab.label);
-  // a permission set starts from the merged result: both versions' entries
-  const text = await until(mergedFile, 'the merged file');
-  assert.ok(text.includes('From_Feature_Class'), 'the incoming entry was added');
-  assert.ok(text.includes('Resolution_Only_Class'), 'the target kept everything');
+  const tab = await until(() => editorTabs()[0], 'the comparison', 30000);
+  assert.ok(/Compare \u00b7 resolution\.xml/.test(tab.label), tab.label);
+  // a comparison merges nothing: the incoming version as it is, the target's entries not added to it
+  const text = await until(mergedFile, 'the incoming side');
+  assert.ok(text.includes('From_Feature_Class'), 'the incoming version');
+  assert.ok(!text.includes('Resolution_Only_Class'), 'nothing of the target merged in');
   await vscode.window.tabGroups.close(tab);
-  await until(() => !editorTabs().length, 'the merge editor to close');
+  await until(() => !editorTabs().length, 'the comparison to close');
 });

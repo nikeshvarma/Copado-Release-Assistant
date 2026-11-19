@@ -431,3 +431,48 @@ button.crow { cursor: pointer; } button.crow:hover { background: var(--vscode-li
 .cst.info { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); } .cst.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
 .cst.grey { color: var(--muted); background: color-mix(in srgb, var(--vscode-foreground) 9%, transparent); }
 .cgo { justify-self: end; color: var(--muted); } .cgo svg { width: 13px; height: 13px; display: block; }
+
+/* Compare: two branches, the files that differ */
+.csub { margin: -4px 0 12px; }
+.cbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; flex-wrap: wrap; }
+.cpick { display: inline-flex; align-items: center; gap: 8px; }
+.cpick select { min-width: 220px; padding: 4px 8px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--line)); border-radius: 4px; font: 12.5px var(--vscode-editor-font-family, monospace); }
+.cerr { padding: 10px 14px; color: var(--vscode-errorForeground); margin-top: 10px; }
+.cempty { display: flex; align-items: center; gap: 12px; padding: 14px; }
+.csum { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; flex-wrap: wrap; }
+.cfilter { width: 240px; padding: 4px 10px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--line)); border-radius: 4px; }
+.cgroup { margin-top: 10px; }
+.cgh { font-weight: 600; padding: 4px 2px; }
+.crow2 { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel, transparent); margin-top: 6px; }
+.crow2 .ck { width: 92px; flex: none; }
+.crow2 .cn { font-size: 12.5px; }
+.chip.warn { color: var(--warn); }
+
+/* a branch picker that searches */
+.cbox { position: relative; display: inline-block; }
+.cq { width: 260px; padding: 4px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--line)); border-radius: 4px; font-size: 12.5px; }
+.cq:focus { outline: 1px solid var(--vscode-focusBorder); }
+.clist { position: absolute; left: 0; top: calc(100% + 2px); z-index: 20; width: 100%; min-width: 260px; max-height: 320px; overflow-y: auto; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, var(--line)); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.copt { padding: 4px 10px; font-size: 12.5px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.copt:hover { background: var(--vscode-list-hoverBackground); } .copt.on { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.cmore { padding: 4px 10px; font-size: 12px; }
+.csect { font-weight: 700; margin: 18px 2px 2px; font-size: 13.5px; }
+.cpage { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+
+/* Compare: one chip, icon and button style throughout */
+.ichip { display: inline-flex; align-items: center; gap: 4px; }
+.ichip svg { width: 12px; height: 12px; }
+.cbox > svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; opacity: .7; pointer-events: none; }
+.cbox .cq { padding-left: 27px; }
+.csearch { position: relative; display: inline-flex; align-items: center; }
+.csearch > svg { position: absolute; left: 8px; width: 13px; height: 13px; opacity: .7; pointer-events: none; }
+.csearch .cfilter { padding-left: 27px; }
+.cgh { display: flex; align-items: center; gap: 6px; } .cgh svg { width: 14px; height: 14px; opacity: .85; }
+.crow2 .btn svg, .cbar .btn svg, .cpage .btn svg, .cempty .btn svg { width: 13px; height: 13px; }
+.ctlist { right: 0; left: auto; width: 300px; padding-bottom: 4px; }
+.ctsearch { position: relative; padding: 6px; border-bottom: 1px solid var(--line); }
+.ctsearch svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; opacity: .7; }
+.ctq { width: 100%; padding: 4px 8px 4px 26px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--line)); border-radius: 4px; }
+.ctopt { display: flex; align-items: center; gap: 7px; } .ctopt svg { width: 14px; height: 14px; }
+.cbx { width: 14px; height: 14px; border: 1px solid var(--vscode-checkbox-border, var(--line)); border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; }
+.ctfoot { padding: 4px 10px; border-top: 1px solid var(--line); }

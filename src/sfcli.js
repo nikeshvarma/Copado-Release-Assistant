@@ -358,11 +358,6 @@ function shapeOf(l) {
 /** Symbols at the start of a line that mark a stage's state rather than say anything. */
 const SYMBOLS = /^[\s\u00bb\u221a\u2713\u2714\u2716\u2717\u2718\u00d7\u25a0\u25a1\u25cb\u25cf\u25ef\u25b8\u25ba\u2022\u26a0\u2026]+/;
 
-/** What a frame says in words, ignoring spinners, symbols, numbers and blank lines. */
-function signature(lines) {
-  return lines.filter(l => l.trim()).map(shapeOf).join('\n');
-}
-
 /** "1m 19.83s" -> 79830 */
 function durationMs(text) {
   let ms = 0;
@@ -672,5 +667,5 @@ function walk(v, fn, key, depth) {
 
 module.exports = {
   version, listOrgs, retrieve, validate, restGet, query, describe, resetRest, isMissingCommand, openPath, restPatch, loginFor, httpGet, display, commandFor, escapeArgument,
-  parseJson, parseOrgs, parseDeploy, parseRetrieveText, lineCleaner, reprintFilter, shapeOf, signature, durationMs, orgWaitFrom, deployIdFrom, errorFrom, retrieveArgs, validateArgs
+  parseJson, parseOrgs, parseDeploy, parseRetrieveText, lineCleaner, reprintFilter, shapeOf, durationMs, orgWaitFrom, deployIdFrom, errorFrom, retrieveArgs, validateArgs
 };

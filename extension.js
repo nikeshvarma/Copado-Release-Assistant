@@ -80,12 +80,20 @@ function activate(context) {
   const cmd = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
   cmd('cmr.checkDuplicates', cmdCheckDuplicates);
   cmd('cmr.removeDuplicates', cmdRemoveDuplicates);
+  cmd('cmr.storage.clean', cmdCleanStorage);
+  // old working files removed by themselves: soon after starting, then twice a day (cmr.storage.keepDays)
+  const tidy = () => { try { tidyStorage(); } catch (e) { /* next time */ } };
+  // never what keeps VS Code - or a test - from closing
+  const first = setTimeout(tidy, 30000), again = setInterval(tidy, 12 * 3600000);
+  if (first.unref) first.unref(); if (again.unref) again.unref();
+  context.subscriptions.push({ dispose() { clearTimeout(first); clearInterval(again); } });
   cmd('cmr.format', cmdFormat);
   cmd('cmr.showOrder', cmdShowOrder);
   cmd('cmr.writeWorkspaceSettings', cmdWriteWorkspaceSettings);
   cmd('cmr.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:nikeshvarma.copado-release-assistant'));
 
   require('./release').activate(context, {
+    inUse: fn => busyFns.push(fn),
     output,
     startSession,
     writeTemp,
@@ -162,6 +170,17 @@ function isReferenceCopy(doc) {
   if (!/^(TARGET__|INCOMING__|GIT_TARGET__|GIT_INCOMING__|GIT_ANCESTOR__|A__|B__)/.test(name)) return false;
   const p = doc.uri.fsPath;
   return p.indexOf(storageRoot().fsPath) === 0 || (ctx.globalStorageUri && p.indexOf(ctx.globalStorageUri.fsPath) === 0);
+}
+
+/** Code the merge editor shows in its own language, compared by lines (Apex and JavaScript by their members); null for metadata XML. */
+function codeLanguage(file) {
+  const ext = String(path.extname(file)).toLowerCase();
+  if (ext === '.cls' || ext === '.trigger') return 'apex';
+  if (ext === '.js') return 'javascript';
+  if (ext === '.css') return 'css';
+  // a component's template, a Visualforce page, Aura markup
+  if (['.html', '.page', '.component', '.cmp', '.app', '.evt', '.intf', '.design', '.auradoc', '.tokens'].includes(ext)) return 'html';
+  return null;
 }
 
 function hasMarkers(text) {
@@ -351,7 +370,15 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
   progress.report({ message: 'Merging' + (lines > 5000 ? ' \u2013 a large file, this can take a moment' : '') });
   const eol = targetDoc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
   const e0 = Date.now();
-  const result = await runEngine({
+  // code: no metadata merge - its two sides, compared as you edit; the start is Copado's conflict file, its blocks to choose
+  const language = codeLanguage(targetUri.fsPath);
+  // Manual and Compare: two versions compared, nothing merged. A promotion's code: Copado's conflict file as git merged
+  // it, each conflict block taken out - neither version in until you accept one. A resolution you saved: as it is
+  const plain = !!(so.manual || so.compare);
+  const gitMerge = language && !plain && so.startFrom != null && hasMarkers(so.startFrom) ? require('./src/codeMerge').fromConflictFile(so.startFrom) : null;
+  const result = language ? { ok: true, typeName: null, threeWay: !!ancestorDoc, marks: [], checks: [],
+    report: { added: [], updated: [], auto: [], conflicts: [], deletions: [], duplicates: [], skipped: [] },
+    targetText: targetDoc.getText(), incomingText: incomingDoc.getText(), mergedText: plain ? incomingDoc.getText() : gitMerge ? gitMerge.text : so.startFrom != null && !hasMarkers(so.startFrom) ? so.startFrom : targetDoc.getText() } : await runEngine({
     targetText: targetDoc.getText(),
     incomingText: incomingDoc.getText(),
     ancestorText: ancestorDoc ? ancestorDoc.getText() : null,
@@ -376,7 +403,9 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
   const base = path.basename(targetUri.fsPath);
   // a resolution you saved before is where you left it - not the merge worked out again; otherwise
   // where cmr.merge.startFrom says: nothing is merged behind your back (src/mergeStart.js)
-  const startFrom = so.startFrom != null && String(so.startFrom) !== result.mergedText ? String(so.startFrom) : null;
+  // code: Copado's conflict file is never where you start - it only told where git's blocks were
+  const usable = so.startFrom != null && !(language && hasMarkers(so.startFrom));
+  const startFrom = usable && String(so.startFrom) !== result.mergedText ? String(so.startFrom) : null;
   const starts = { merged: result.mergedText, feature: result.incomingText, target: result.targetText };
   // identical duplicates out of each start, once, here - what merging always does to its result, now also for a
   // start from a branch's file; the merge editor marks what was removed and never removes anything twice
@@ -387,7 +416,7 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
       starts[k] = d.text; dupRemoved[k] = d.removed.length; d.removed.forEach(f => removedDups.add(f));
     }
   }
-  const startKind = so.startFrom != null ? 'saved' : require('./src/mergeStart').startFor(result.typeName, c.mergeStartFrom);
+  const startKind = usable ? 'saved' : plain ? 'feature' : language ? 'merged' : require('./src/mergeStart').startFor(result.typeName, c.mergeStartFrom);
   let initial = startFrom != null ? startFrom : starts[startKind] != null ? starts[startKind] : result.mergedText;
   // unsaved changes this merge was closed with: offered back, once
   const draft = draftOf(so.applyToUri || targetUri);
@@ -432,8 +461,11 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
       reviewed: false
     })),
     checks: result.checks,
-    // your resolution against both branches, worked out as you type (src/liveMarks.js)
-    normTargetText: result.targetText, normIncomingText: result.incomingText, live: null, liveText: null, liveOff: false,
+    language,
+    code: language ? { conflicts: gitMerge ? gitMerge.conflicts : [], reviewed: new Map() } : null,
+    plain,
+    // your resolution against both branches - and their common ancestor, when known - worked out as you type
+    normTargetText: result.targetText, normIncomingText: result.incomingText, ancestorText: ancestorDoc ? ancestorDoc.getText() : null,
     starts, startKind, dupRemoved, removedDups
   };
   session.conflicts.sort((a, b) => a.line - b.line);
@@ -448,7 +480,7 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
   output.appendLine(timingLine(base, result, timing, Date.now() - t0));
 
   const r = result.report;
-  if (!r.added.length && !r.updated.length && !r.conflicts.length && !r.duplicates.length) {
+  if (!language && !plain && !r.added.length && !r.updated.length && !r.conflicts.length && !r.duplicates.length) {
     vscode.window.showInformationMessage('These two files already describe the same metadata. Nothing to merge.');
   }
 }
@@ -580,6 +612,56 @@ function readProjectJson(root) {
   try { return fsSync.readFileSync(path.join(root, 'sfdx-project.json'), 'utf8'); } catch (e) { return ''; }
 }
 
+/**
+ * Clean Working Files: the extension's working folder (.copado by default) emptied - what it holds listed first, and
+ * any promotion whose resolutions are not uploaded yet named. Not while a merge is open; its .gitignore stays.
+ */
+async function cmdCleanStorage() {
+  if (session) { vscode.window.showWarningMessage('Close the merge first - its files are in the working folder.'); return; }
+  const root = storageRoot().fsPath;
+  let entries = [];
+  try { entries = fsSync.readdirSync(root, { withFileTypes: true }).filter(e => e.name !== '.gitignore'); } catch (e) { /* not there */ }
+  const measure = p => { let bytes = 0, files = 0; const walk = d => { for (const e of fsSync.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else { files++; bytes += fsSync.statSync(f).size; } } };
+    try { if (fsSync.statSync(p).isDirectory()) walk(p); else { files = 1; bytes = fsSync.statSync(p).size; } } catch (e) { /* gone */ } return { bytes, files }; };
+  const parts = entries.map(e => Object.assign({ name: e.name }, measure(path.join(root, e.name)))).filter(x => x.files);
+  const rel = path.relative(resolveProject().root || resolveProject().fallback || root, root) || root;
+  if (!parts.length) { vscode.window.showInformationMessage(rel + ' is already empty.'); return; }
+  const size = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
+  // resolutions made here and not uploaded to Copado yet - gone with the folder
+  const pending = [];
+  try {
+    for (const d of fsSync.readdirSync(path.join(root, 'promotions'), { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      try {
+        const st = JSON.parse(fsSync.readFileSync(path.join(root, 'promotions', d.name, 'promotion.json'), 'utf8'));
+        const n = Object.values((st && st.files) || {}).filter(f => f.state === 'resolved').length;
+        if (n) pending.push(d.name + ' (' + n + ')');
+      } catch (e) { /* no state */ }
+    }
+  } catch (e) { /* no promotions */ }
+  const total = parts.reduce((a, x) => a + x.bytes, 0);
+  const go = await vscode.window.showWarningMessage('Empty ' + rel + '? ' + size(total) + ' in ' + parts.map(x => x.name + ' (' + x.files + ' file' + (x.files === 1 ? '' : 's') + ', ' + size(x.bytes) + ')').join(', ') + '.',
+    { modal: true, detail: (pending.length ? 'Resolutions not uploaded to Copado yet will be lost: ' + pending.join(', ') + '. Upload them first, or they are gone.\n\n' : '') +
+      'Everything here is the extension\u2019s own working copies - your project, git and Copado are not touched. Promotions are fetched again when you open them.' }, 'Empty it');
+  if (go !== 'Empty it') return;
+  for (const x of parts) fsSync.rmSync(path.join(root, x.name), { recursive: true, force: true });
+  vscode.window.showInformationMessage('Emptied ' + rel + ' - ' + size(total) + ' removed.');
+}
+
+// what other parts of the extension have open in the working folder - the promotion on the page - kept by tidyStorage
+const busyFns = [];
+/** Working files older than cmr.storage.keepDays removed - never the open merge's, nor a promotion's not uploaded yet. */
+function tidyStorage() {
+  const days = vscode.workspace.getConfiguration('cmr').get('storage.keepDays', 14);
+  const root = storageRoot().fsPath;
+  const open = session ? [session.targetUri, session.incomingUri, session.applyToUri].filter(Boolean).map(u => u.fsPath) : [];
+  const inUse = open.concat(...busyFns.map(fn => { try { return fn() || []; } catch (e) { return []; } }));
+  const busy = p => inUse.some(f => f === p || f.startsWith(p + path.sep) || p.startsWith(f + path.sep));
+  const removed = require('./src/retention').prune(root, { days, busy });
+  if (removed.length) output.appendLine('Working files older than ' + days + ' days removed: ' + removed.join(', '));
+  return removed;
+}
+
 async function storageDir(sub) {
   const root = storageRoot();
   await vscode.workspace.fs.createDirectory(root);
@@ -632,13 +714,18 @@ function openMergePanel(startText, so) {
     file: path.basename(s.targetUri.fsPath),
     labels: { target: s.labels.target, merged: s.labels.merged || 'Your resolution' },
     theirs, short, typeName: s.typeName,
-    target: s.normTargetText, incoming: s.normIncomingText || '', text: startText,
-    savedText: so.startFrom != null ? String(so.startFrom) : null,
+    target: s.normTargetText, incoming: s.normIncomingText || '', text: startText, language: s.language || null, code: s.code || null, plain: !!s.plain,
+    // code in one pane or two: cmr.merge.codeView - the switch in the editor's \u22ef writes it
+    codeView: vscode.workspace.getConfiguration('cmr').get('merge.codeView', 'onePane'),
+    setCodeView: v => vscode.workspace.getConfiguration('cmr').update('merge.codeView', v, vscode.ConfigurationTarget.Global).then(() => {}, () => {}),
+    // the common ancestor, when known: what each branch did since - unless turned off (cmr.merge.useAncestor)
+    ancestor: s.ancestorText && vscode.workspace.getConfiguration('cmr').get('merge.useAncestor', true) !== false ? s.ancestorText : null,
+    savedText: so.startFrom != null && !(s.language && hasMarkers(so.startFrom)) ? String(so.startFrom) : null,
     applyOnly: !s.applyOnSave,
     starts: s.starts, start: s.startKind, dupRemoved: s.dupRemoved, removedDups: s.removedDups,
     hideIdentical: vscode.workspace.getConfiguration('cmr').get('merge.hideIdentical', false),
     onPref: p => vscode.workspace.getConfiguration('cmr').update('merge.hideIdentical', !!p.hideIdentical, vscode.ConfigurationTarget.Global),
-    conflictsFor,
+    conflictsFor: s.plain ? null : conflictsFor,
     onText: text => { if (session === s) s.panelText = text; },
     save: async (text, close) => {
       if (session !== s) return { ok: false, message: 'This merge has ended.' };
@@ -654,11 +741,38 @@ function openMergePanel(startText, so) {
       if (go === 'Discard') await cmdCancelMerge();
     },
     report: async () => { await cmdCopyReport(); return null; },
+    // Remove Duplicate Entries, in the editor: as the command does it - the same rule for which one stays, the same
+    // question first when duplicates differ
+    dedupe: async text => {
+      const c = cfg();
+      const parsed = X.parse(String(text));
+      if (!parsed.root || (parsed.errors && parsed.errors.length)) return { error: 'Not valid XML - fix it first' };
+      const findings = findDuplicates(parsed, { warnRepeatedSingletons: c.warnSingletons }).filter(f => f.kind !== 'duplicate-single');
+      if (!findings.length) return { note: 'No duplicate entries to remove.' };
+      const risky = findings.filter(f => !f.identical);
+      if (risky.length) {
+        const go = await vscode.window.showWarningMessage(risky.length + ' of ' + findings.length + ' duplicates have the same key but different values. Keeping the ' + c.keep + ' occurrence will discard the other. Continue?', { modal: true }, 'Remove duplicates');
+        if (go !== 'Remove duplicates') return { note: 'Nothing removed.' };
+      }
+      let out = String(text);
+      for (const r of dedupeEdits(parsed, findings, c.keep).sort((a, b) => b.start - a.start)) out = out.slice(0, r.start) + out.slice(r.end);
+      return { text: out, note: 'Removed ' + findings.length + ' duplicate ' + (findings.length === 1 ? 'entry' : 'entries') + ' \u2013 Ctrl+Z undoes it.' };
+    },
+    // \u22ef \u203a Format and Order Metadata: Salesforce's own order, as Format Document - duplicates are left for the editor to show
+    format: text => {
+      const parsed = X.parse(String(text));
+      if (!parsed.root || (parsed.errors && parsed.errors.length)) return { error: 'Not valid XML - fix it first: ' + ((parsed.errors && parsed.errors[0] && parsed.errors[0].message) || 'no root element') };
+      const c = cfg();
+      const out = formatter.format(parsed, formatOptions(c, /\r\n/.test(text) ? '\r\n' : '\n', { removeDuplicates: false, keep: c.keep }));
+      return out == null ? { error: 'This file cannot be formatted' } : { text: out };
+    },
     swap: async () => { await cmdSwapDirection(); return null; },
     // a manual merge's ways out: copied to paste into Copado, or saved as a file
     copyResult: async text => { await vscode.env.clipboard.writeText(text); return { ok: true, message: 'Copied \u2013 paste it into Copado\u2019s resolution and save it there' }; },
-    saveAs: async text => {
-      const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(s.targetUri, '..', 'resolved-' + path.basename(s.targetUri.fsPath)), filters: { 'Metadata XML': ['xml'] } });
+    // a file of either side: in a comparison, each side is yours to save
+    saveAs: async (text, side) => {
+      const name = s.plain ? (side === 'left' ? (s.labels.target || 'left') : (s.labels.incoming || 'right')).replace(/[^\w.-]+/g, '_') + '-' + path.basename(s.targetUri.fsPath) : 'resolved-' + path.basename(s.targetUri.fsPath);
+      const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(s.targetUri, '..', name), filters: { 'Metadata XML': ['xml'] } });
       if (!to) return null;
       await vscode.workspace.fs.writeFile(to, Buffer.from(text, 'utf8'));
       return { ok: true, message: 'Saved as ' + path.basename(to.fsPath) };
@@ -908,10 +1022,15 @@ async function saveIntoResolution() {
   const text = await mergedText();
   await keepDraft(session.applyToUri || session.targetUri, null);
   const notes = [];
-  const parsed = X.parse(text);
-  if (parsed.errors.length) notes.push(parsed.errors.length + ' XML problem' + (parsed.errors.length === 1 ? '' : 's'));
-  if (checksFor(text).some(v => v.severity === 'error')) notes.push('a deploy check would fail');
-  if (findDuplicates(parsed, { warnRepeatedSingletons: true }).length) notes.push('duplicate entries');
+  if (session.language) {
+    const problems = require('./src/codeChecks').problems(text, session.language).filter(p => p.severity === 'error');
+    if (problems.length) notes.push(problems.length + ' problem' + (problems.length === 1 ? '' : 's') + ' (' + problems[0].message + ')');
+  } else {
+    const parsed = X.parse(text);
+    if (parsed.errors.length) notes.push(parsed.errors.length + ' XML problem' + (parsed.errors.length === 1 ? '' : 's'));
+    if (checksFor(text).some(v => v.severity === 'error')) notes.push('a deploy check would fail');
+    if (findDuplicates(parsed, { warnRepeatedSingletons: true }).length) notes.push('duplicate entries');
+  }
   const targetDoc = await vscode.workspace.openTextDocument(session.applyToUri);
   const edit = new vscode.WorkspaceEdit();
   edit.replace(session.applyToUri, new vscode.Range(targetDoc.positionAt(0), targetDoc.positionAt(targetDoc.getText().length)), text);
@@ -927,15 +1046,26 @@ async function applyOnce() {
   const unreviewed = inPanel ? remapConflicts(session.marks, session.mergedStart != null ? session.mergedStart : session.panelText, session.panelText).length
     : session.conflicts.filter(c => !c.reviewed).length;
   if (unreviewed) {
-    const go = await vscode.window.showWarningMessage(
-      inPanel ? unreviewed + ' value' + (unreviewed === 1 ? '' : 's') + ' both branches changed still as the merge suggested. Apply anyway?'
-        : unreviewed + ' conflict' + (unreviewed === 1 ? '' : 's') + ' still on the incoming value without being looked at. Apply anyway?',
-      { modal: true }, ...(inPanel ? ['Apply anyway'] : ['Apply anyway', 'Review them']));
-    if (go === 'Review them') { await cmdListConflicts(); return false; }
+    const go = await vscode.window.showWarningMessage(unreviewed + ' value' + (unreviewed === 1 ? '' : 's') + ' both branches changed still as the merge suggested. Apply anyway?', { modal: true }, 'Apply anyway');
     if (go !== 'Apply anyway') return false;
   }
 
   const text = await mergedText();
+  if (session.language) {
+    // code: a conflict not chosen for yet; then brackets that do not balance
+    const c = session.code;
+    const needs = c && !session.plain ? require('./src/codeMerge').marks({ text, conflicts: c.conflicts, language: session.language, reviewed: c.reviewed }).counts.needs : 0;
+    if (needs) {
+      const go = await vscode.window.showWarningMessage(needs + ' conflict' + (needs === 1 ? ' is' : 's are') + ' not resolved yet - ' + (needs === 1 ? 'its' : 'their') + ' lines are not in the file. Save anyway?', { modal: true }, 'Save anyway');
+      if (go !== 'Save anyway') return false;
+    }
+    const problems = require('./src/codeChecks').problems(text, session.language).filter(p => p.severity === 'error');
+    if (problems.length) {
+      const go = await vscode.window.showWarningMessage(problems[0].message + ' (line ' + problems[0].line + ')' + (problems.length > 1 ? ' \u2013 and ' + (problems.length - 1) + ' more' : '') + '. Apply anyway?', { modal: true }, 'Apply anyway');
+      if (go !== 'Apply anyway') return false;
+    }
+    return finishApply(text);
+  }
   const parsed = X.parse(text);
   if (parsed.errors.length) {
     const go = await vscode.window.showWarningMessage(
@@ -948,7 +1078,7 @@ async function applyOnce() {
     const go = await vscode.window.showWarningMessage(
       violations.length + ' deploy check' + (violations.length === 1 ? '' : 's') + ' would fail on this result, e.g. "' +
       violations[0].message + '" Apply anyway?',
-      { modal: true }, ...(inPanel ? ['Apply anyway'] : ['Apply anyway', 'Show them']));
+      { modal: true }, 'Apply anyway');
     if (go !== 'Apply anyway') return false;
   }
 
@@ -956,11 +1086,15 @@ async function applyOnce() {
   if (leftovers.length) {
     const go = await vscode.window.showWarningMessage(
       leftovers.length + ' duplicate entr' + (leftovers.length === 1 ? 'y' : 'ies') + ' in the merged result. Apply anyway?',
-      { modal: true }, ...(inPanel ? ['Apply anyway'] : ['Apply anyway', 'Show them']));
-    if (go === 'Show them') { await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(session.mergedUri)); return false; }
+      { modal: true }, 'Apply anyway');
     if (go !== 'Apply anyway') return false;
   }
 
+  return finishApply(text);
+}
+
+/** The checks passed or were waived: the result written into its file, the merge ended. */
+async function finishApply(text) {
   const targetDoc = await vscode.workspace.openTextDocument(session.applyToUri);
   const edit = new vscode.WorkspaceEdit();
   edit.replace(session.applyToUri, new vscode.Range(targetDoc.positionAt(0), targetDoc.positionAt(targetDoc.getText().length)), text);

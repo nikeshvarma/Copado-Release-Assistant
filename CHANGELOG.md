@@ -1,5 +1,100 @@
 # Changelog
 
+## 3.16.5
+
+- CI: `npm run check` failed in a repository that still had files earlier versions removed (`src/quickPair.js`, `src/liveMarks.js`) - a new version copied over an old one never deletes anything. The unused-code check now leaves out what `scripts/removed.txt` lists and names any it finds, with `npm run tidy` to remove them.
+- CI: the in-VS-Code test of the Manual tab still expected a merge. It now checks a comparison: *Compare · resolution.xml*, the incoming version as it is, nothing of the target merged in.
+
+## 3.16.4
+
+- Fixed: **Compare** could leave out whole folders - often permission sets and profiles. A repository lists a comparison's files a page at a time, in path order, and only the first page was read, so a large comparison stopped before the folders that come last. Azure DevOps: every page now, until it says all changes are in (folders count towards its pages). GitHub gives a comparison's first 300 files only, and GitLab stops at its own limit: a list cut short is now said to be, rather than looking whole.
+
+## 3.16.3
+
+- Fixed: **Accept feature** did nothing when the feature's version of a conflict is empty. It is a choice too: the conflict is resolved, the target's lines shown struck through in green - nothing in the file. The same for **Accept target** when the target's is empty.
+- **⋯ › Accept all target** and **Accept all feature**: every conflict at once - one step, Ctrl+Z undoes it.
+- **Format and Order Metadata** and **Remove Duplicate Entries** only where entries add up - permission sets, profiles, muting permission sets, labels, translations - never for a layout, a page or a flow, whose order is what users see; and only in the right-click menu. A comparison marks duplicates only for those too.
+- A comparison: what only the other side has is shown on this side, struck through in red - *Not here*; its sides are no longer saved from **⋯**.
+
+## 3.16.2
+
+- Fixed: **Accept feature** could show **Accept both** as the one chosen - when the target's version of a conflict is empty, the two are the same text. The version you clicked is the one shown.
+- A conflict you resolved says **Resolved**, in green, its lines no longer lit yellow - the version you chose marked, still a click from changing.
+- The rows say only what each is - *Conflict*, *Resolved* - and the status bar how many are left, without their names.
+- **View**: its choices checked, as *Hide identical lines* is, not dotted; no shortcuts in its labels; it opens aligned to its button, never past the window's edge. A comparison's has neither *Layout* nor *Start from* - a comparison merges nothing.
+- Fixed: comparing code, or any comparison, said *These two files already describe the same metadata. Nothing to merge.* It is for a merge of metadata only.
+
+## 3.16.1
+
+- Fixed: a code conflict you had not touched could show as *edited by you*, spanning lines that were not its own, and rows could stand in the wrong place. A conflict was found again by the one line before it - often a `}` or `/**` seen many times in a class. Now it is found by the three lines either side of it, exactly, nearest to where it was.
+- While a conflict is unresolved the code is not whole, so brackets are not checked until every conflict is resolved.
+- A conflict's two versions: the target's greyed out, the feature's - replacing it - in the feature's colour.
+- The editor's rows say what each is, and nothing more: no *choose one*, *edited by you*, *now at line*, *from line*, nor the branch after *Target* and *Feature*; a comparison's rows are *Differs*, *Only here* and *Not here*.
+- A comparison is called one - *Compare*, in its tab too; **F7** goes through its differences (it said *No changes*); no Save button - **⋯** saves either side as a file.
+- Notices: only what matters - a change that could not be made, an error - at the bottom right, clear of the buttons; none for each small thing.
+
+## 3.16.0
+
+- **A promotion's code is Copado's conflict file, as git merged it.** Git had the common ancestor, so whatever only one story changed is already merged - the feature's deletions applied, other stories' work kept - and taken as it is, as plain text. Only the **conflicts** are marked, and none is decided for you: both versions shown, neither in your resolution until you choose **Accept target**, **Accept feature** or **Accept both**; then it is ordinary text, and Ctrl+Z undoes the choice. Each conflict is named by what it is about (*Conflict · method total(Decimal)*), the markers are never shown, and saving with one not resolved warns first. In one panel or two, the same conflicts. The member-by-member re-merge of code, and its rows - *Added*, *Removed by the feature*, *Not in the feature*, *Kept · added in the target since* - are gone; no ancestor is fetched for code.
+- **Manual and Compare compare, they do not merge**: the two versions side by side, both editable - **Format and Order Metadata** and **Remove Duplicate Entries** on either side, in its header and its right-click menu - so order and formatting drop away and only real differences are left; what differs is marked, nothing moves across; **Save as file** saves either side.
+- **Metadata conflicts** say *Conflict*, with **Accept target** and **Accept feature** - a value cannot be left empty, so the feature's stays in place until you choose, counted until then.
+- Permission sets, profiles, muting permission sets, labels and translations: as before - the target the base, nothing removed, the feature's additions and changes applied, each marked.
+
+## 3.15.2
+
+- **Fixed, in code: what the feature does not have is never in your resolution by itself.** A member only the target had was kept, unmarked, when the common ancestor was not known - so a method the feature deleted could come back. Now: with the ancestor, removed by the feature is left out (*Removed by the feature*), added in the target since is kept and marked (*Kept · added in the target since*), removed by the feature and changed in the target is left out as a choice; without the ancestor, it is left out as a choice - *Not in the feature*, **Restore** or **Leave out** - and saving asks while one is not made. A promotion's ancestor comes from the connected repository.
+- **Objects start from the feature's file**, like every type but permission sets, profiles, labels and translations - an object's own file is not a union.
+- **The counts are the merge's, not the layout's**: code in two panels shows the same counts as in one - by member - and F7 stops once per member in both. Before, two panels counted every run of changed lines (*74 from the feature* against *28*).
+- **A comment set apart by a blank line - a section banner - is not part of the member below it**: *Added by the feature · comment “Setup helpers”*, not *Changed by the feature · method make()* for a method nobody changed.
+- Fixed: after **Format and Order Metadata** or **Remove Duplicate Entries**, Ctrl+Z did not always undo it straight away - the editor now has the focus again.
+
+## 3.15.1
+
+- **Compare**: a file whose two versions differ only in spacing - or in order where Salesforce does not count it - is the same file: left out of the list and the counts, and the next rows take its place.
+- Fixed: on the Compare tab, a search box lost its focus whenever the list below loaded or was read again. Every search box - the branches, **Search**, the types - keeps its focus, text and caret through any redraw, and a branch list closed stays closed.
+
+## 3.15.0
+
+- **Compare**: **All types** - a list of the metadata types found, with their icons and how many of each, its own search, any number chosen at once; **Search** narrows to a name; **Reset** clears both branches and what was found. One chip, icon and button style throughout: *removed*, *changed*, *new* with their icons, each type's icon on its group, **Compare** and **Open** the same button. The explanations a developer does not need are gone.
+- **Code: View › One panel / Two panel** - the choice moved from **⋯** to **View**, under *Layout*. Still the setting `cmr.merge.codeView`.
+
+## 3.14.0
+
+- **Compare**: each branch is picked by searching - type, and the branches that match are listed under it (the first 50, and how many more) - so thousands of branches are no trouble. What was removed or changed comes first, then what is new, each grouped by metadata type. The files are shown 50 at a time (**Show 50 more**), and what differs in each is read only once its row is shown; at most 200 files are held at a time. A file deep in its type's folder says which folder (*Agent_v72_definition/schema*, not *schema*).
+- **Code in one pane or two**: **⋯ › One pane / Two panes** in the merge editor, remembered - it is the setting `cmr.merge.codeView` (one pane by default). Two panes show the target beside your resolution line by line, its conflicts still choices with Target's, Feature's and Both. Metadata stays in two panes.
+- **Working files kept only so long**: branch comparisons, promotion files, manual merges, reports and the like are removed by themselves once nothing in them has changed for `cmr.storage.keepDays` days (14; `0` never) - soon after VS Code starts, then twice a day. Never the open merge's or the promotion open on the page, never a promotion with resolutions not uploaded to Copado, never the validations' history.
+
+## 3.13.0
+
+- **Compare** - a new tab: two branches of the connected repository (GitHub, GitLab, Bitbucket, Azure DevOps - read-only, never asking for a token), every file the From branch changed since it split from To grouped by metadata type, each with what differs in a few words (*4 elements differ · 1 duplicate*, *3 members differ*), a filter by name. **Compare** opens a file in the merge editor, element by element: the To branch read-only, a copy of the From branch's file to work on and save as a file. A file on one side only opens to read. Comparing code never asks for a choice. Only the project's package directories are listed.
+- **Format and Order Metadata** and **Remove Duplicate Entries** in the merge editor: in its right-click menu and in **⋯** (Shift+Alt+F formats), as the commands do it - the same occurrence kept (`cmr.dedupe.keep`), the same question first when duplicates differ; one step Ctrl+Z undoes.
+- **Clean Working Files** (Command Palette): `.copado/` emptied - what it holds listed with sizes first, any promotion whose resolutions are not uploaded to Copado yet named; its `.gitignore` kept; not while a merge is open. The project, git, Copado and `copado-policy.json` are not touched.
+- **Manual**: fixed - a merge could start from an earlier merge's versions. Each pair of versions now has a folder of its own (a fingerprint of the two), so VS Code can never hand back a file it still holds from before, and unsaved changes come back only for the very same pair; older ones are pruned. **Clear both** empties the two sides at once.
+
+## 3.12.0
+
+- **Code, merged by its members, in one pane - no conflict markers.** A promotion's Apex and Lightning web component JavaScript is merged the way metadata is merged by its elements: a method, property or inner class only one branch changed goes in by itself, and only a member both branches changed since they split is a choice. Your resolution is shown in one pane with every change marked where it is: *Added by the feature* (Leave out), *Changed by the feature* with the old lines where they were (Use target), *Removed by the feature* (Restore), *Edited by you* (Undo), and *Both changed* - the other version under it to compare, **Target's**, **Feature's** (where it starts) or **Both**; a choice made, or an edit of your own, and it no longer needs you. With the common ancestor - Copado's or the repository's merge-base - git's conflicts between neighbouring methods are not conflicts; without one, every member that differs is a choice, nothing merged behind your back. A comment after a class's last member, before it closes, is that member's. Code with no members to read - a template, a stylesheet, Visualforce, Aura - keeps git's own merge, each of its blocks such a choice, the markers never shown. Saving with a choice not made asks first. Metadata keeps its two panes.
+- The search box's buttons show no tooltips. Their keys still work.
+
+## 3.11.2
+
+- Fixed: blank lines showed as changes of their own - after an added method, each blank line was an *Added* row with its own Undo, and the target's blank line holding spaces was *Removed*. Now a line's trailing spaces are not a change, in code and in metadata alike; blank lines next to a change are part of it, and alone they are a quiet difference - no row, not counted, passed by F7. In code, a closing comment and blank lines added straight after an added member are that member's row: one *Added · method …*, one Undo.
+- Fixed: changes that touch - a line taken out and two put in its place - showed as two or three rows; they are one change. This was in every line-by-line comparison: code, and the comments and long text of metadata.
+
+## 3.11.1
+
+- Fixed: in code, a conflict block's own lines were counted as your edits as well - *4 your edits* and *1 of 7* for one edit and one block. A block counts once, as a conflict, and F7 stops at it once.
+- Tests: only what the extension does now is tested. Removed with the code they tested: `src/quickPair.js` (from the quick merge removed in 3.8.0), and in `src/selective.js` and `src/sfcli.js` three functions nothing used since the selective-commit downloads and the log signatures went. Removed from the tests: what served the VS Code diff view removed in 3.8.0 (its settings, its side view, its CodeLens and hover), the target's "literal order" no longer offered, and checks that removed things stay removed. The unused-code check now also finds an exported function that only the tests use, and a module nothing requires - with planted controls for both.
+- The README, CONTRIBUTING and the package description now cover code: a picture of Apex in the merge editor, the checks as you type, where code conflicts open.
+
+## 3.11.0
+
+- **Code in the merge editor**: a promotion's Apex, Lightning web component JavaScript, HTML and CSS, Visualforce and Aura conflicts open in it, in their own colours (Monaco's, without language services). Each of Copado's conflict blocks is one *Both changed* row with **Use target**, **Use feature** and **Use both**. Apex and JavaScript are compared by their members - methods by name and parameter types, properties, fields, getters, inner classes - so a member moved is no change and an edit says which (*Changed · method tax(Decimal)*). Conflict markers left, brackets that do not balance (strings, comments and template literals skipped) and a member defined twice are underlined as you type, and saving with markers left asks first. VS Code's own conflict view stays a setting away (`cmr.merge.codeIn`).
+- **The common ancestor**: when Copado's conflict file has none, the merge-base of the feature branch and the destination branch is fetched from the connected repository (GitHub, GitLab, Bitbucket, Azure DevOps - never asking for a token). The editor then shows what each branch did since: the target's own later additions and changes need no mark; *Removed by the feature*, *Kept · removed by the feature*, *Feature changed it*. `cmr.merge.useAncestor` turns it off.
+- **Renamed**: an entry gone and one come back alike but for its name - and something telling, a label's value, a field's item - is one change: *Renamed labels: Greeting → Welcome*.
+- **The editor**: the parent elements stay in view as you scroll (sticky scroll); elements fold, the target's lines with them; matching tags light up and an opening tag closes itself; *Format XML* in **⋯**; zoom (Ctrl + / − / 0) and word wrap (Alt+Z) in **View**, wrapped lines kept level in both panes; a divider to drag between the panes. Of an edited line, the characters that changed are lit.
+- Fixed: Ctrl+V in the find and replace boxes pasted into the file instead. The editor's own clipboard keys now apply to its text only.
+
 ## 3.10.2
 
 - **Needs VS Code 1.90 or later** (May 2024), the first release that runs extensions on Node.js 20. CI tests on Node 20 and 22 - what VS Code runs the extension on from 1.90 to today - and no longer on Node 18, which reached its end of life in April 2025. A test keeps the oldest Node tested and the oldest VS Code supported in step. No change to what the extension does.

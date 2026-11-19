@@ -23,6 +23,7 @@ const T = page(TEAM() + REG + APP + OWN);
 const base = { file: 'Account_Record_Page.flexipage-meta.xml', labels: { target: 'Target branch (HEAD)', merged: 'Your resolution' }, theirs: 'the feature branch', short: 'the feature', typeName: 'FlexiPage', target: T, incoming: T };
 const look = p => p.evaluate(() => ({
   chips: document.querySelector('#chips').textContent,
+  counter: document.getElementById('pos').textContent,
   rows: [...document.querySelectorAll('#right .zone.head:not(.l)')].map(z => z.textContent),
   buttons: [...document.querySelectorAll('.acts button')].map(b => b.title),
   ghost: document.querySelectorAll('#right .zone.ghost .gl').length,
@@ -58,7 +59,8 @@ ok('a block moved and another removed: removed from its place and added at the n
   await run(Object.assign({}, base, { text: mine }), async (p, h) => {
     const a = await look(p);
     assert.strictEqual(a.chips, '1 your edit2 removed');
-    assert.ok(/^Removed \u00b7 now at line \d+$/.test(a.rows[0]) && a.rows.includes('Removed') && a.rows.some(r => /^Added by you \u00b7 from line \d+$/.test(r)), JSON.stringify(a.rows));
+    // the kind, and nothing more after it
+    assert.deepStrictEqual(a.rows, ['Removed', 'Removed', 'Added by you']);
     assert.ok(!a.rows.some(r => /Moved/.test(r)) && !a.buttons.includes('Move back'), 'no moves');
     assert.deepStrictEqual(a.buttons, ['Restore', 'Restore', 'Undo']);
     assert.strictEqual(await p.evaluate(() => window.monaco.editor.getEditors().find(e => e.getOption(window.monaco.editor.EditorOption.readOnly)).getValue()), T, 'the left pane is the target, as it is');
@@ -99,7 +101,6 @@ ok('typing: compared again as you go; broken XML pauses the marks', async () => 
     await eventually(async () => assert.ok((await look(p)).held, 'paused'));
     await p.keyboard.press('Backspace');
     await eventually(async () => { const a = await look(p); assert.ok(!a.held && a.chips === '1 your edit', JSON.stringify(a.chips)); });
-    assert.ok(!/in your order|as it is/.test((await look(p)).left), 'the target is shown as it is - there is no other order');
     assert.deepStrictEqual(h.errors, []);
   });
 });
@@ -136,7 +137,7 @@ ok('what the feature branch removed is marked, whatever the start: still here - 
     assert.deepStrictEqual(a.rows, ['Not in feature', 'Not in feature']);
     assert.deepStrictEqual(a.buttons, ['Restore', 'Restore']);
     await p.click('#viewBtn');
-    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), '\u25cfThe feature branch | \u25cbTarget branch (HEAD) | \u25cbMerged (both) | Hide identical lines', 'Start from and the view, in one menu');
+    assert.strictEqual(await p.$$eval('#viewMenu .mi', m => m.map(x => x.textContent).join(' | ')), '\u2713The feature branch | Target branch (HEAD) | Merged (both) | Word wrap | Zoom in | Zoom out | Reset zoom | Hide identical lines', 'Start from and the view, in one menu');
     await p.keyboard.press('Escape');
     assert.deepStrictEqual(h.errors, []);
   });
@@ -302,7 +303,8 @@ ok('a duplicate you add is marked on its lines - a row, a margin mark, an underl
     await eventually(() => assert.strictEqual(h.text(), T, 'removed: back to the target exactly'));
     // break the XML: underlined where it breaks, what you type keeps a dotted margin
     await p.click('#right .view-lines'); await p.keyboard.press('Control+Home'); await p.keyboard.press('ArrowDown'); await p.keyboard.press('End');
-    await p.keyboard.type('<broken>');
+    // a stray closing tag: typing an opening tag would be closed for you
+    await p.keyboard.type('</broken>');
     await eventually(async () => {
       const a = await look(p);
       assert.ok(/Marks paused \u2013 not valid XML at line \d+/.test(a.status), a.status);
@@ -334,6 +336,254 @@ ok('a button whose lines you just changed does nothing, and says so; one Save an
     assert.ok(h.text().includes('<value>edit</value>') || (await p.evaluate(() => window.monaco.editor.getEditors().some(e => e.getValue().includes('<value>edit</value>')))), 'nothing was done');
     assert.deepStrictEqual(h.errors, []);
   });
+});
+
+ok('the find and replace boxes keep their own copy and paste: Ctrl+V pastes into the box, never into the file; Ctrl+C copies from it', async () => {
+  await run(Object.assign({}, base, { text: T }), async (p, h) => {
+    await p.click('#right .view-lines');
+    await p.evaluate(() => navigator.clipboard.writeText('RecordRegion_cField'));
+    await p.keyboard.press('Control+f');
+    await p.waitForSelector('#right .find-widget.visible textarea, #right .find-widget.visible input');
+    await p.keyboard.press('Control+v');
+    const find = () => p.$eval('#right .find-widget .find-part textarea, #right .find-widget .find-part input', i => i.value);
+    await eventually(async () => assert.strictEqual(await find(), 'RecordRegion_cField', 'pasted into the search box'));
+    assert.strictEqual(h.text(), T, 'the file is untouched');
+    // copy out of the box: select it, Ctrl+C
+    await p.keyboard.press('Control+a');
+    await p.evaluate(() => navigator.clipboard.writeText('-'));
+    await p.keyboard.press('Control+c');
+    await eventually(async () => assert.strictEqual(await p.evaluate(() => navigator.clipboard.readText()), 'RecordRegion_cField', 'copied from the box'));
+    // and the replace box
+    await p.keyboard.press('Escape');
+    await p.click('#right .view-lines');
+    await p.keyboard.press('Control+h');
+    await p.waitForSelector('#right .find-widget.visible .replace-part textarea, #right .find-widget.visible .replace-part input');
+    await p.focus('#right .find-widget .replace-part textarea, #right .find-widget .replace-part input');
+    await p.evaluate(() => navigator.clipboard.writeText('RecordArea_cField'));
+    await p.keyboard.press('Control+v');
+    await eventually(async () => assert.strictEqual(await p.$eval('#right .find-widget .replace-part textarea, #right .find-widget .replace-part input', i => i.value), 'RecordArea_cField'));
+    assert.strictEqual(h.text(), T, 'still untouched');
+    // the buttons say nothing on hover: a title put on is taken off; the mouse's arrival never reaches them
+    await p.evaluate(() => document.querySelector('#right .find-widget .codicon-widget-close').setAttribute('title', 'Close (Escape)'));
+    await eventually(async () => assert.strictEqual(await p.$$eval('#right .find-widget [title]', n => n.length), 0, 'no titles in the search box'));
+    const heard = await p.evaluate(() => { const b = document.querySelector('#right .find-widget .codicon-widget-close'); let n = 0; b.addEventListener('mouseover', () => n++); b.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); return n; });
+    assert.strictEqual(heard, 0, 'the hover never starts');
+    await p.click('#right .find-widget .codicon-widget-close');
+    await eventually(async () => assert.strictEqual(await p.$('#right .find-widget.visible'), null, 'its buttons still work'));
+    // and in the text, the editor's own paste still works
+    await p.keyboard.press('Escape');
+    await p.click('#right .view-lines');
+    assert.deepStrictEqual(h.errors, []);
+  }, { clipboard: true });
+});
+
+ok('the everyday editor: parents stay in view, an element folds (and the target with it), tags match and close, Format XML, zoom, word wrap that stays level, a divider to drag', async () => {
+  const mine = page(TEAM('required') + REG + APP + OWN);
+  await run(Object.assign({}, base, { text: mine }), async (p, h) => {
+    const ed = side => `window.monaco.editor.getEditors().find(e => ${side === 'left' ? '' : '!'}e.getOption(window.monaco.editor.EditorOption.readOnly))`;
+    const lineOf = (side, needle) => p.evaluate(([e, n]) => eval(e).getModel().getLinesContent().findIndex(l => l.includes(n)) + 1, [ed(side), needle]);
+    const top = (side, needle) => p.evaluate(([e, n]) => { const x = eval(e); const i = x.getModel().getLinesContent().findIndex(l => l.includes(n)) + 1; return Math.round(x.getTopForLineNumber(i) - x.getScrollTop()); }, [ed(side), needle]);
+    // sticky scroll: deep in an element, its parents pinned at the top
+    await p.evaluate(e => eval(e).setScrollTop(30 * 19), ed('right'));
+    await eventually(async () => assert.ok(/flexiPageRegions/.test(await p.$eval('#right .sticky-widget', w => w.textContent)), 'the parents pinned'));
+    await p.evaluate(e => eval(e).setScrollTop(0), ed('right'));
+    // fold the first field in your pane: the target folds with it, the panes stay level
+    const before = await top('right', 'RecordRegion_cField');
+    assert.strictEqual(before, await top('left', 'RecordRegion_cField'), 'level before');
+    const at = await lineOf('right', '<itemInstances>');
+    await p.evaluate(([e, l]) => { const x = eval(e); x.setPosition({ lineNumber: l, column: 10 }); x.focus(); x.trigger('t', 'editor.fold', {}); }, [ed('right'), at]);
+    await eventually(async () => { const r = await top('right', 'RecordRegion_cField'), l = await top('left', 'RecordRegion_cField'); assert.ok(r < before && r === l, 'folded on both sides, level: ' + r + ' / ' + l); });
+    await p.evaluate(e => eval(e).trigger('t', 'editor.unfoldAll', {}), ed('right'));
+    // a matching tag lit up
+    await p.evaluate(([e, l]) => { const x = eval(e); x.setPosition({ lineNumber: l, column: 10 }); x.focus(); }, [ed('right'), at]);
+    await eventually(async () => assert.strictEqual(await p.$$eval('#right .tagmatch', n => n.length), 2, 'the tag and its partner'));
+    // typing an opening tag closes it
+    const endOf = await lineOf('right', '<name>main</name>');
+    await p.evaluate(([e, l]) => { const x = eval(e); x.setPosition({ lineNumber: l, column: x.getModel().getLineMaxColumn(l) }); x.focus(); }, [ed('right'), endOf]);
+    await p.keyboard.press('Enter'); await p.keyboard.type('<description>');
+    await eventually(() => assert.ok(/<description><\/description>/.test(h.text()), 'closed for you'));
+    await p.keyboard.type('Hello');
+    await eventually(() => assert.ok(/<description>Hello<\/description>/.test(h.text()), 'typed between'));
+    await p.keyboard.press('Control+z'); await p.keyboard.press('Control+z'); await p.keyboard.press('Control+z'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.strictEqual(h.text(), mine, 'undone'));
+    // a page: its order is what users see - neither ordered nor de-duplicated, in no menu
+    await p.click('#right .view-lines', { button: 'right' });
+    assert.ok(!(await p.$$eval('#menu .mi span:first-child', n => n.map(x => x.textContent))).some(t => /Format and Order|Remove Duplicate/.test(t)), 'not for a page');
+    await p.keyboard.press('Escape');
+    await p.click('#moreBtn');
+    assert.ok(!(await p.$$eval('#moreMenu .mi', n => n.map(x => x.textContent))).some(t => /Format and Order|Remove Duplicate/.test(t)), 'nor in the more menu');
+    await p.keyboard.press('Escape');
+    // zoom: both panes the same size, still level
+    const fs0 = await p.evaluate(e => eval(e).getOption(window.monaco.editor.EditorOption.fontSize), ed('right'));
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+Equal');
+    await eventually(async () => assert.deepStrictEqual(await p.evaluate(([a, b]) => [eval(a), eval(b)].map(x => x.getOption(window.monaco.editor.EditorOption.fontSize)), [ed('left'), ed('right')]), [fs0 + 1, fs0 + 1]));
+    await eventually(async () => assert.strictEqual(await top('right', 'RecordOwner_cField'), await top('left', 'RecordOwner_cField'), 'level when zoomed'));
+    await p.keyboard.press('Control+0');
+    // word wrap with a very long edited line: wrapped on one side only - still level after it
+    const long = 'x'.repeat(400);
+    await p.evaluate(([e, v]) => { const x = eval(e); const m = x.getModel(); const i = m.getLinesContent().findIndex(l => l.includes('<value>required</value>')) + 1; x.executeEdits('t', [{ range: new window.monaco.Range(i, 1, i, m.getLineMaxColumn(i)), text: '                    <value>' + v + '</value>' }]); }, [ed('right'), long]);
+    await menu(p, 'viewBtn', 'Word wrap');
+    await eventually(async () => { const r = await top('right', 'RecordTeam_cField'), l = await top('left', 'RecordTeam_cField'); assert.ok(Math.abs(r - l) <= 1, 'level after a wrapped line: ' + r + ' / ' + l); }, 6000);
+    await menu(p, 'viewBtn', 'Word wrap');
+    // the divider: dragged, the target\u2019s pane wider
+    const w0 = await p.$eval('#left', e => e.getBoundingClientRect().width);
+    const g = await p.$eval('#gap', e => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 200 }; });
+    await p.mouse.move(g.x, g.y); await p.mouse.down(); await p.mouse.move(g.x + 200, g.y, { steps: 5 }); await p.mouse.up();
+    await eventually(async () => assert.ok(await p.$eval('#left', e => e.getBoundingClientRect().width) > w0 + 150, 'wider'));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a permission set: Format and Order Metadata and Remove Duplicate Entries in the right-click menu - one undoable step each', async () => {
+  const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+  const ps = b => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + b + '    <label>P</label>\n</PermissionSet>\n';
+  const mine = ps(fp('A.a__c') + fp('A.b__c')), dupd = ps(fp('A.a__c') + fp('A.b__c') + fp('A.a__c'));
+  await run({ labels: { target: 'Target branch (HEAD)', merged: 'Your resolution' }, theirs: 'the feature branch', typeName: 'PermissionSet', file: 'P.permissionset-meta.xml', target: mine, incoming: mine, text: dupd }, async (p, h) => {
+    await p.click('#right .view-lines', { button: 'right' });
+    assert.deepStrictEqual(await p.$$eval('#menu .mi span:first-child', n => n.map(x => x.textContent).slice(-2)), ['Format and Order Metadata', 'Remove Duplicate Entries']);
+    await p.click('#menu .mi:last-child');
+    await eventually(() => assert.strictEqual(h.text(), mine, 'the copy taken out'));
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.strictEqual(h.text(), dupd, 'Ctrl+Z: back'));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a promotion\u2019s code: only the conflicts marked - both versions shown, neither in until accepted; Accept feature puts it in, Ctrl+Z takes it back; the same in two panels', async () => {
+  const CM = require('../src/codeMerge');
+  const f = 'public with sharing class InvoiceService {\n    private static final String SOURCE = \'Billing\';\n<<<<<<< HEAD\n    private static final Decimal TAX_RATE = 0.21;\n=======\n    private static final Decimal TAX_RATE = 0.20;\n>>>>>>> feature/US-0012345\n    public static void refund(Id invoiceId) { issueCredit(invoiceId); }\n    public static Decimal total(Decimal amount) {\n<<<<<<< HEAD\n        return amount * (1 + TAX_RATE);\n=======\n        return (amount - discountOf(amount)) * 1.2;\n>>>>>>> feature/US-0012345\n    }\n}\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> feature\/US-0012345\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> feature\/US-0012345\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'uat', merged: 'Your resolution' }, theirs: 'feature/US-0012345', short: 'the feature', typeName: null, file: 'InvoiceService.cls', language: 'apex', target: T, incoming: F, text: g.text, code: { conflicts: g.conflicts } }, async (p, h) => {
+    const a = await look(p);
+    assert.deepStrictEqual(a.rows, ['Conflict', 'Conflict'], 'only the conflicts - the tag, nothing after it');
+    // the target's version greyed out, the feature's - replacing it - in the feature's colour
+    assert.deepStrictEqual(await p.$$eval('#right .zone.alt', n => n.map(x => (x.classList.contains('tgt') ? 'tgt' : x.classList.contains('fea') ? 'fea' : '?') + ':' + x.querySelector('.alt-t').textContent.trim())), ['tgt:\u25be Target', 'fea:\u25be Feature', 'tgt:\u25be Target', 'fea:\u25be Feature']);
+    assert.strictEqual(a.chips, '2 conflicts to resolve');
+    assert.ok(!/discountOf|TAX_RATE = 0\.2/.test(h.text()), 'neither in the file');
+    await p.$$eval('.acts button[title="Accept feature"]', b => b[1].click());
+    await eventually(() => assert.ok(h.text().includes('discountOf(amount)) * 1.2;'), 'the feature\u2019s lines in'));
+    await eventually(async () => { const b = await look(p); assert.deepStrictEqual([b.chips, b.rows[1]], ['1 conflict to resolve1 resolved', 'Resolved']); });
+    assert.deepStrictEqual(await p.$$eval('.acts button.res.on', n => n.map(x => x.title)), ['Accept feature'], 'the one clicked, chosen - in the resolved colour');
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.strictEqual(h.text(), g.text, 'Ctrl+Z: to resolve again'));
+    await menu(p, 'viewBtn', 'Two panel');
+    // two panels: the target beside it - the counts and the conflicts the same as in one
+    await eventually(async () => assert.strictEqual(await p.evaluate(() => window.monaco.editor.getEditors().find(e => e.getOption(window.monaco.editor.EditorOption.readOnly)).getValue()), T, 'the target beside it'));
+    await eventually(async () => { const b = await look(p); assert.deepStrictEqual([b.chips, b.rows.length], ['2 conflicts to resolve', 2], JSON.stringify(b.rows)); });
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a conflict whose feature version is empty: Accept feature resolves it - the target\u2019s lines struck through in green; Accept all target and Accept all feature, one step each', async () => {
+  const CM = require('../src/codeMerge');
+  const f = 'public class A {\n    void a() {\n        x();\n<<<<<<< HEAD\n        // retry\n        retry();\n=======\n>>>>>>> feature\n    }\n    void b() {\n<<<<<<< HEAD\n        one();\n=======\n        two();\n>>>>>>> feature\n    }\n}\n';
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'uat', merged: 'Your resolution' }, theirs: 'feature/US-0012345', short: 'the feature', typeName: null, file: 'A.cls', language: 'apex', target: f, incoming: f, text: g.text, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    assert.strictEqual((await look(p)).chips, '2 conflicts to resolve');
+    await p.$$eval('.acts button[title="Accept feature"]', b => b[0].click());
+    await eventually(async () => { const a = await look(p); assert.deepStrictEqual([a.chips, a.rows], ['1 conflict to resolve1 resolved', ['Resolved', 'Conflict']]); });
+    assert.deepStrictEqual(await p.$$eval('#right .zone.ghost.dropped .gl', n => n.map(x => x.textContent.trim())), ['// retry', 'retry();'], 'the target\u2019s lines, struck through in green');
+    assert.strictEqual(h.text(), g.text, 'nothing put in - the feature has nothing here');
+    // every conflict at once: one step, Ctrl+Z undoes it
+    await menu(p, 'moreBtn', 'Accept all target');
+    await eventually(() => assert.ok(h.text().includes('retry();') && h.text().includes('one();') && !h.text().includes('two();')));
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved', 'Resolved']));
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.strictEqual(h.text(), g.text, 'Ctrl+Z: one step back'));
+    await menu(p, 'moreBtn', 'Accept all feature');
+    await eventually(() => assert.ok(h.text().includes('two();') && !h.text().includes('retry();')));
+    await eventually(async () => assert.strictEqual((await look(p)).chips, '2 conflicts resolved'));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a comparison - Manual, Compare: both sides editable, each formatted on its own, compared again as either changes; Save as file for either side; nothing merged', async () => {
+  const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+  const ps = b => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + b + '    <label>P</label>\n</PermissionSet>\n';
+  const A = ps(fp('A.b__c') + fp('A.a__c')), B = ps(fp('A.a__c') + fp('A.b__c'));
+  await run({ labels: { target: 'uat', incoming: 'feature/US-0012345', merged: 'feature/US-0012345' }, theirs: 'feature/US-0012345', typeName: 'PermissionSet', file: 'P.permissionset-meta.xml', plain: true, target: A, incoming: B, text: B }, async (p, h) => {
+    const a = await look(p);
+    assert.ok(/difference/.test(a.chips) && a.buttons.length === 0, 'differences, nothing to move across: ' + a.chips);
+    assert.ok(await p.evaluate(() => !window.monaco.editor.getEditors().every(e => !e.getOption(window.monaco.editor.EditorOption.readOnly)) === false), 'both sides editable');
+    // the other side formatted - sorted as Salesforce writes it: the same as this one
+    await p.click('#left .view-lines', { button: 'right' });
+    await p.$$eval('#menu .mi', n => n.find(x => /Format and Order Metadata/.test(x.textContent)).click());
+    await eventually(async () => assert.strictEqual((await look(p)).chips, 'no differences', 'only the order differed'));
+    // called a comparison; no Save button - either side saved from the more menu; F7 goes through the differences
+    assert.strictEqual(await p.$eval('#title', e => e.textContent), 'Compare \u00b7 P.permissionset-meta.xml');
+    assert.strictEqual(await p.$eval('#saveClose', e => e.hidden), true);
+    // what only the other side has: its lines here, struck through in red
+    await p.evaluate(t => { const x = window.monaco.editor.getEditors()[1]; x.executeEdits('t', [{ range: x.getModel().getFullModelRange(), text: t }]); }, ps(fp('A.a__c')));
+    await eventually(async () => assert.ok((await look(p)).rows.includes('Not here')));
+    await eventually(async () => assert.ok((await p.$$eval('#right .zone.ghost.removed .gl', n => n.map(x => x.textContent))).some(t => /A\.b__c/.test(t)), 'struck through on the right'));
+    // its View: nothing to start from, no layout - a comparison merges nothing
+    await p.click('#viewBtn');
+    const view = await p.$$eval('#viewMenu .mi, #viewMenu .mh', n => n.map(x => x.textContent));
+    assert.ok(!view.some(t => /Start from|Layout|One panel|Merged/i.test(t)), JSON.stringify(view));
+    await p.keyboard.press('Escape');
+    await p.click('#moreBtn');
+    const items = await p.$$eval('#moreMenu .mi', n => n.map(x => x.textContent));
+    assert.ok(!items.some(t => /Save .* as file|Format and Order|Remove Duplicate/.test(t)), JSON.stringify(items));
+    await p.keyboard.press('Escape');
+    assert.deepStrictEqual(h.errors, []);
+  });
+  // code and a component's files: side by side, coloured, no errors
+  for (const [file, language, a, b] of [['opsCard.js', 'javascript', 'export default class X {\n    a() { return 1; }\n}\n', 'export default class X {\n    a() { return 2; }\n}\n'], ['opsCard.html', 'html', '<template>\n    <p>{title}</p>\n</template>\n', '<template>\n    <p class="big">{title}</p>\n</template>\n'], ['opsCard.css', 'css', '.big {\n    color: red;\n}\n', '.big {\n    color: blue;\n}\n']]) {
+    await run({ labels: { target: 'uat', incoming: 'feature/US-0012345', merged: 'feature/US-0012345' }, theirs: 'feature/US-0012345', typeName: null, file, language, plain: true, target: a, incoming: b, text: b }, async (p, h) => {
+      await eventually(async () => assert.strictEqual(await p.evaluate(() => window.monaco.editor.getModels().map(x => x.getLanguageId()).join()), 'cmr-' + language + ',cmr-' + language));
+      await eventually(async () => assert.ok(/1 difference/.test((await look(p)).chips), language));
+      await eventually(async () => assert.strictEqual((await look(p)).counter, '1 of 1', language + ': F7 goes through the differences'));
+      assert.deepStrictEqual((await look(p)).rows, ['Differs'], language + ': the kind alone');
+      await p.waitForTimeout(400);
+      assert.deepStrictEqual(h.errors, [], language + ': ' + JSON.stringify(h.errors).slice(0, 300));
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+ok('the Compare tab: a search box keeps its focus, text and caret while the list below loads or is read again; a branch list closed stays closed', async () => {
+  const { runPage } = require('./browserHarness');
+  const CB = require('../src/compareBranches'), d = 'force-app/main/default/';
+  const F = (p, kind, summary) => Object.assign({ path: d + p, kind, summary }, CB.groupOf(d + p));
+  const files = [F('classes/TaxHelper.cls', 'changed', null), F('classes/Billing.cls', 'changed', null), F('permissionsets/Sales.permissionset-meta.xml', 'changed', null)];
+  const st = f => ({ copadoOrg: 'copado', recent: [], current: null, compare: { connected: true, branches: ['feature/US-0012345', 'uat', 'uat-hotfix'], from: 'feature/US-0012345', to: 'uat', files: f } });
+  await runPage(st(files), async (p, h) => {
+    const active = () => p.evaluate(() => { const a = document.activeElement; return a ? [a.id, a.value, a.selectionStart] : null; });
+    // Search: typing, and a summary arrives - the box keeps it all
+    await p.click('#cfilter'); await p.keyboard.type('Tax');
+    await h.push(st([Object.assign({}, files[0], { summary: '2 members differ' }), files[1], files[2]]));
+    await p.waitForTimeout(100);
+    assert.deepStrictEqual(await active(), ['cfilter', 'Tax', 3], 'Search kept, after the list loaded');
+    await p.keyboard.type('H');
+    assert.strictEqual(await p.$eval('#cfilter', e => e.value), 'TaxH', 'and typing goes on in it');
+    // a branch box: its list open, the branches read again - still there, still open
+    await p.click('#cq-to'); await p.keyboard.type('ua');
+    await h.push(st(files));
+    await p.waitForTimeout(100);
+    assert.deepStrictEqual((await active()).slice(0, 2), ['cq-to', 'ua'], 'the branch box kept');
+    assert.ok(await p.$('.clist'), 'its list still open');
+    // closed with Escape: an update does not open it again
+    await p.keyboard.press('Escape');
+    await h.push(st(files));
+    await p.waitForTimeout(100);
+    assert.strictEqual(await p.$('.clist'), null, 'closed stays closed');
+    // what differs only in spacing is the same: not listed, not counted - the search cleared first
+    await p.click('#cfilter'); await p.keyboard.press('Control+a'); await p.keyboard.press('Backspace');
+    await h.push(st([Object.assign({}, files[0], { summary: 'only spacing differs', same: true }), files[1], files[2]]));
+    await p.waitForTimeout(100);
+    const t = await p.$eval('#app', e => e.textContent);
+    assert.ok(!/TaxHelper/.test(t) && /2 changed/.test(t), 'spacing only: gone from the list and the count');
+    assert.deepStrictEqual(h.errors, []);
+  }, { saved: { nav: 'Compare' } });
 });
 
 ok('the light theme', async () => {

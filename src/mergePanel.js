@@ -37,7 +37,7 @@ function html(webview, media) {
     '<body data-vs="' + attr(u('monaco/vs')) + '">' +
     '<div class="top"><span class="title" id="title"></span><span class="chips" id="chips"></span><span class="sp"></span>' +
     '<span class="navg"><button id="prev" title="Previous change (Shift+F7)" aria-label="Previous change"></button><span id="pos" aria-live="polite"></span><button id="next" title="Next change (F7)" aria-label="Next change"></button></span>' +
-    '<span class="mwrap"><button id="viewBtn" class="tb" aria-haspopup="menu" aria-expanded="false" title="Start from, hide identical lines, the target\u2019s order"></button><div id="viewMenu" class="dmenu" role="menu" hidden></div></span>' +
+    '<span class="mwrap"><button id="viewBtn" class="tb" aria-haspopup="menu" aria-expanded="false" title="Start from, hide identical lines, the target\u2019s order"></button><div id="viewMenu" class="dmenu right" role="menu" hidden></div></span>' +
     '<button id="saveClose" class="pri" title="Save as your resolution and close \u2013 Ctrl+S saves and keeps it open">Save &amp; Close</button>' +
     '<span class="mwrap"><button id="moreBtn" class="tb ic" aria-haspopup="menu" aria-expanded="false" title="More" aria-label="More"></button><div id="moreMenu" class="dmenu right" role="menu" hidden></div></span></div>' +
     '<div id="help" hidden role="dialog" aria-label="Keyboard shortcuts"></div>' +
@@ -50,15 +50,40 @@ function html(webview, media) {
 }
 
 /** The pieces, without what the page does not need: the left pane's lines come once, as its text. */
+/** Ordering and de-duplicating are for files whose entries add up - permission sets, profiles, labels, translations - never a layout's or a page's, whose order is what users see. */
+function tidy(o) { return !o.language && require('./mergeStart').ADDITIVE.has(o.typeName); }
+
 function marksFor(o, text, mode) {
-  const r = align(o.target, o.incoming, text, { type: o.typeName, mode });
+  // Manual and Compare: two versions compared line by line, nothing merged - both sides yours to edit, format, sort
+  if (o.plain) {
+    const r = align(o.target, null, text, { type: null, mode: 'literal' });
+    const pieces = r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, ghost: p.ghost || p.left }));
+    return { plain: true, code: !!o.language, single: false, left: r.left, mode: 'literal', moves: [], rows: [], pieces,
+      counts: { differs: pieces.filter(p => p.kind !== 'same' && p.kind !== 'blank').length }, dups: !o.language && tidy(o) ? MD.inText(text) : [],
+      problems: o.language ? require('./codeChecks').problems(text, o.language) : [] };
+  }
+  // a promotion's code: Copado's conflict file - only its conflicts marked, none decided for you
+  if (o.language) {
+    const c = o.code || { conflicts: [] };
+    const k = require('./codeMerge').marks({ text, conflicts: c.conflicts, language: o.language, reviewed: c.reviewed });
+    // two panes, if chosen: the target beside your resolution line by line - the conflicts still choices, over it
+    if (o.codeView === 'twoPanes') {
+      const r = align(o.target, o.incoming, text, { type: null, mode: 'literal' });
+      // the counts are the merge's - its members - whichever layout shows them
+      return { code: true, git: true, single: false, left: r.left, mode: 'literal', counts: k.counts, rows: k.rows, moves: [], dups: [],
+        pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature })),
+        problems: k.counts.needs ? [] : require('./codeChecks').problems(text, o.language) };
+    }
+    return { code: true, git: true, single: true, left: '', mode: 'code', counts: k.counts, rows: k.rows, moves: [], dups: [], pieces: [], problems: k.counts.needs ? [] : require('./codeChecks').problems(text, o.language) };
+  }
+  const r = align(o.target, o.incoming, text, { type: o.typeName, mode, ancestor: o.ancestor || null });
   if (r.hold) return Object.assign(r, { xmlError: xmlError(text) });
   const removed = o.removedDups || new Set();
   return {
     left: r.left, mode: r.mode, counts: r.counts, moves: r.moves,
     // duplicates in your resolution as it is - one you add is marked as you type
     dups: MD.inText(text),
-    pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, context: p.context, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature, now: p.now, was: p.was,
+    pieces: r.pieces.map(p => ({ kind: p.kind, a0: p.a0, a1: p.a1, b0: p.b0, b1: p.b1, label: p.label, context: p.context, undo: p.kind === 'same' ? undefined : p.undo, ghost: p.ghost, notInFeature: p.notInFeature, byFeature: p.byFeature, now: p.now, was: p.was,
       dupRemoved: p.kind === 'removed' && removed.size && p.ghost ? removed.has(MD.flat(p.ghost.join(''))) || undefined : undefined }))
   };
 }
@@ -77,7 +102,8 @@ function xmlError(text) {
 
 function open(vscode, extensionUri, o) {
   const media = p => vscode.Uri.joinPath(extensionUri, 'media', ...p.split('/'));
-  const title = 'Merge \u00b7 ' + o.file;
+  // a comparison is called one - it merges nothing
+  const title = (o.plain ? 'Compare' : 'Merge') + ' \u00b7 ' + o.file;
   const panel = vscode.window.createWebviewPanel('cmrMergeEditor', title, vscode.ViewColumn.Active, {
     enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
   });
@@ -89,10 +115,24 @@ function open(vscode, extensionUri, o) {
     try {
       if (m.type === 'ready') {
         post({ type: 'init', title, file: o.file, applyOnly: !!o.applyOnly, labels: o.labels, theirs: o.theirs, short: o.short, mode, text, savedText: o.savedText != null ? o.savedText : null,
-          starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, dupRemoved: o.dupRemoved || null, manual: !!o.manual,
+          starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, dupRemoved: o.dupRemoved || null, manual: !!o.manual, plain: !!o.plain, tidy: tidy(o), ancestor: !!o.ancestor, language: o.language || 'xml',
           marks: marksFor(o, text, mode), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
-      } else if (m.type === 'text' || m.type === 'mode') {
-        if (m.type === 'mode') mode = m.mode === 'literal' ? 'literal' : 'order';
+      } else if (m.type === 'codeView') {
+        // one pane or two, for code: remembered - it is the setting
+        o.codeView = m.view === 'twoPanes' ? 'twoPanes' : 'onePane';
+        if (o.setCodeView) o.setCodeView(o.codeView);
+        if (typeof m.text === 'string') text = m.text;
+        post({ type: 'marks', seq: m.seq, marks: marksFor(o, text, mode), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
+      } else if (m.type === 'review') {
+        // a code conflict's empty version accepted: nothing in the text says so - remembered
+        if (o.code) { o.code.reviewed = o.code.reviewed || new Map(); o.code.reviewed.set(String(m.id), String(m.choice || 'feature')); }
+        text = typeof m.text === 'string' ? m.text : text;
+        post({ type: 'marks', seq: m.seq, marks: marksFor(o, text, mode), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
+      } else if (m.type === 'text' && m.side === 'left') {
+        // a comparison's other side, edited: compared again
+        o.target = String(m.text);
+        post({ type: 'marks', seq: m.seq, mode, marks: marksFor(o, text, mode), conflicts: [] });
+      } else if (m.type === 'text') {
         text = String(m.text);
         if (o.onText) o.onText(text);
         const marks = marksFor(o, text, mode);
@@ -107,10 +147,18 @@ function open(vscode, extensionUri, o) {
         await vscode.env.clipboard.writeText(String(m.text));
       } else if (m.type === 'paste') {
         post({ type: 'pasted', id: m.id, text: await vscode.env.clipboard.readText() });
+      } else if (m.type === 'dedupe') {
+        const r = o.dedupe ? await o.dedupe(String(m.text)) : { error: 'Removing duplicates is not available here' };
+        post(Object.assign({ type: 'formatted', seq: m.seq, side: m.side || 'right' }, r));
+      } else if (m.type === 'format') {
+        const r = o.format ? o.format(String(m.text)) : { error: 'Formatting is not available here' };
+        post(Object.assign({ type: 'formatted', seq: m.seq, side: m.side || 'right' }, r));
       } else if (m.type === 'report' || m.type === 'swap' || m.type === 'copyResult' || m.type === 'saveAs') {
         // the \u22ef menu's report and swap; a manual merge's two ways out - copied, or saved as a file
+        // a comparison's other side, saved as a file: its own text
+        if (m.type === 'saveAs' && m.side === 'left') { const r = o.saveAs ? await o.saveAs(String(m.text), 'left') : null; if (r && r.message) post({ type: 'saved', ok: !!r.ok, message: r.message, text }); return; }
         if (m.text != null) { text = String(m.text); if (o.onText) o.onText(text); }
-        const r = o[m.type] ? await o[m.type](text) : null;
+        const r = o[m.type] ? await o[m.type](text, 'right') : null;
         if (r && r.message) post({ type: 'saved', ok: !!r.ok, message: r.message, text });
       } else if (m.type === 'discard') {
         if (o.discard) await o.discard();
