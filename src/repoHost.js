@@ -103,25 +103,7 @@ function createHost(repo, token) {
   const enc = encodeURIComponent;
   const bbHash = new Map();
   const okJson = async (url) => { const r = await get(url, { Accept: 'application/json' }); return r.status === 200 && !/text\/html/.test(r.headers['content-type'] || '') ? JSON.parse(r.body.toString('utf8')) : null; };
-  const SHA = /^[0-9a-f]{40}$/i;
-  const base = {
-    azure: async (a, b) => {
-      const head = async br => { const v = await okJson(repo.api + '/refs?filter=' + enc('heads/' + br) + '&api-version=7.1'); const x = v && (v.value || []).find(r => r.name === 'refs/heads/' + br); return x ? x.objectId : null; };
-      const [ha, hb] = [await head(a), await head(b)];
-      if (!ha || !hb) return null;
-      const v = await okJson(repo.api + '/commits/' + ha + '/mergebases?otherCommitId=' + hb + '&api-version=7.1');
-      return v && v.value && v.value[0] ? v.value[0].commitId : null;
-    },
-    github: async (a, b) => { const v = await okJson(repo.api + '/compare/' + enc(b) + '...' + enc(a)); return v && v.merge_base_commit ? v.merge_base_commit.sha : null; },
-    gitlab: async (a, b) => { const v = await okJson(repo.api + '/repository/merge_base?refs[]=' + enc(a) + '&refs[]=' + enc(b)); return v ? v.id : null; },
-    bitbucket: async (a, b) => { const v = await okJson(repo.api + '/merge-base/' + enc(a) + '..' + enc(b)); return v ? v.hash : null; }
-  };
-  const fileAt = {
-    azure: (sha, p) => get(repo.api + '/items?path=' + enc('/' + p) + '&versionDescriptor.version=' + enc(sha) + '&versionDescriptor.versionType=commit&includeContent=true&$format=octetStream&api-version=7.1'),
-    github: (sha, p) => get(repo.api + '/contents/' + p.split('/').map(enc).join('/') + '?ref=' + enc(sha), { Accept: 'application/vnd.github.raw+json' }),
-    gitlab: (sha, p) => get(repo.api + '/repository/files/' + enc(p) + '/raw?ref=' + enc(sha)),
-    bitbucket: (sha, p) => get(repo.api + '/src/' + sha + '/' + p.split('/').map(enc).join('/'))
-  };
+
   // the branches, and what differs between two of them - as added (only in "from"), removed (only in "to") or changed
   const many = async (first, pick, next) => { const out = []; let url = first; for (let i = 0; url && i < 20; i++) { const v = await okJson(url); if (!v) break; out.push(...pick(v)); url = next(v, i); } return out; };
   const listBranches = {
@@ -246,19 +228,6 @@ function createHost(repo, token) {
     async listBranches() { try { return [...new Set(await listBranches[repo.provider]())].sort(); } catch (e) { return []; } },
     /** The files that differ between two branches: [{ path, kind: added | removed | changed }], or null when it cannot say. */
     async changedFiles(from, to) { try { return await changed[repo.provider](from, to); } catch (e) { return null; } },
-    /** The commit two branches last shared - their merge-base - or null. */
-    async mergeBase(a, b) {
-      const f = base[repo.provider];
-      try { const sha = f ? await f(a, b) : null; return sha && SHA.test(sha) ? sha : null; } catch (e) { return null; }
-    },
-    /** A file as it was at a commit; null where it did not exist. */
-    async readFileAt(sha, p) {
-      if (!SHA.test(String(sha))) throw new Error('not a commit: ' + sha);
-      const r = await fileAt[repo.provider](sha, p);
-      if (r.status === 404) return null;
-      if (r.status !== 200) throw new Error(explain(r, 'Reading ' + p));
-      return r.body;
-    },
     async readFile(branch, p) {
       const r = await ops.file(branch, p);
       if (r.status === 404) return null;

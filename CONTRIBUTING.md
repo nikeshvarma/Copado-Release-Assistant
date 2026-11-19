@@ -19,7 +19,7 @@ npm install --no-save @vscode/test-electron
 npm run test:vscode       # on Linux without a display: xvfb-run -a npm run test:vscode
 ```
 
-Open the folder in VS Code and press **F5** to start an Extension Development Host with the extension loaded. `samples/` has two permission sets to try a merge on.
+Open the folder in VS Code and press **F5** to start an Extension Development Host with the extension loaded. `samples/` has two permission sets to try a comparison on.
 
 GitHub Actions runs every one of these on each push and pull request (`.github/workflows/test.yml`): the unit tests on Linux, Windows and macOS with Node 20 and 22; the checks and the package; the browser tests; the VS Code tests on all three systems.
 
@@ -55,16 +55,18 @@ The package is the files git tracks, less what `.vscodeignore` leaves out - comm
 extension.js     entry point: diagnostics, formatting, merge sessions in the merge editor
 release.js       package.xml, branch conflicts, validation, user stories
 promotionUi.js   promotions on the Release Assistant page
-releasePage.js   the Release Assistant page - Promotions, Stories, Manual               media/page.js   its script
-manualUi.js      the page's Manual tab: two versions merged by hand, a package from a commit file
+releasePage.js   the Release Assistant page - Promotions, Stories, Manual, Compare      media/page.js   its script
+manualUi.js      the page's Manual tab: two versions compared side by side, a package from a commit file
 lifecycleUi.js   the page's Stories: a story's journey, validate, package
 compareUi.js     the page's Compare: two branches of the connected repository (src/compareBranches: by type, in a few words)
 media/merge.*    the merge editor's page            media/monaco/   Monaco Editor (MIT)
-src/             the engine - no VS Code dependency, fully unit-tested: merge, mergeAlign (the merge
-                 editor's pieces - metadata by element), codeMerge (code merged by its members, and its marks in
-                 one pane), codeChecks (code's problems as you type), mergeDuplicates, xmlCompare, mergeStart, mergePanel (the panel),
-                 registry and keys (what identifies each metadata element), repoHost (the repository: files,
-                 merge-bases), the Copado side (copadoClient, promotion, promotionWork), guard (the team policy), ...
+src/             the engine - no VS Code dependency, fully unit-tested: codeMerge (Copado's conflict file - its
+                 conflicts, found again as you edit), unionMerge (permission sets and profiles: the target, the feature
+                 added), mergePanel (the panel - one, two or three panes), merge and mergeAlign (metadata by element -
+                 Branch conflicts, the union types' marks), codeChecks, mergeDuplicates, xmlCompare, mergeStart,
+                 registry and keys (what identifies each metadata element), repoHost (the repository: branches, files,
+                 changed files), borrow (what a pre-check lacks, from the source org), retention (old working files),
+                 the Copado side (copadoClient, promotion, promotionWork), guard (the team policy), ...
 scripts/         packaging and checks - plain Node
 test/            smoke.js and smoke3.js, browser.js, integration/, fixtures/
 ```

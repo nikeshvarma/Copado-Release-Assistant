@@ -32,7 +32,9 @@ function fromConflictFile(conflictText) {
     i = b.b1;
   });
   out.push(...lines.slice(i));
-  return { text: out.join(''), conflicts };
+  // each branch as the file names it: <<<<<<< HEAD, >>>>>>> origin/feature/US-...
+  const name = re => { const m = re.exec(String(conflictText)); return m ? m[1].trim() || null : null; };
+  return { text: out.join(''), conflicts, labels: { ours: name(/^<{7} ?([^\r\n]*)/m), theirs: name(/^>{7} ?([^\r\n]*)/m) } };
 }
 
 /**
@@ -83,9 +85,11 @@ function marks(o) {
     const op = text => ({ b0: at.p, b1: at.q, expect: lines.slice(at.p, at.q).map(l => l.replace(/\r?\n$/, '')), insert: text });
     const trimmed = t => { const ls = split(t); let a = 0, z = ls.length; while (a < z && !key(ls[a])) a++; while (z > a && !key(ls[z - 1])) z--; return ls.slice(a, z); };
     rows.push({ kind: 'conflict', id: c.id, label: where(at.p, c), b0: at.p, b1: at.q, at: at.p, chosen: at.chosen, needs: at.chosen === 'none',
-      // nothing chosen yet: both versions shown, neither in the file. An empty version chosen: the other's lines struck through
-      ghosts: at.chosen === 'none' ? [{ at: at.p, lines: trimmed(c.target), cls: 'alt', title: 'Target' }, { at: at.p, lines: trimmed(c.feature), cls: 'alt', title: 'Feature' }].filter(g => g.lines.length)
+      // nothing chosen yet: both versions shown, neither in the file - an empty feature version says it removes the lines.
+      // An empty version chosen: the other's lines struck through - removed by the feature, or left out by you
+      ghosts: at.chosen === 'none' ? [{ at: at.p, lines: trimmed(c.target), cls: 'alt', title: 'Target' }, { at: at.p, lines: trimmed(c.feature), cls: 'alt', title: 'Feature', removes: !trimmed(c.feature).length && !!trimmed(c.target).length }].filter(g => g.lines.length || g.removes)
         : at.q === at.p ? [{ at: at.p, lines: trimmed(at.chosen === 'target' ? c.feature : c.target), cls: 'struck' }].filter(g => g.lines.length) : [],
+      outcome: at.q === at.p && at.chosen === 'feature' && !trimmed(c.feature).length ? 'removed' : at.q === at.p && at.chosen === 'target' && !trimmed(c.target).length ? 'leftout' : null,
       // lit only once a version is in - the blank line or two where it was are git's, not the conflict's
       hl: at.chosen !== 'none' && at.q > at.p ? [[at.p, at.q]] : [],
       actions: [{ label: 'Accept target', choice: 'target', op: op(c.target) }, { label: 'Accept feature', choice: 'feature', op: op(c.feature) }, { label: 'Accept both', choice: 'both', op: op(c.target + c.feature) }] });

@@ -1348,15 +1348,6 @@ ok('Phase 2b: writes go straight to the REST API with the CLI\u2019s session - P
   }
 });
 
-function promoMerge() {
-  const { runMergeJob } = require('../src/mergeJob');
-  return async (ours, theirs, base) => {
-    const r = runMergeJob({ targetText: ours, incomingText: theirs, ancestorText: base, merge: { dedupe: true, winner: 'incoming' }, format: { indent: 4, eol: '\n' }, normalize: false, rules: { enable: false } });
-    if (!r.ok) return { ok: false, error: r.error };
-    const clashes = r.marks.filter(m => m.mark.kind === 'conflict').map(m => ({ line: m.startLine, tag: m.mark.conflict.tag, target: m.mark.conflict.base, incoming: m.mark.conflict.incoming }));
-    return { ok: true, mergedText: r.mergedText, conflicts: r.report.conflicts.length, clashes };
-  };
-}
 
 function promoOrg() {
   const fp = f => '    <fieldPermissions>\n        <editable>false</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
@@ -1379,7 +1370,7 @@ ok('promotion workspace: everything fetched at once, sorted into resolved automa
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra promo '));
   const s = W.store(dir);
   const promotion = { id: 'P1', name: 'P10001', from: 'dev', to: 'qa' };
-  const r = await W.sync(api, s, promotion, promoMerge(), { copadoOrg: 'copado' });
+  const r = await W.sync(api, s, promotion, { copadoOrg: 'copado' });
   assert.strictEqual(r.fetched, 3, 'three conflict files, fetched together; the change list is not a conflict');
   const f = r.state.files;
   const ps = f['force-app/main/default/permissionsets/Sales.permissionset-meta.xml'];
@@ -1388,7 +1379,8 @@ ok('promotion workspace: everything fetched at once, sorted into resolved automa
   assert.ok(resolved.includes('Account.FromQa__c') && resolved.includes('Account.FromFeature__c') && !resolved.includes('<<<<<<<'));
   assert.ok(s.read('promotion', 'force-app/main/default/permissionsets/Sales.permissionset-meta.xml').includes('FromQa__c'), 'the sides keep their real file names');
   const ops = f['force-app/main/default/permissionsets/Ops.permissionset-meta.xml'];
-  assert.deepStrictEqual([ops.state, ops.conflicts], ['review', 1]);
+  // both changed its description: the target's entries kept, the feature's change applied - nothing to decide
+  assert.deepStrictEqual([ops.state, ops.conflicts], ['auto', 0]);
   const code = f['force-app/main/default/classes/A.cls'];
   assert.deepStrictEqual([code.state, code.conflicts], ['code', 1]);
   const codeText = s.read('resolved', 'force-app/main/default/classes/A.cls');
@@ -1397,36 +1389,16 @@ ok('promotion workspace: everything fetched at once, sorted into resolved automa
   // nothing changed in Copado: a refresh fetches nothing and keeps local work
   s.write('resolved', 'force-app/main/default/classes/A.cls', 'class A {\n  same();\n  feature();\n}\n');
   const st = s.load(); st.files['force-app/main/default/classes/A.cls'].state = 'resolved'; s.save(st);
-  const again = await W.sync(api, s, promotion, promoMerge(), {});
+  const again = await W.sync(api, s, promotion, {});
   assert.strictEqual(again.fetched, 0);
   assert.strictEqual(again.state.files['force-app/main/default/classes/A.cls'].state, 'resolved');
   // resolved in Copado meanwhile: marked, never overwritten
   api.att.A4.Name = 'RESOLVED ' + api.att.A4.Name;
-  const third = await W.sync(api, s, promotion, promoMerge(), {});
+  const third = await W.sync(api, s, promotion, {});
   assert.strictEqual(third.state.files['force-app/main/default/permissionsets/Ops.permissionset-meta.xml'].state, 'copado');
   rmTree(dir);
 });
 
-ok('the page\u2019s choices: each clash takes the side you pick, exactly as the merge view would write it', async () => {
-  const W = require('../src/promotionWork');
-  const api = promoOrg();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra choose '));
-  const s = W.store(dir);
-  await W.sync(api, s, { id: 'P1', name: 'P10001' }, promoMerge(), {});
-  const rel = 'force-app/main/default/permissionsets/Ops.permissionset-meta.xml';
-  const e = s.load().files[rel];
-  assert.strictEqual(e.clashes.length, 1);
-  assert.deepStrictEqual([e.clashes[0].tag, e.clashes[0].target, e.clashes[0].incoming], ['description', 'qa text', 'feature text']);
-  const merged = s.read('merged', rel);
-  assert.ok(merged.includes('<description>feature text</description>'), 'the automatic result takes the feature\u2019s value');
-  const r = W.applyChoices(merged, e.clashes, { 0: 'target' });
-  assert.deepStrictEqual([r.applied, r.moved], [1, []]);
-  assert.ok(r.text.includes('    <description>qa text</description>\n') && !r.text.includes('feature text'), 'the promotion side, indent and line ending kept');
-  assert.strictEqual(X.parse(r.text).root.name, 'PermissionSet');
-  assert.strictEqual(W.applyChoices(merged, [{ line: 999, tag: 'x', target: 'a', incoming: 'b' }], { 0: 'target' }).moved.length, 1, 'a clash whose line moved is reported, not guessed');
-  assert.ok(W.applyChoices(merged, [{ line: e.clashes[0].line, tag: 'description', target: 'a < b & c', incoming: '' }], { 0: 'target' }).text.includes('<description>a &lt; b &amp; c</description>'), 'values are escaped');
-  rmTree(dir);
-});
 
 ok('the page: only the extension\u2019s own script runs, and the stylesheet uses only VS Code\u2019s theme', () => {
   const Module = require('module'); const load = Module._load;
@@ -1594,7 +1566,7 @@ ok('promotion workspace: Upload all checks each file, uploads in parallel, sets 
   const api = promoOrg();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra upload '));
   const s = W.store(dir);
-  await W.sync(api, s, { id: 'P1', name: 'P10001' }, promoMerge(), { copadoOrg: 'copado' });
+  await W.sync(api, s, { id: 'P1', name: 'P10001' }, { copadoOrg: 'copado' });
   // the review file accepted with a choice; the code file resolved by hand - but one is left broken
   const st = s.load();
   s.write('resolved', 'force-app/main/default/permissionsets/Ops.permissionset-meta.xml', s.read('merged', 'force-app/main/default/permissionsets/Ops.permissionset-meta.xml'));
@@ -1719,7 +1691,7 @@ ok('the Promotions tab, end to end: open, sorted groups, accept, save a code fil
   ui.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => state.has(k) ? state.get(k) : d, update: async (k, v) => state.set(k, v) } }, {
     output: { appendLine: l => logs.push(l) }, rc: () => ({ copadoOrg: 'copado', sfPath: 'sf' }), cmd: (id, fn) => { registered[id] = fn; },
     requireTrust() {}, projectRoot: () => root, apiVersion: async () => '62.0', copadoApi: () => api,
-    deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), promoMerge: promoMerge(), startSession: async () => {} },
+    deps: { storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), startSession: async () => {} },
     cmdValidate: async o => { calls.validate = o; }, runBranchCheck: async o => { calls.branch = o; },
     orgForEnvironment: async (c, r, id, name) => name === 'dev' ? 'devAlias' : name === 'qa' ? 'qaAlias' : null, orgList: async () => [], sfcli: { openPath: async () => {} },
     credentialsFor: async () => [], onValidation: () => ({ dispose() {} }), validationStatus: () => null, validatePromotionBranch: async o => { calls.promoBranch = o; },
@@ -1735,13 +1707,11 @@ ok('the Promotions tab, end to end: open, sorted groups, accept, save a code fil
   assert.deepStrictEqual([opened[0], treeViews], ['cmr.page.open', 0], 'it opens on the page; there is no sidebar view for a promotion');
   const snap0 = await ui.snapshot();
   assert.deepStrictEqual([snap0.current.promotion.name, snap0.current.promotion.status], ['P10001', 'Merge Conflict']);
-  assert.deepStrictEqual(await groups(), ['To review (1)', 'Code to resolve (1)', 'Ready to upload (1)']);
-  const reviewRel = Object.entries(snap0.current.state.files).find(([, e]) => e.state === 'review')[0];
-  assert.strictEqual(path.basename(reviewRel), 'Ops.permissionset-meta.xml');
-  assert.ok(info.some(m => /1 resolved automatically, 1 to review, 1 code file to resolve/.test(m)), info.join(' | '));
+  // both permission sets: the target with the feature added - ready; the code file is yours
+  assert.deepStrictEqual(await groups(), ['Code to resolve (1)', 'Ready to upload (2)']);
+  assert.ok(info.some(m => /2 resolved automatically, 1 code file to resolve/.test(m)), info.join(' | '));
   assert.ok(logs.some(l => /3 files fetched in/.test(l)));
 
-  await ui.act('accept', { rel: reviewRel });
   // the code file, finished in the editor and saved: it moves to Ready by itself
   const codeFile = path.join(root, '.copado', 'promotions', 'P10001', 'resolved', 'force-app', 'main', 'default', 'classes', 'A.cls');
   fs.writeFileSync(codeFile, 'class A {\n  same();\n  feature();\n}\n');
@@ -1926,7 +1896,7 @@ ok('a fix on a 49,000-line file removes one entry and nothing else', () => {
 });
 
 /* ------------------------------------------------------------ 3.0 */
-require('./smoke3')(ok, section, { fakeGitHosts: (...a) => fakeGitHosts(...a), fakeSf: (...a) => fakeSf(...a), promoMerge: (...a) => promoMerge(...a), promoOrg: (...a) => promoOrg(...a) });
+require('./smoke3')(ok, section, { fakeGitHosts: (...a) => fakeGitHosts(...a), fakeSf: (...a) => fakeSf(...a), promoOrg: (...a) => promoOrg(...a) });
 
 /* ------------------------------------------------------------ run */
 (async () => {

@@ -31,7 +31,7 @@ function activate(context, promotionUi, lifecycleUi, cmd, manualUi, compareUi) {
   if (life) life.onChange(() => push());
 }
 
-/** The page - on a tab of it, when one is named (Merge in Release Assistant opens Manual). */
+/** The page - on a tab of it, when one is named (Compare in Release Assistant opens Manual). */
 function show(nav) {
   if (panel) { panel.reveal(); if (nav) panel.webview.postMessage({ type: 'nav', nav }); return push(); }
   pendingNav = nav || null;

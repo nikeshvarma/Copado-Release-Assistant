@@ -67,7 +67,7 @@ const mergedFile = () => {
   return f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
 };
 
-test('Merge in Release Assistant opens the page on its Manual tab, with the file as the target', async () => {
+test('Compare in Release Assistant opens the page on its Manual tab, with the file as the target', async () => {
   const file = vscode.Uri.file(path.join(root(), 'conflict', 'metadata', 'resolution.xml'));
   await vscode.commands.executeCommand('cmr.manual.mergeWith', file);
   await until(() => vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputWebview && /cmrPage/.test(t.input.viewType)), 'the Release Assistant page', 30000);

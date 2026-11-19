@@ -10,7 +10,7 @@
   S.widgets = { left: [], right: [] };
   // identical lines folded away: this many stay around every change, and a run shorter than RUN stays
   const CONTEXT = 3, RUN = 4;
-  let L, R, monaco;
+  let L, R, F, monaco;
 
   // ---- colours and fonts from VS Code's theme ----
   const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -67,6 +67,8 @@
     L = monaco.editor.create($('left'), Object.assign({}, common, { readOnly: true, domReadOnly: true, renderValidationDecorations: 'off' }));
     // folding in your pane, by element (indentation); each fold is mirrored on the target's lines, so the panes stay level
     R = monaco.editor.create($('right'), Object.assign({}, common, { folding: true, foldingStrategy: 'indentation', showFoldingControls: 'mouseover', foldingHighlight: false }));
+    // the third panel - Copado's: the feature branch's side, read-only, beside your resolution
+    F = monaco.editor.create($('feat'), Object.assign({}, common, { readOnly: true, domReadOnly: true, renderValidationDecorations: 'off' }));
     if (view.split) setSplit(view.split);
     divider(); watchFolds(); tags(); quietFindWidget();
     // a comparison: what you do to the other side is compared again too
@@ -76,8 +78,7 @@
     const sync = (from, to) => from.onDidScrollChange(e => {
       if (syncing || (!e.scrollTopChanged && !e.scrollLeftChanged)) return;
       syncing = true;
-      if (e.scrollTopChanged) to.setScrollTop(e.scrollTop);
-      if (e.scrollLeftChanged) to.setScrollLeft(e.scrollLeft);
+      for (const t of (to === F ? [F] : [to].concat(from === F ? [] : [F]))) { if (t === from) continue; if (e.scrollTopChanged) t.setScrollTop(e.scrollTop); if (e.scrollLeftChanged) t.setScrollLeft(e.scrollLeft); }
       syncing = false;
     });
     sync(L, R); sync(R, L);
@@ -222,20 +223,90 @@
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   function zoneNode(cls, html) { const d = document.createElement('div'); d.className = 'zone ' + cls; d.innerHTML = html || ''; return d; }
+  // ---- three panels, Copado's own: the promotion branch's side, your resolution, the feature branch's side ----
+  function drawThree(m, items, ld, rd, fd, whole, zone, HEAD, colours) {
+    const { GREEN, YELLOW } = colours;
+    if (F.getValue() !== (m.feat || '')) F.getModel().setValue(m.feat || '');
+    const segs = m.segs || [];
+    // the rows first: at the same line a row stands above the padding, so each conflict's row is level in all three
+    for (const r of m.rows || []) {
+      const s = segs.find(x => x.r0 === r.at) || segs.find(x => x.r0 <= r.at && r.at <= x.r1);
+      if (!s) continue;
+      const done = !r.needs, tag = tagOf(r), cls = ROW(tag)[0];
+      // what was removed or left out: struck through in the resolution; a feature version that removes: said on its side
+      const act = c => { const a = r.actions.find(x => x.choice === c); return Object.assign([a.op], { review: r.id, choice: c }); };
+      const mark = c => r.chosen === c ? ' on' : '';
+      // the resolution's row: what it is, and both; each side's: its arrow into the resolution, the same height
+      items.right.push({ after: s.r0, lines: 0, px: HEAD, node: rowNode(cls, ROW(tag)[1]), buttons: [['\u2261', 'Accept both', act('both'), cls + mark('both')]], cls });
+      items.left.push({ after: s.l0, lines: 0, px: HEAD, node: zoneNode('head side3'), buttons: [['\u2192', 'Accept promotion', act('target'), 'arw' + mark('target')]], cls: 'arw' });
+      items.feat.push({ after: s.f0, lines: 0, px: HEAD, node: zoneNode('head side3'), buttons: [['\u2190', 'Accept feature', act('feature'), 'arw fea' + mark('feature')]], cls: 'arw' });
+      // under the rows - each at its line, after them: what was removed or left out, struck; that the feature removes
+      const struck = (r.ghosts || []).find(g => g.cls === 'struck');
+      if (struck && s.r1 === s.r0) { items.right.push({ after: s.r0, lines: struck.lines.length, node: struckNode(r, struck.lines) }); s.rExtra = struck.lines.length; }
+      if ((r.ghosts || []).some(g => g.removes)) { const n = zoneNode('alt fea'); n.innerHTML = '<div class="alt-t">\u25be <b>Feature</b> \u00b7 removes these lines</div>'; items.feat.push({ after: s.f0, lines: 1, node: n }); s.fExtra = 1; }
+      for (const [h0, h1] of r.hl) whole(rd, h0, h1, cls, done ? GREEN : YELLOW);
+    }
+    for (const s of segs) {
+      const nL = s.l1 - s.l0, nR = s.r1 - s.r0 + (s.rExtra || 0), nF = s.f1 - s.f0 + (s.fExtra || 0), H = Math.max(nL, nR, nF);
+      whole(ld, s.l0, s.l1, 'tgt3'); whole(fd, s.f0, s.f1, 'fea3');
+      // each side padded to the tallest: the three stay level
+      if (H > nL) zone('left', s.l1, H - nL, zoneNode('pad'));
+      if (H > nR) zone('right', s.r1, H - nR, zoneNode('pad'));
+      if (H > nF) zone('feat', s.f1, H - nF, zoneNode('pad'));
+      // the words that differ, line for line
+      if (nL === nF) for (let k = 0; k < nL; k++) wordsApart(s.l0 + k, s.f0 + k, ld, fd);
+    }
+    // the headings: Copado's - each branch as Copado's file names it
+    const lb = S.gitLabels || {};
+    $('lefthead').innerHTML = '<b>Conflicts in Promotion branch</b>' + (lb.ours ? ' \u00b7 ' + esc(lb.ours) : '');
+    $('righthead').innerHTML = '<b>Resolution</b> \u00b7 <span class="ok">editable</span>';
+    $('feathead').innerHTML = '<b>Conflicts in Feature branch</b>' + (lb.theirs ? ' \u00b7 ' + esc(lb.theirs) : '');
+  }
+  // within a line both sides changed: only what differs lit - what comes before and after is the same
+  function middle(a, b) {
+    if (a === b) return [-1, -1];
+    let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let q = 0; while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
+    return [p, q];
+  }
+  function wordsApart(l, f, ld, fd) {
+    const a = L.getModel().getLineContent(l + 1), b = F.getModel().getLineContent(f + 1);
+    if (a === b) return;
+    let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let q = 0; while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
+    if (a.length - q > p) ld.push({ range: new monaco.Range(l + 1, p + 1, l + 1, a.length - q + 1), options: { inlineClassName: 'w3t' } });
+    if (b.length - q > p) fd.push({ range: new monaco.Range(f + 1, p + 1, f + 1, b.length - q + 1), options: { inlineClassName: 'w3f' } });
+  }
+  // identical lines folded away in all three - where they agree, between the places they differ
+  function threeRuns(m) {
+    const ctx = 3, out = [], segs = (m.segs || []).concat([{ l0: L.getModel().getLineCount(), r0: R.getModel().getLineCount(), f0: F.getModel().getLineCount(), end: true }]);
+    let l = 0, r = 0, f = 0;
+    for (const s of segs) {
+      const n = s.r0 - r, a = r === 0 ? 0 : ctx, z = s.end ? 0 : ctx;
+      if (n - a - z >= 4 && !(S.expanded || []).some(([e0, e1]) => e0 < s.r0 - z && r + a < e1)) out.push({ a0: l + a, a1: s.l0 - z, b0: r + a, b1: s.r0 - z, f0: f + a, f1: s.f0 - z });
+      if (s.end) break;
+      l = s.l1; r = s.r1; f = s.f1;
+    }
+    return out;
+  }
+  // what a conflict's row says: to resolve; resolved - its lines in the file; or, an empty version accepted, removed by
+  // the feature or left out by you - lines not in the file, struck through in their colour
+  const tagOf = r => r.needs ? 'conflict' : r.outcome === 'removed' ? 'removedRes' : r.outcome === 'leftout' ? 'leftOut' : 'resolved';
+  const struckNode = (r, lines) => ghostNode(lines, r.outcome === 'leftout' ? 'leftout' : 'gone');
   // a conflict's row: the version accepted shown as chosen; nothing chosen yet, said
   function markChoice(it, r) {
     if (!it) return;
     const pick = { target: 0, feature: 1, both: 2 }[r.chosen];
     it.buttons.forEach((b, i) => { if (i === pick) b[3] = (b[3] || '') + ' on'; });
   }
-  function altNode(title, lines) {
+  function altNode(title, lines, removes) {
     const d = document.createElement('div');
     d.className = 'zone alt';
     // one line of the editor per line - the zone is that many lines high
     const lh = R.getOption(monaco.editor.EditorOption.lineHeight);
     d.style.fontFamily = fontFamily(); d.style.fontSize = fontSize() + 'px'; d.style.lineHeight = lh + 'px'; d.style.setProperty('--lh', lh + 'px');
     d.className += title === 'Target' ? ' tgt' : title === 'Feature' ? ' fea' : '';
-    d.innerHTML = '<div class="alt-t">\u25be <b>' + esc(title) + '</b></div>' +
+    d.innerHTML = '<div class="alt-t">\u25be <b>' + esc(title) + '</b>' + (removes ? ' \u00b7 removes these lines' : '') + '</div>' +
       lines.map(l => '<div class="alt-l">' + (esc(l.replace(/\r?\n$/, '')) || '&nbsp;') + '</div>').join('');
     return d;
   }
@@ -282,6 +353,8 @@
     // a promotion's code: a conflict git left - neither version in until one is accepted
     conflict: ['conf', 'Conflict', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
     resolved: ['res', 'Resolved', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
+    removedRes: ['rem', 'Removed', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
+    leftOut: ['lo', 'Left out', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
     // a comparison: what differs, said - nothing to move across
     plainDiff: ['mv', 'Differs', []],
     plainRight: ['mv', 'Only here', []],
@@ -296,7 +369,8 @@
     document.body.classList.toggle('single', !!m.single);
     const lh = R.getOption(monaco.editor.EditorOption.lineHeight);
     const HEAD = Math.max(22, lh + 3), FOLD = lh + 4;
-    const items = { left: [], right: [] };
+    const items = { left: [], right: [], feat: [] };
+    document.body.classList.toggle('three', !!m.three);
     // a zone: lines, or a header row's pixels; buttons over it, or the whole of it a click
     const zone = (sd, after, lines, node, buttons, opts) => items[sd].push(Object.assign({ after, lines, node, buttons }, opts || {}));
     // a change's row on both sides: the word on your side, a wordless row on the target's, the same height
@@ -318,7 +392,7 @@
       if (!m.single) zone('left', leftAfter, 0, zoneNode('head ' + cls + ' l'), null, { px: HEAD });
       return item;
     };
-    const ld = [], rd = [];
+    const ld = [], rd = [], fd = [];
     const whole = (arr, l0, l1, cls, ruler, glyph) => { if (l1 > l0) arr.push({ range: new monaco.Range(l0 + 1, 1, l1, 1), options: { isWholeLine: true, className: cls, linesDecorationsClassName: cls + '-g', glyphMarginClassName: glyph || undefined, overviewRuler: ruler ? { color: ruler, position: monaco.editor.OverviewRulerLane.Full } : undefined } }); };
     const ORANGE = 'rgba(232,145,45,.9)', RED = 'rgba(241,76,76,.7)', GREEN = 'rgba(137,209,133,.8)', BLUE = 'rgba(55,148,255,.8)', PURPLE = 'rgba(177,128,215,.9)', YELLOW = 'rgba(204,167,0,.9)';
 
@@ -328,26 +402,59 @@
     // code, one pane: each row - its words, its buttons, the other version's or the old lines under it, its lines lit
     if (m.single) for (const r of m.rows) {
       const done = !r.needs;
-      const it = row(done ? 'resolved' : 'conflict', r.at, r.at, r.actions.map(a => Object.assign([a.op], { review: r.id, choice: a.choice })), null);
+      const it = row(tagOf(r), r.at, r.at, r.actions.map(a => Object.assign([a.op], { review: r.id, choice: a.choice })), null);
       markChoice(it, r);
-      for (const g of r.ghosts) g.cls === 'struck' ? zone('right', g.at, g.lines.length, ghostNode(g.lines, 'dropped')) : zone('right', g.at, g.lines.length + 1, altNode(g.title, g.lines));
+      for (const g of r.ghosts) g.cls === 'struck' ? zone('right', g.at, g.lines.length, struckNode(r, g.lines)) : zone('right', g.at, g.lines.length + 1, altNode(g.title, g.lines, g.removes));
       for (const [h0, h1] of r.hl) whole(rd, h0, h1, done ? 'res' : 'conf', done ? GREEN : YELLOW);
     }
-    const conflictRows = !m.single && m.code && !m.plain ? (m.rows || []) : [];
+    const conflictRows = !m.single && m.code && !m.plain && !m.three ? (m.rows || []) : [];
     // a line under a choice's row is the choice's - and a member left out is its row, not a removal as well
     const underConflict = p => conflictRows.some(r => (p.b0 < r.b1 && r.b0 < Math.max(p.b1, p.b0 + 1)) || (r.b0 === r.b1 && p.b1 === p.b0 && p.b0 === r.b0));
+    // the line piece a conflict sits on: the target's lines there, and what the resolution has there
+    const conflictPieces = r => { const ps = m.pieces.filter(p => p.kind !== 'same' && ((p.b0 < r.b1 && r.b0 < Math.max(p.b1, p.b0 + 1)) || (r.b0 === r.b1 && p.b0 === r.b0))); if (!ps.length) return null;
+      return { a0: Math.min(...ps.map(p => p.a0)), a1: Math.max(...ps.map(p => p.a1)), b0: Math.min(...ps.map(p => p.b0)), b1: Math.max(...ps.map(p => p.b1)) }; };
+    // the words that differ between the target's lines and the feature's version shown beside them
+    const wordsBeside = (piece, lines, node, ld) => {
+      if (piece.a1 - piece.a0 !== lines.length) return;
+      const rows = node.querySelectorAll('.alt-l');
+      lines.forEach((b0, k) => { const a = L.getModel().getLineContent(piece.a0 + k + 1), b = String(b0).replace(/\r?\n$/, '');
+        const [p, q] = middle(a, b); if (p < 0) return;
+        if (a.length - q > p) ld.push({ range: new monaco.Range(piece.a0 + k + 1, p + 1, piece.a0 + k + 1, a.length - q + 1), options: { inlineClassName: 'w3t' } });
+        if (rows[k] && b.length - q > p) rows[k].innerHTML = esc(b.slice(0, p)) + '<span class="w3f">' + esc(b.slice(p, b.length - q)) + '</span>' + esc(b.slice(b.length - q)); });
+    };
     for (const r of conflictRows) {
-      const done = !r.needs;
-      const it = row(done ? 'resolved' : 'conflict', r.at, leftOf(r.at), r.actions.map(a => Object.assign([a.op], { review: r.id, choice: a.choice })), null);
-      markChoice(it, r);
-      const h = r.ghosts.reduce((n, g) => n + g.lines.length + (g.cls === 'struck' ? 0 : 1), 0);
-      for (const g of r.ghosts) g.cls === 'struck' ? zone('right', g.at, g.lines.length, ghostNode(g.lines, 'dropped')) : zone('right', g.at, g.lines.length + 1, altNode(g.title, g.lines));
-      if (h) zone('left', leftOf(r.at), h, zoneNode('pad'));
+      const done = !r.needs, tag = tagOf(r), cls = ROW(tag)[0];
+      const pieceOf = conflictPieces(r);
+      const la0 = pieceOf ? pieceOf.a0 : leftOf(r.at), la1 = pieceOf ? pieceOf.a1 : leftOf(r.at), rb1 = pieceOf ? pieceOf.b1 : r.at;
+      // the resolution's row: the feature and both - the target's button stands beside its lines, on the left
+      // each action in its own place - the row's buttons follow their order; the target's left empty here
+      const ops = ['target', 'feature', 'both'].map(c => { const a = r.actions.find(x => x.choice === c); return c === 'target' || !a ? null : Object.assign([a.op], { review: r.id, choice: c }); });
+      const it = row(tag, r.at, la0, ops, null);
+      if (it) {
+        it.buttons = it.buttons.map((b, k) => { const c = ['feature', 'both'][k]; return r.chosen === c ? b.slice(0, 3).concat([(b[3] || '') + ' on']) : b; });
+        const counterpart = items.left[items.left.length - 1], t = r.actions.find(a => a.choice === 'target');
+        if (counterpart && t) counterpart.buttons = [['\u21b6', 'Accept target', Object.assign([t.op], { review: r.id, choice: 'target' }), 'arw' + (r.chosen === 'target' ? ' on' : '')]];
+      }
+      // under the row: the feature's version (or that it removes the lines) - or what was removed or left out, struck
+      const shown = r.ghosts.filter(g => g.title !== 'Target');
+      let rightH = 0;
+      for (const g of shown) {
+        if (g.cls === 'struck') { zone('right', g.at, g.lines.length, struckNode(r, g.lines)); rightH += g.lines.length; }
+        else { const node = altNode(g.title, g.lines, g.removes); zone('right', g.at, g.lines.length + 1, node); rightH += g.lines.length + 1; if (pieceOf) wordsBeside(pieceOf, g.lines, node, ld); }
+      }
+      // the target's lines where they are, lit; the shorter side padded after its own
+      whole(ld, la0, la1, 'tgt3');
+      const leftH = la1 - la0, resH = (pieceOf ? pieceOf.b1 - pieceOf.b0 : 0) + rightH;
+      if (resH > leftH) zone('left', la1, resH - leftH, zoneNode('pad'));
+      else if (leftH > resH) zone('right', rb1, leftH - resH, zoneNode('pad'));
       for (const [h0, h1] of r.hl) whole(rd, h0, h1, done ? 'res' : 'conf', done ? GREEN : YELLOW);
     }
-    for (const p of (m.single ? [] : m.pieces)) {
+    if (m.three) drawThree(m, items, ld, rd, fd, whole, zone, HEAD, { GREEN, YELLOW });
+    for (const p of (m.single || m.three ? [] : m.pieces)) {
       if (p.kind === 'same') continue;
-      // under a conflict's row - or a promotion's code, where only conflicts are marked: colours, no row
+      // under a conflict's row: the conflict draws it, its padding too
+      if (m.git && underConflict(p)) continue;
+      // a promotion's file elsewhere - where only conflicts are marked: colours, no row
       if (underConflict(p) || m.git) { const lc0 = p.a1 - p.a0, rc0 = p.b1 - p.b0; if (lc0) whole(ld, p.a0, p.a1, 'del'); if (rc0 > lc0) zone('left', p.a1, rc0 - lc0, zoneNode('pad')); if (lc0 > rc0) zone('right', p.b1, lc0 - rc0, zoneNode('pad')); continue; }
       // blank lines only: no row - the panes kept level, nothing more
       if (p.kind === 'blank') {
@@ -416,16 +523,16 @@
     S.typed.clear(); if (S.deco.typed) S.deco.typed.set([]);
 
     // identical lines folded away - the same lines on both sides, so the panes stay level
-    S.hiddenRuns = S.hide ? identicalRuns(m) : [];
+    S.hiddenRuns = S.hide ? (m.three ? threeRuns(m) : identicalRuns(m)) : [];
     for (const run of S.hiddenRuns) {
       const n = run.b1 - run.b0, text = n + ' hidden line' + (n === 1 ? '' : 's');
       const open = () => { S.expanded.push([run.b0, run.b1]); draw(S.marks); };
       // after the run's last line: Monaco hides a row whose next line is hidden
-      for (const [sd, after] of [['right', run.b1], ['left', run.a1]]) {
+      for (const [sd, after] of [['right', run.b1], ['left', run.a1]].concat(m.three ? [['feat', run.f1]] : [])) {
         const margin = document.createElement('div');
         margin.className = 'fold-m';
         // Monaco's margin zones have no width of their own: the icon is placed in pixels, under the line numbers
-        const li = (sd === 'left' ? L : R).getLayoutInfo();
+        const li = (sd === 'left' ? L : sd === 'feat' ? F : R).getLayoutInfo();
         // Monaco sizes a margin zone itself: the icon is placed inside it, exactly over the line-number column
         margin.innerHTML = '<span class="fx" style="left:' + li.lineNumbersLeft + 'px;width:' + li.lineNumbersWidth + 'px;height:' + FOLD + 'px">' + ICON.expand + '</span>';
         zone(sd, after, 0, zoneNode('fold', '<span class="ft">' + esc(text) + '</span><span class="rule"></span>'), null, { click: open, title: 'Show these ' + n + ' lines', px: FOLD, margin });
@@ -434,8 +541,9 @@
     applyHidden();
 
     // the zones: replaced as a whole, in order, the same rows on both sides
-    for (const sd of ['left', 'right']) {
-      const ed = sd === 'left' ? L : R;
+    for (const sd of ['left', 'right', 'feat']) {
+      const ed = sd === 'left' ? L : sd === 'feat' ? F : R;
+      S.zones[sd] = S.zones[sd] || []; S.widgets[sd] = S.widgets[sd] || [];
       ed.changeViewZones(acc => {
         for (const id of S.zones[sd]) acc.removeZone(id);
         S.zones[sd] = items[sd].map((it, i) => acc.addZone(Object.assign({ afterLineNumber: it.after, domNode: it.node, ordinal: i, marginDomNode: it.margin || undefined,
@@ -476,6 +584,7 @@
     }
     S.deco.left = S.deco.left ? (S.deco.left.set(ld), S.deco.left) : L.createDecorationsCollection(ld);
     S.deco.right = S.deco.right ? (S.deco.right.set(rd), S.deco.right) : R.createDecorationsCollection(rd);
+    S.deco.feat = S.deco.feat ? (S.deco.feat.set(fd), S.deco.feat) : F.createDecorationsCollection(fd);
     summary(m);
     where();
     balance();
@@ -536,6 +645,8 @@
       return;
     }
     if (m.code) {
+      // two panels: the target's side of Copado's file beside it, named
+      if (!m.single && !m.three) $('lefthead').innerHTML = '<b>' + esc(S.labels.target || 'Target') + '</b> \u00b7 read-only';
       $('chips').innerHTML = c.needs ? '<span class="chip conf">' + c.needs + ' conflict' + (c.needs === 1 ? '' : 's') + ' to resolve</span>' + (c.resolved ? '<span class="chip">' + c.resolved + ' resolved</span>' : '')
         : c.conflicts ? '<span class="chip">' + c.conflicts + ' conflict' + (c.conflicts === 1 ? '' : 's') + ' resolved</span>' : '<span class="chip">no conflicts</span>';
       status();
@@ -594,6 +705,7 @@
     const mirror = (S.folds || []).map(([f0, f1]) => { const a0 = leftLine(f0), a1 = leftLine(f1 - 1) + 1; return a1 > a0 + 1 ? new monaco.Range(a0 + 2, 1, a1, 1) : null; }).filter(Boolean);
     L.setHiddenAreas(runs.map(r => new monaco.Range(r.a0 + 1, 1, r.a1, 1)).concat(mirror));
     R.setHiddenAreas(runs.map(r => new monaco.Range(r.b0 + 1, 1, r.b1, 1)));
+    F.setHiddenAreas(runs.filter(r => r.f1 != null).map(r => new monaco.Range(r.f0 + 1, 1, r.f1, 1)));
   }
   function watchFolds() {
     const fc = R.getContribution && R.getContribution('editor.contrib.folding');
@@ -635,7 +747,7 @@
   }
   function setWrap(on) {
     S.wrap = !!on;
-    for (const ed of [L, R]) ed.updateOptions({ wordWrap: S.wrap ? 'on' : 'off' });
+    for (const ed of [L, R, F]) ed.updateOptions({ wordWrap: S.wrap ? 'on' : 'off' });
     keepView();
     setTimeout(() => { if (S.marks) draw(S.marks); }, 30);
   }
@@ -643,7 +755,7 @@
   // ---- zoom: both panes, the same size, remembered ----
   function zoom(step) {
     S.zoom = step === 0 ? 0 : Math.max(-6, Math.min(16, (S.zoom || 0) + step));
-    for (const ed of [L, R]) ed.updateOptions({ fontSize: fontSize() + S.zoom });
+    for (const ed of [L, R, F]) ed.updateOptions({ fontSize: fontSize() + S.zoom });
     keepView();
     note(S.zoom ? 'Zoom ' + (S.zoom > 0 ? '+' : '') + S.zoom : 'Zoom reset');
     setTimeout(() => { if (S.marks) draw(S.marks); }, 30);
@@ -723,7 +835,7 @@
         monaco.languages.setMonarchTokensProvider(id, def.language);
         if (def.conf) monaco.languages.setLanguageConfiguration(id, def.conf);
       }
-      for (const ed of [L, R]) if (ed.getModel()) monaco.editor.setModelLanguage(ed.getModel(), id);
+      for (const ed of [L, R, F]) if (ed.getModel()) monaco.editor.setModelLanguage(ed.getModel(), id);
     });
   }
 
@@ -779,10 +891,10 @@
   }
 
   // a promotion's merge saves as your resolution; a plain merge is applied into the target file, once, as before
-  // a promotion's merge saves as your resolution (Ctrl+S) or saves and closes; one from the Manual tab is
-  // copied, or saved as a file from the \u22ef menu; a branch's is applied into the file, once
+  // a promotion's merge saves as your resolution (Ctrl+S) or saves and closes; a branch's is applied into the file,
+  // once; a comparison saves nothing - it merges nothing
   function save(close) {
-    if (S.manual) return api.postMessage({ type: 'copyResult', text: R.getValue() });
+    if (S.plain) return;
     if (S.applyOnly && !close) return note('Apply and close writes it into ' + S.file + ' \u2013 nothing is written before that.', true);
     api.postMessage({ type: 'save', close: !!close, text: R.getValue() });
   }
@@ -795,7 +907,7 @@
   // ---- the status bar: saved or not, the marks live or paused, duplicates ----
   function status() {
     const saved = $('stSaved');
-    if (S.manual) saved.textContent = '';
+    if (S.plain) saved.textContent = '';
     else if (S.applyOnly) saved.textContent = 'Not applied yet';
     else saved.innerHTML = S.unsaved ? '<span class="dirty">\u25cf Not saved</span>' : '\u2713 Saved as your resolution';
     $('stMarks').innerHTML = S.held
@@ -854,7 +966,7 @@
       S.hide = !!m.hideIdentical;
       S.saved = m.savedText != null ? m.savedText : null;
       S.applyOnly = !!m.applyOnly; S.file = m.file; S.manual = !!m.manual; S.dupRemoved = m.dupRemoved || null;
-      S.plain = !!m.plain; S.tidy = !!m.tidy;
+      S.plain = !!m.plain; S.tidy = !!m.tidy; S.gitLabels = m.gitLabels || null;
       if (S.plain) {
         // both sides yours: editable, formatted, de-duplicated, saved each as a file
         L.updateOptions({ readOnly: false, domReadOnly: false });
@@ -862,10 +974,9 @@
         S.headRight = '';
         $('saveClose').hidden = true;
       }
-      else if (S.manual) { $('saveClose').innerHTML = ICON.check + '<span>Copy result</span>'; $('saveClose').title = 'Copy the result, to paste into Copado (Ctrl+S) \u2013 or \u22ef \u203a Save as file\u2026'; }
       else if (S.applyOnly) { $('saveClose').innerHTML = ICON.check + '<span>Apply &amp; Close</span>'; $('saveClose').title = 'Write it into ' + m.file + ' and close'; }
       $('title').textContent = m.title;
-      starts(m);
+      S.startNow = m.start || null;   // where it started - for what was taken out when it was prepared
       // code: one pane - your resolution, every change marked in it
       document.body.classList.toggle('single', !!(m.marks && m.marks.single));
       $('righthead').innerHTML = S.plain ? '<b>' + esc(m.labels.incoming || m.labels.merged || 'Right') + '</b> \u00b7 <span class="ok">editable</span>' + (S.headRight || '')
@@ -898,27 +1009,6 @@
     else if (m.type === 'reveal') reveal(m.line);
     else if (m.type === 'apply') act(m.undo);
   });
-  const START_NAMES = () => ({ saved: 'Your saved resolution', feature: cap(S.theirs || 'the incoming file'), target: S.labels.target || 'The target', merged: 'Merged (both)' });
-  function starts(m) {
-    S.starts = m.starts || {};
-    if (m.savedText != null) S.starts.saved = m.savedText;
-    const order = ['saved', 'feature', 'target', 'merged'].filter(k => S.starts[k] != null);
-    S.startOrder = order;
-    S.startNow = m.start && S.starts[m.start] != null ? m.start : order[0] || null;
-  }
-  // a start, in one step that Ctrl+Z undoes
-  function startFrom(k) {
-    const text = S.starts[k];
-    if (text == null || k === S.startNow) return;
-    const model = R.getModel();
-    R.pushUndoStop();
-    model.pushEditOperations(R.getSelections(), [{ range: model.getFullModelRange(), text }], () => null);
-    R.pushUndoStop();
-    note('Started again from ' + START_NAMES()[k].replace(/^The /, 'the ') + ' \u2013 Ctrl+Z goes back to what you had.');
-    S.startNow = k;
-    status();
-    R.focus();
-  }
 
   // ---- the toolbar's two menus: View, and the rest ----
   function menuOf(id, items) {
@@ -929,12 +1019,12 @@
     m.onclick = e => { const d = e.target.closest('.mi'); if (!d) return; closeMenus(); items[+d.dataset.i].run(); };
   }
   function viewItems() {
-    const names = START_NAMES();
     // code: one panel or two - remembered, it is the setting cmr.merge.codeView
-    const view = S.marks && S.marks.single ? 'onePane' : 'twoPanes';
+    const view = S.marks && S.marks.single ? 'onePane' : S.marks && S.marks.three ? 'threePanes' : 'twoPanes';
     const switchView = v => () => { if (v === view) return; S.seq++; api.postMessage({ type: 'codeView', view: v, seq: S.seq, text: R.getValue() }); };
-    const layout = S.language && S.language !== 'xml' && !S.plain ? [{ head: 'Layout' }, { label: 'One panel', radio: view === 'onePane', run: switchView('onePane') }, { label: 'Two panel', radio: view === 'twoPanes', run: switchView('twoPanes') }, null] : [];
-    return layout.concat(!S.plain && S.startOrder && S.startOrder.length > 1 ? [{ head: 'Start from' }].concat(S.startOrder.map(k => ({ label: names[k], radio: k === S.startNow, run: () => startFrom(k) }))).concat([null]) : [])
+    const layout = S.marks && S.marks.git ? [{ head: 'Layout' }, { label: 'One panel', radio: view === 'onePane', run: switchView('onePane') }, { label: 'Two panel', radio: view === 'twoPanes', run: switchView('twoPanes') }, { label: 'Three panel', radio: view === 'threePanes', run: switchView('threePanes') }, null] : [];
+    // one start: Copado's conflict file - nothing to choose
+    return layout
       .concat([{ label: 'Word wrap', check: S.wrap, run: () => setWrap(!S.wrap) }, { label: 'Zoom in', run: () => zoom(1) }, { label: 'Zoom out', run: () => zoom(-1) }, { label: 'Reset zoom', run: () => zoom(0) }, null])
       .concat([{ label: 'Hide identical lines', check: S.hide, run: () => {
         S.hide = !S.hide; S.expanded = [];
@@ -946,8 +1036,6 @@
   function moreItems() {
     // a promotion's code: every conflict at once - one step, Ctrl+Z undoes it
     return (S.marks && S.marks.git && S.marks.rows.length ? [{ label: 'Accept all target', run: () => acceptAll('target') }, { label: 'Accept all feature', run: () => acceptAll('feature') }, null] : []).concat([{ label: 'Keyboard shortcuts', run: () => { $('help').hidden = false; } }])
-      .concat(S.plain ? []
-        : S.manual ? [{ label: 'Save as file\u2026', run: () => api.postMessage({ type: 'saveAs', text: R.getValue() }) }, { label: 'Swap the two sides', run: () => api.postMessage({ type: 'swap', text: R.getValue() }) }] : [])
       .concat([{ label: 'Copy merge report', run: () => api.postMessage({ type: 'report' }) }, null, { label: 'Discard this merge\u2026', bad: true, run: () => api.postMessage({ type: 'discard' }) }]);
   }
   function closeMenus() { for (const id of ['viewMenu', 'moreMenu']) $(id).hidden = true; $('viewBtn').setAttribute('aria-expanded', 'false'); $('moreBtn').setAttribute('aria-expanded', 'false'); }
@@ -962,13 +1050,7 @@
   function reveal(line) { R.revealLineInCenter(line + 1); R.setPosition({ lineNumber: line + 1, column: 1 }); R.focus(); }
 
   // ---- the toolbar ----
-  $('saveClose').addEventListener('click', e => {
-    if (!S.plain) return save(true);
-    // a comparison: which side
-    e.stopPropagation();
-    toggleMenu('moreMenu', 'saveClose', () => [{ label: 'Save ' + (S.labels.target || 'the left side') + ' as file\u2026', run: () => api.postMessage({ type: 'saveAs', side: 'left', text: L.getValue() }) },
-      { label: 'Save ' + (S.labels.incoming || S.labels.merged || 'the right side') + ' as file\u2026', run: () => api.postMessage({ type: 'saveAs', side: 'right', text: R.getValue() }) }]);
-  });
+  $('saveClose').addEventListener('click', () => save(true));
   $('viewBtn').addEventListener('click', () => toggleMenu('viewMenu', 'viewBtn', viewItems));
   $('moreBtn').addEventListener('click', () => toggleMenu('moreMenu', 'moreBtn', moreItems));
   document.addEventListener('mousedown', e => { if (!e.target.closest('.mwrap')) closeMenus(); }, true);

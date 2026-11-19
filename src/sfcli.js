@@ -116,6 +116,14 @@ async function listOrgs(sfPath, cwd) {
   return parseOrgs(r.json);
 }
 
+/** The components of one type an org has - their full names, sorted - via `sf org list metadata`. */
+async function listMetadata(sfPath, o) {
+  const r = await run(sfPath, ['org', 'list', 'metadata', '--metadata-type', o.type, '--target-org', o.org], { cwd: o.cwd });
+  if (!r.json) throw new Error('Could not list the ' + o.type + ' components of ' + o.org + '.' + (r.stderr ? ' ' + r.stderr.trim() : ''));
+  const list = r.json.result == null ? [] : Array.isArray(r.json.result) ? r.json.result : [r.json.result];
+  return [...new Set(list.map(x => x && x.fullName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
 /**
  * A standard source-format retrieve into the project's package directories.
  * --ignore-conflicts lets it overwrite local files, which is the intent here.
@@ -666,6 +674,6 @@ function walk(v, fn, key, depth) {
 }
 
 module.exports = {
-  version, listOrgs, retrieve, validate, restGet, query, describe, resetRest, isMissingCommand, openPath, restPatch, loginFor, httpGet, display, commandFor, escapeArgument,
+  version, listOrgs, listMetadata, retrieve, validate, restGet, query, describe, resetRest, isMissingCommand, openPath, restPatch, loginFor, httpGet, display, commandFor, escapeArgument,
   parseJson, parseOrgs, parseDeploy, parseRetrieveText, lineCleaner, reprintFilter, shapeOf, durationMs, orgWaitFrom, deployIdFrom, errorFrom, retrieveArgs, validateArgs
 };

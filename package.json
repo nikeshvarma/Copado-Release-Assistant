@@ -2,7 +2,7 @@
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
   "description": "Copado release work for Salesforce metadata and code: resolve promotion conflicts - metadata element by element, Apex and Lightning web components by member - validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
-  "version": "3.16.6",
+  "version": "3.20.0",
   "publisher": "nikeshvarma",
   "license": "MIT",
   "repository": {
@@ -190,7 +190,7 @@
       },
       {
         "command": "cmr.manual.mergeWith",
-        "title": "Merge in Release Assistant…",
+        "title": "Compare in Release Assistant…",
         "category": "Copado"
       },
       {
@@ -426,24 +426,6 @@
             ],
             "description": "Which value a real conflict starts with, before you review it."
           },
-          "cmr.merge.startFrom": {
-            "type": "string",
-            "enum": [
-              "auto",
-              "feature",
-              "target",
-              "merged"
-            ],
-            "enumDescriptions": [
-              "The merged result for permission sets, profiles, labels and translations - files often retrieved in part, where an entry the feature branch lacks is not a removal; the feature branch's file for everything else (objects, pages, layouts, flows, code...), so its removals count.",
-              "The feature branch's file as it is.",
-              "The target branch's file as it is.",
-              "Both branches combined: nothing of the target is dropped."
-            ],
-            "default": "auto",
-            "markdownDescription": "Where your resolution starts when you open a merge. Whatever the start, the merge editor marks what the other branch has - including what the feature branch does not have - and you switch with **Start from** in the merge editor.",
-            "order": 3
-          },
           "cmr.merge.hideIdentical": {
             "type": "boolean",
             "default": false,
@@ -482,12 +464,6 @@
             "description": "Which occurrence survives when duplicates are removed.",
             "order": 7
           },
-          "cmr.merge.useAncestor": {
-            "type": "boolean",
-            "default": true,
-            "order": 5,
-            "markdownDescription": "For **metadata**: use the common ancestor when it is known - Copado’s own, or the merge-base of the feature branch and the destination branch from the connected repository - so the merge editor marks what each branch did since. Code needs none: Copado’s conflict file is git’s merge, made with it."
-          },
           "cmr.merge.codeIn": {
             "type": "string",
             "enum": [
@@ -506,15 +482,17 @@
             "type": "string",
             "enum": [
               "onePane",
-              "twoPanes"
+              "twoPanes",
+              "threePanes"
             ],
-            "default": "onePane",
+            "default": "threePanes",
             "order": 7,
             "enumDescriptions": [
-              "One panel: your resolution - Copado’s conflict file, its conflicts marked.",
-              "Two panel: the target beside your resolution, the same conflicts over it."
+              "One panel: your resolution, its conflicts marked.",
+              "Two panel: the promotion branch’s side beside your resolution.",
+              "Three panel - Copado’s: the promotion branch’s side, your resolution, the feature branch’s side."
             ],
-            "markdownDescription": "How the merge editor shows **code**. Switch it in the editor’s **View** menu – that changes this setting. Metadata is always shown in two panels."
+            "markdownDescription": "How a promotion’s file opens in the merge editor - code and metadata. Switch it in the editor’s **View › Layout** – that changes this setting."
           }
         }
       },
@@ -726,6 +704,12 @@
             "default": false,
             "order": 3,
             "markdownDescription": "Resolve automatically the conflict files that need no decision - the sides agree, or only one side changed - so they are ready to upload without you. **Off** (the default): nothing is resolved without you; a clean merge is offered as a suggestion that you review and accept, and code keeps every conflict block for you to decide."
+          },
+          "cmr.borrow.sourceOrg": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "markdownDescription": "The Salesforce CLI alias (or username) of the org the **pre-check** borrows missing components from - read-only, for the pre-check alone. Empty: the promotion’s source environment’s login, asked for once."
           }
         },
         "order": 6

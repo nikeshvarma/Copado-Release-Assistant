@@ -1,17 +1,10 @@
 'use strict';
 
 /**
- * Where your resolution starts in the merge editor - nothing is merged
- * behind your back. cmr.merge.startFrom:
- *
- *   auto     (the default) the merged result for metadata Salesforce writes
- *            as sorted entries, where a file is often retrieved in part and
- *            an entry it lacks is not a removal - permission sets, profiles,
- *            labels, translations, objects; the feature branch's file for
- *            everything else (pages, layouts, flows...), whose removals count
- *   merged   both branches combined: nothing of the target is dropped
- *   feature  the feature branch's file as it is
- *   target   the target branch's file as it is
+ * Files whose entries add up - permission sets, profiles, muting permission sets, labels, translations: a file is
+ * often retrieved in part, so an entry it lacks is not a removal. For a promotion they are the target with the
+ * feature added (src/unionMerge); for a merge of two branches' files (Branch conflicts) the start is the merged
+ * result for them, the feature branch's file for everything else - whose removals count.
  *
  * Whatever the start, the merge editor marks what the other side has.
  */

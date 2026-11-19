@@ -145,18 +145,12 @@ async function load(promotion, c, a) {
   let r;
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Opening ' + promotion.name }, async progress => {
     progress.report({ message: autoOn() ? 'Getting the conflicts and settling the easy ones for you' : 'Getting the conflicts - nothing is resolved without you' });
-    const [synced, info] = await Promise.all([W.sync(a, s, promotion, h.deps.promoMerge, { copadoOrg: c.copadoOrg, autoResolve: autoOn() }), facts(promotion, c, a).catch(e => { h.output.appendLine('copado: ' + e.message); return null; })]);
+    const [synced, info] = await Promise.all([W.sync(a, s, promotion, { copadoOrg: c.copadoOrg, autoResolve: autoOn() }), facts(promotion, c, a).catch(e => { h.output.appendLine('copado: ' + e.message); return null; })]);
     r = synced;
     if (info) current.info = info;
   });
   const f = Object.values(r.state.files);
   const st0 = s.load();
-  // resolutions the one-line version of the choices broke are rebuilt from your recorded choices
-  const rebuilt = W.repairChoices(current.s, st0, libs.X);
-  if (rebuilt.length) {
-    W.logEvent(st0, 'reset', 'Rebuilt ' + rebuilt.length + ' resolution' + (rebuilt.length === 1 ? '' : 's') + ' from your choices', 'an earlier version broke values that span lines: ' + rebuilt.map(r => path.basename(r)).join(', '));
-    h.output.appendLine('copado: rebuilt ' + rebuilt.join(', ') + ' from your choices - an earlier version broke values that span lines');
-  }
   W.logEvent(st0, 'fetch', r.fetched ? 'Got ' + r.fetched + ' conflict file' + (r.fetched === 1 ? '' : 's') + ' from Copado' : f.length ? 'Checked Copado for updates' : 'Opened from Copado',
     r.fetched ? 'in ' + ((Date.now() - t0) / 1000).toFixed(1) + ' seconds' : f.length ? 'nothing changed in Copado meanwhile' : 'no conflicts on this promotion');
   const autoN = f.filter(e => e.state === 'auto').length;
@@ -182,8 +176,10 @@ async function load(promotion, c, a) {
   }
   if (pending && pending.recreate) readJobs({ notify: false }).catch(() => {});
   if (!f.length) { vscode.window.showInformationMessage(promotion.name + ' (' + (promotion.status || '?') + ') has no conflicts - validate its promotion branch, or follow its deployment, from the page.'); return; }
-  vscode.window.showInformationMessage(promotion.name + ': ' + count(['auto']) + ' resolved automatically, ' + count(['review']) + ' to review, ' + count(['code', 'error']) + ' code file' +
-    (count(['code', 'error']) === 1 ? '' : 's') + ' to resolve' + (count(['uploaded', 'copado']) ? ', ' + count(['uploaded', 'copado']) + ' done' : '') + '.');
+  // what there is - a count of nothing is not said
+  const parts = [[count(['auto']), ' resolved automatically'], [count(['review']), ' to review'], [count(['code', 'error']), count(['code', 'error']) === 1 ? ' code file to resolve' : ' code files to resolve'], [count(['uploaded', 'copado']), ' done']]
+    .filter(([n]) => n).map(([n, w]) => n + w);
+  vscode.window.showInformationMessage(promotion.name + ': ' + (parts.length ? parts.join(', ') : 'no conflicts') + '.');
 }
 
 /**
@@ -241,20 +237,14 @@ async function review(rel) {
   const codeHere = e.kind !== 'xml' && vscode.workspace.getConfiguration('cmr').get('merge.codeIn', 'mergeEditor') !== 'vscode';
   if ((e.kind === 'xml' || codeHere) && fs.existsSync(s.file('promotion', rel)) && fs.existsSync(s.file('feature', rel))) {
     const lb = e.labels || {};
-    // Copado's conflict file has no common ancestor: the repository's merge-base can give it
-    if (!fs.existsSync(s.file('base', rel)) && h.ancestorFor && current.info && current.info.destinationBranch && e.story && !(current.info && current.info.back)) {
-      const pattern = vscode.workspace.getConfiguration('cmr').get('repo.featureBranch', 'feature/{story}');
-      const body = await h.ancestorFor({ rel, featureBranch: pattern.split('{story}').join(e.story), destinationBranch: current.info.destinationBranch });
-      if (body) { fs.mkdirSync(path.dirname(s.file('base', rel)), { recursive: true }); fs.writeFileSync(s.file('base', rel), body); }
-    }
-    await h.deps.startSession(vscode.Uri.file(s.file('promotion', rel)), vscode.Uri.file(s.file('feature', rel)),
-      fs.existsSync(s.file('base', rel)) ? vscode.Uri.file(s.file('base', rel)) : null, {
+    // everything from Copado's conflict file - no branch is read: its two sides for reference, the file itself the start
+    await h.deps.startSession(vscode.Uri.file(s.file('promotion', rel)), vscode.Uri.file(s.file('feature', rel)), null, {
         labels: { target: 'Target branch' + (lb.ours ? ' (' + lb.ours + ')' : ''), incoming: theirsLabel() + (lb.theirs ? ' (' + lb.theirs + ')' : ''), ancestor: 'Common ancestor', merged: 'Your resolution (editable)' },
         applyToUri: vscode.Uri.file(s.file('resolved', rel)),
         // what you save in the merge view is your resolution: saving moves the file on, nothing else to choose
         applyOnSave: true, openAfterApply: false, theirs: current.info && current.info.back ? (current.promotion.from || 'the source') : 'the feature branch',
-        // code starts from Copado's conflict file, its blocks to choose - or what you resolved
-        startFrom: e.state === 'resolved' || e.kind !== 'xml' ? s.read('resolved', rel) : null,
+        // Copado's conflict file as git merged it - and what you resolved, when you have
+        copado: true, conflictText: s.read('conflicted', rel), startFrom: e.state === 'resolved' ? s.read('resolved', rel) : null,
         appliedMessage: path.basename(rel) + ' is ready to upload - what you saved is your resolution.',
         // the first save makes it yours; saving again only refreshes the page - no new entry each time
         onApplied: () => { const f = entry(rel); if (f && f.state === 'resolved' && f.note === 'your resolution from the merge view') changed.fire(); else setState(rel, 'resolved', 'your resolution from the merge view'); }
@@ -273,23 +263,6 @@ async function accept(rel) {
   if (!e) return;
   if (P.hasMarkers(current.s.read('resolved', rel) || '')) { vscode.window.showWarningMessage(path.basename(rel) + ' still has conflict markers - resolve them first.'); return; }
   setState(rel, 'resolved', e.suggestion ? 'you accepted the suggested merge' : e.state === 'review' ? 'accepted as merged (the feature\u2019s value where both changed)' : 'accepted');
-}
-
-/** The page's choices for a file's real clashes: applied to the automatic result, the file accepted. */
-async function choose(rel, choices) {
-  const e = entry(rel);
-  if (!e || !e.clashes || !e.clashes.length) return;
-  const merged = current.s.read('merged', rel);
-  const r = W.applyChoices(merged, e.clashes, choices);
-  if (r.moved.length) { vscode.window.showWarningMessage(path.basename(rel) + ': ' + r.moved.length + ' clash(es) could not be placed - use Open in merge.'); return; }
-  // never a broken file from a choice: if the result is not well-formed, nothing is written
-  const bad = W.wellFormed(r.text, libs.X);
-  if (bad) { vscode.window.showWarningMessage(path.basename(rel) + ': your choices would give ' + bad + ' - nothing was changed. Use Open in merge.'); return; }
-  current.s.write('resolved', rel, r.text);
-  const st = current.s.load();
-  st.files[rel].choices = choices;
-  current.s.save(st);
-  setState(rel, 'resolved', 'your choices: ' + Object.values(choices).map(v => v === 'target' ? 'target' : 'feature').join(', '));
 }
 
 async function compare(rel) {
@@ -384,7 +357,7 @@ async function reset(rel) {
   current.s.write('resolved', rel, merged);
   const auto = P.hasMarkers(merged) ? 'code' : (e.kind === 'xml' && e.conflicts) || !autoOn() ? 'review' : 'auto';
   const st = current.s.load();
-  st.files[rel].suggestion = auto === 'review' && !(e.kind === 'xml' && (e.conflicts || e.featureLacks));
+  st.files[rel].suggestion = auto === 'review' && !(e.kind === 'xml' && e.conflicts);
   current.s.save(st);
   setState(rel, auto, auto === 'auto' ? 'reset to the automatic result' : st.files[rel].suggestion ? 'reset to the suggested merge - review it and accept' : 'reset - to resolve');
 }
@@ -480,6 +453,84 @@ async function undoUpload() {
  */
 let activeRun = null;
 
+// ---- borrowing for the pre-check: what the target lacks, from the source org, read-only - for the pre-check alone ----
+const Borrow = require('./src/borrow');
+const ROUNDS = 5;
+const borrowDir = () => path.join(current.s.dir, 'borrowed');
+const pkgDir = () => { try { const j = JSON.parse(fs.readFileSync(path.join(h.projectRoot(), 'sfdx-project.json'), 'utf8')); const d = (j.packageDirectories || []).find(x => x.default) || (j.packageDirectories || [])[0]; return (d && d.path) || 'force-app'; } catch (e) { return 'force-app'; } };
+/** The source org's login - cmr.borrow.sourceOrg when set; otherwise asked for once, then kept for this promotion. */
+async function sourceOrg(c) {
+  // the one set in Settings, when there is one - nothing to ask
+  const set = String(vscode.workspace.getConfiguration('cmr').get('borrow.sourceOrg', '') || '').trim();
+  if (set) return set;
+  const st = current.s.load();
+  if (st.borrow && st.borrow.org) return st.borrow.org;
+  const a = await api(c);
+  let localOrgs = []; try { localOrgs = await h.orgList(c, h.projectRoot()); } catch (e) { /* asked */ }
+  const creds = await h.credentialsFor(a, [st.fromId].filter(Boolean), localOrgs);
+  const org = await h.orgForEnvironment(c, { credentials: creds }, st.fromId, st.from, localOrgs, 'source - components borrowed for the pre-check, read-only');
+  return org && (org.alias || org.username || org);
+}
+async function borrow(items) {
+  const c = needOrg(); if (!c || !items || !items.length) return;
+  h.requireTrust('Borrowing runs the Salesforce CLI');
+  const st = current.s.load();
+  const bw = st.borrow || { items: [], round: 1, org: null, prev: [] };
+  if (bw.round >= ROUNDS) { vscode.window.showWarningMessage('Already ' + ROUNDS + ' rounds of borrowing - what is still missing is probably more than a few components: commit them to the story, or promote the story that has them.'); return; }
+  const org = await sourceOrg(c);
+  if (!org) { vscode.window.showWarningMessage('Not borrowed: no Salesforce login chosen for ' + (st.from || 'the source org') + '.'); return; }
+  const all = bw.items.concat(items.filter(i => !bw.items.some(b => b.type === i.type && b.name.toLowerCase() === i.name.toLowerCase())).map(i => ({ type: i.type, name: i.name })));
+  // a scratch project of its own, never the open one: the source org's versions, retrieved, read-only
+  const dir = borrowDir(), root = pkgDir();
+  fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(path.join(dir, 'manifest'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: root, default: true }], sourceApiVersion: '62.0' }, null, 2));
+  fs.writeFileSync(path.join(dir, 'manifest', 'package.xml'), Borrow.manifestFor(all, '62.0'));
+  try {
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Borrowing ' + all.length + ' component' + (all.length === 1 ? '' : 's') + ' from ' + (st.from || org) }, () =>
+      h.sfcli.retrieve(c.sfPath, { manifest: path.join('manifest', 'package.xml'), org, cwd: dir }));
+  } catch (e) { vscode.window.showErrorMessage('Could not borrow from ' + (st.from || org) + ': ' + e.message); return; }
+  const files = Borrow.collect(dir, root);
+  // each component: the files it came as - one the source org does not have either is said, and left out
+  const kept = [], notThere = [];
+  for (const b of all) {
+    const tail = b.type === 'CustomField' ? '/objects/' + b.name.split('.')[0] + '/fields/' + b.name.split('.').slice(1).join('.') + '.' : '/' + b.name.split('.').pop() + '.';
+    const mine = files.filter(f => f.rel.includes(tail) || f.rel.includes('/' + b.name + '/')).map(f => f.rel);
+    if (mine.length) kept.push(Object.assign(b, { files: mine })); else notThere.push(b.name);
+  }
+  if (notThere.length) vscode.window.showWarningMessage((st.from || org) + ' does not have ' + notThere.join(', ') + ' either - left out.');
+  const prev = st.precheck && st.precheck.result ? st.precheck.result.failures.map(f => f.problem) : [];
+  const s2 = current.s.load();
+  s2.borrow = { items: kept, round: (st.borrow ? bw.round + 1 : 2), org, prev };
+  W.logEvent(s2, 'precheck', 'Borrowed for the pre-check', kept.map(b => b.name).join(', ') + ' from ' + (st.from || org) + ' - for the pre-check only, never deployed');
+  current.s.save(s2); changed.fire();
+  if (kept.length) await precheck();
+}
+function unborrow(key) {
+  const s2 = current.s.load(); if (!s2.borrow) return;
+  s2.borrow.items = s2.borrow.items.filter(b => b.type + ':' + b.name !== key);
+  if (!s2.borrow.items.length) { s2.borrow = null; fs.rmSync(borrowDir(), { recursive: true, force: true }); }
+  current.s.save(s2); changed.fire();
+}
+function unborrowAll() { const s2 = current.s.load(); s2.borrow = null; fs.rmSync(borrowDir(), { recursive: true, force: true }); current.s.save(s2); changed.fire(); }
+/** For the picker: a type's components in the source org, each said if the target has it already. */
+const listed = new Map();
+async function borrowList(type, q) {
+  const c = needOrg(); if (!c || !Borrow.TYPES.includes(type)) return;
+  const st = current.s.load();
+  const org = await sourceOrg(c);
+  if (!org) return;
+  const target = st.precheck && st.precheck.target && st.precheck.target.alias;
+  const key = org + '|' + target + '|' + type;
+  if (!listed.has(key)) {
+    const [mine, theirs] = await Promise.all([h.sfcli.listMetadata(c.sfPath, { type, org }), target ? h.sfcli.listMetadata(c.sfPath, { type, org: target }).catch(() => []) : Promise.resolve([])]);
+    listed.set(key, { mine, theirs: new Set(theirs.map(n => n.toLowerCase())) });
+  }
+  const l = listed.get(key), ql = String(q || '').toLowerCase();
+  const hits = l.mine.filter(n => !ql || n.toLowerCase().includes(ql));
+  current.borrowList = { type, q: q || '', from: st.from || org, total: hits.length, items: hits.slice(0, 100).map(n => ({ name: n, inTarget: l.theirs.has(n.toLowerCase()) })) };
+  changed.fire();
+}
+
 async function precheck() {
   if (!current) return;
   h.requireTrust('The pre-check runs the Salesforce CLI');
@@ -533,6 +584,13 @@ async function precheck() {
       run.steps.check = 'done';
       run.steps.result = ev.success ? 'done' : 'failed';
       run.result = { success: ev.success, failures: ev.failures.map(f => Object.assign({}, f, { resolution: conflictOf(f) })), tests: ev.tests, coverage: ev.coverage, coverageRule: ev.coverageRule, cliError: ev.cliError };
+      // what the target lacks, read from the errors - less what is borrowed already; and what went since the last round
+      const bw = (current.s.load() || {}).borrow || null;
+      const isBorrowed = x => !!(bw && bw.items.some(b => b.type === x.type && b.name.toLowerCase() === x.name.toLowerCase()));
+      run.missing = Borrow.missingFrom(run.result.failures).filter(x => !isBorrowed(x));
+      run.borrowed = bw ? bw.items.map(b => ({ type: b.type, name: b.name })) : [];
+      run.gone = bw && bw.prev ? bw.prev.filter(p => !run.result.failures.some(f => f.problem === p)).length : 0;
+      run.round = bw ? bw.round : 1;
       const n = ev.failures.length + ev.tests.length;
       finish(ev.success ? 'passed' : 'failed', ev.success ? 'Validated successfully.' :
         'Validation failed: ' + (ev.cliError ? ev.cliError : n + ' error' + (n === 1 ? '' : 's')) + '.');
@@ -582,9 +640,13 @@ async function precheck() {
     save();
     const target = await h.orgForEnvironment(c, { credentials: creds }, st.toId, st.to, localOrgs, 'target - validated against, nothing is deployed');
     if (!target) { finish('stopped', 'Not checked: no Salesforce login chosen for ' + (st.to || 'the destination') + '.'); save(); return; }
+    // borrowed from the source org, for this pre-check only: in its package, never in the story or the promotion
+    const bw = st.borrow && st.borrow.items && st.borrow.items.length ? st.borrow : null;
+    if (bw) for (const b of bw.items) if (!rows.some(r => r.t === b.type && W.decodeName(r.n) === b.name)) rows.push({ t: b.type, n: b.name, a: 'Add' });
+    const borrowedFiles = bw ? bw.items.flatMap(b => (b.files || []).map(rel => ({ rel, file: path.join(borrowDir(), rel) }))).filter(x => fs.existsSync(x.file)) : [];
     await h.runBranchCheck({ rows, branches, name: st.name + '-precheck', api: a, pipelineId: info.pipelineId, toId: st.toId, fromId: st.fromId, environment: st.to,
-      overlay: used.map(u => ({ rel: u.rel, file: u.file })), exclude: leftOut.map(x => x.rel), target, quiet: true, onEvent,
-      label: 'pre-check of ' + st.name + (leftOut.length ? ' (' + leftOut.length + ' not resolved yet, left out)' : ''),
+      overlay: used.map(u => ({ rel: u.rel, file: u.file })).concat(borrowedFiles), exclude: leftOut.map(x => x.rel), target, quiet: true, onEvent,
+      label: 'pre-check of ' + st.name + (leftOut.length ? ' (' + leftOut.length + ' not resolved yet, left out)' : '') + (bw ? ' with ' + bw.items.length + ' borrowed from ' + (st.from || 'the source') : ''),
       meta: { source: 'pre-check', promotion: st.name, stories } });
     finish('stopped', 'Validation stopped before Salesforce answered.');
   } catch (e) {
@@ -760,7 +822,7 @@ async function snapshot() {
     if (st) {
       const { ready, held } = W.readyFiles(current.s, st, libs);
       const open = Object.values(st.files).filter(e => !['uploaded', 'copado'].includes(e.state)).length;
-      out.current = { promotion: Object.assign({}, current.promotion, { status: current.promotion.status }), state: st, info: current.info || null, precheck: st.precheck || null,
+      out.current = { promotion: Object.assign({}, current.promotion, { status: current.promotion.status }), state: st, info: current.info || null, precheck: st.precheck || null, borrow: st.borrow || null, borrowList: current.borrowList || null,
         jobs: current.jobs ? { at: current.jobs.at, watching: current.jobs.watching, error: current.jobs.error, objects: current.jobs.objects, errors: current.jobs.errors, mapped: current.jobs.mapped || null,
           jobs: current.jobs.snap ? current.jobs.snap.jobs.map(slim) : [], running: current.jobs.snap ? current.jobs.snap.running : false, failed: current.jobs.snap ? current.jobs.snap.failed : false, finished: current.jobs.snap ? current.jobs.snap.finished : false } : null,
         plan: { ready: ready.map(x => ({ rel: x.rel, how: x.entry.revising ? 'replaces the one in Copado' : x.entry.state === 'auto' ? 'auto' : 'yours', revising: !!x.entry.revising })), held,
@@ -807,12 +869,15 @@ async function actOnce(name, p) {
     case 'refresh': return refresh();
     case 'review': return review(rel);
     case 'accept': return accept(rel);
-    case 'choose': return choose(rel, p.choices);
     case 'compare': return compare(rel);
     case 'reset': return reset(rel);
     case 'copy': return copy(rel);
     case 'undo': return undoUpload();
     case 'precheck': return precheck();
+    case 'borrow': return borrow(p.items || []);
+    case 'unborrow': return unborrow(String(p.key || ''));
+    case 'unborrowAll': return unborrowAll();
+    case 'borrowList': return borrowList(String(p.type || ''), String(p.q || ''));
     case 'validateBranch': return validateBranch();
     case 'jobs': return readJobs({ notify: true });
     case 'components': return readComponents();

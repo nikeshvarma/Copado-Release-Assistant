@@ -78,7 +78,7 @@ function activate(context, d) {
   cmd('cmr.repo.forget', cmdForgetRepo);
   cmd('cmr.repo.validateStory', () => validateFromBranch());
   const helpers = { output, deps, rc, cmd, requireTrust, projectRoot, apiVersion, copadoApi, cmdValidate, runBranchCheck, orgForEnvironment, orgList, sfcli, needCopado,
-    credentialsFor, validatePromotionBranch, validateFromBranch, prepareStory: cmdPrepareStory, inspectStory: cmdInspectStory, ancestorFor, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
+    credentialsFor, validatePromotionBranch, validateFromBranch, prepareStory: cmdPrepareStory, inspectStory: cmdInspectStory, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
   exported.helpers = helpers;
   require('./promotionUi').activate(context, helpers);
   // the promotion open on the page is in use: never removed by the clean-up
@@ -503,25 +503,6 @@ async function cmdForgetRepo() {
  * address is read from Copado's Git Repository record of the pipeline, so only
  * the token needs asking for. o: { api, pipelineId, toId, fromId, envId }.
  */
-/**
- * A promotion file's common ancestor: the file at the merge-base of the story's feature branch and the
- * promotion's destination branch, from the connected repository. Never asks for anything - null when nothing
- * is connected, the setting is off (cmr.merge.useAncestor), or the repository cannot say.
- */
-async function ancestorFor(o) {
-  if (vscode.workspace.getConfiguration('cmr').get('merge.useAncestor', true) === false) return null;
-  const repo = repoHost.parseRepoUrl(rc().repoUrl, rc().repoProvider);
-  const token = repo ? await secrets.get(tokenKey(repo.host)) : null;
-  if (!repo || !token || !o.featureBranch || !o.destinationBranch) return null;
-  try {
-    const host = repoHost.createHost(repo, token);
-    const sha = await host.mergeBase(o.featureBranch, o.destinationBranch);
-    const body = sha ? await host.readFileAt(sha, o.rel) : null;
-    if (body) output.appendLine('merge: the common ancestor of ' + o.rel + ' from ' + repo.repo + ' at ' + sha.slice(0, 8) + ' (' + o.featureBranch + ' and ' + o.destinationBranch + ')');
-    return body;
-  } catch (e) { output.appendLine('merge: no common ancestor for ' + o.rel + ' - ' + e.message); return null; }
-}
-
 /** The connected repository, or null - never asking for anything. */
 async function connectedHost() {
   const repo = repoHost.parseRepoUrl(rc().repoUrl, rc().repoProvider);
