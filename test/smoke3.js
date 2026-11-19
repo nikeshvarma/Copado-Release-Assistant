@@ -418,7 +418,7 @@ module.exports = function register(ok, section, h) {
         createTreeView: () => ({ dispose() {} }), createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, clear() {}, dispose() {} }),
         withProgress: async (o, fn) => { log.progress.push({ title: o.title, location: o.location }); return fn({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) }); },
         showInformationMessage: async (m) => { log.info.push(m); return answer('info', m); },
-        showWarningMessage: async (m) => { log.warn.push(m); return answer('warn', m); },
+        showWarningMessage: async (m, o) => { log.warn.push(m); if (o && o.detail) (log.details = log.details || []).push(o.detail); return answer('warn', m); },
         showErrorMessage: async (m) => { log.error.push(m); return answer('error', m); },
         showInputBox: async o => { log.inputs.push(o); return answer('input', (o.title || '') + ' ' + (o.prompt || '')); },
         showQuickPick: async (items, o) => { log.picks.push({ items, o }); return answer('pick', (o && (o.title || o.placeHolder)) || '', items); },
@@ -649,7 +649,7 @@ module.exports = function register(ok, section, h) {
     assert.ok(t.includes('no login for uat'));
   });
 
-  ok('the Promotion panel over a pipeline: a back-promotion pre-checked from the source environment\u2019s branch, the branch validated, a promotion without conflicts opened', async () => {
+  ok('the Promotions tab over a pipeline: a back-promotion pre-checked from the source environment\u2019s branch, the branch validated, a promotion without conflicts opened', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra back '));
     const conflict = 'public class Tax {\n<<<<<<< HEAD\n  Decimal r = 0.1;\n=======\n  Decimal r = 0.2;\n>>>>>>> main\n}\n';
     const t = '2026-11-12T10:00:00.000+0000';
@@ -1270,7 +1270,7 @@ module.exports = function register(ok, section, h) {
   /** The real merge view of extension.js, on a stand-in VS Code: files on disk, positions and edits by range, its marks, rows and panel captured. */
   async function realMergeView(root, settings) {
     // VS Code's own diff view unless a test asks for the merge editor
-    const vs = fakeCode(root, Object.assign({ 'diffEditor.codeLens': false, 'cmr.merge.editor': 'vscode' }, settings || {}));
+    const vs = fakeCode(root, Object.assign({}, settings || {}));
     const kept = new Map();
     const saves = [], changes = [];
     const any = () => new Proxy(function () {}, { get: (t, k) => k === 'then' ? undefined : k === Symbol.toPrimitive ? () => '' : any(), set: () => true, apply: () => any(), construct: () => any() });
@@ -1284,8 +1284,6 @@ module.exports = function register(ok, section, h) {
       lineAt: i => ({ text: (read(u).split(/\r?\n/)[i] || '') }), get lineCount() { return read(u).split('\n').length; }, save: async () => true });
     Object.assign(vs, { Position, Range, Selection: Range, CodeLens: function (range, command) { this.range = range; this.command = command; }, Hover: function (c, r) { this.contents = c; this.range = r; } });
     vs.WorkspaceEdit = class { constructor() { this.ops = []; } replace(u, r, t) { this.ops.push([u, r, t]); } };
-    const decos = new Map();
-    let lensProvider = null, hoverProvider = null, panel = null, editorUri = null;
     // the merge editor's panel: its page, what it is sent, and a way to answer as the page
     const webviews = [];
     vs.ViewColumn = vs.ViewColumn || { Active: -1, Beside: -2, One: 1 };
@@ -1306,12 +1304,11 @@ module.exports = function register(ok, section, h) {
         return w.panel;
       },
       createTextEditorDecorationType: o => ({ o, dispose() {} }),
-      createTreeView: (id, o) => { if (id === 'cmrMergePanel') panel = o.treeDataProvider; return { dispose() {} }; },
+      createTreeView: () => ({ dispose() {} }),
       setStatusBarMessage: m => { vs.log.status = (vs.log.status || []).concat([m]); return { dispose() {} }; }
     });
     // a real getter: the open editor is the merged file once the view is shown
-    Object.defineProperty(vs.window, 'visibleTextEditors', { get: () => editorUri ? [{ document: doc(editorUri), setDecorations: (t, r) => decos.set(t, r), revealRange() {}, selection: null }] : [] });
-    Object.assign(vs.languages, { registerCodeLensProvider: (sel, p) => { lensProvider = p; return { dispose() {} }; }, registerHoverProvider: (sel, p) => { hoverProvider = p; return { dispose() {} }; } });
+    Object.defineProperty(vs.window, 'visibleTextEditors', { get: () => [] });
     Object.assign(vs.workspace, { onDidSaveTextDocument: fn => { saves.push(fn); return { dispose() {} }; }, onDidChangeTextDocument: fn => { changes.push(fn); return { dispose() {} }; }, openTextDocument: async u => doc(u),
       applyEdit: async e => { for (const [u, r, t] of e.ops) { const x = read(u); fs.writeFileSync(u.fsPath, x.slice(0, offsetOf(x, r.start)) + t + x.slice(offsetOf(x, r.end))); } return true; } });
     const withFallback = o => new Proxy(o, { get: (t, k) => k in t ? t[k] : any() });
@@ -1332,21 +1329,8 @@ module.exports = function register(ok, section, h) {
       api = await ext.activate({ subscriptions: { push() {} }, workspaceState: { get: (k, d) => ws.has(k) ? ws.get(k) : d, update: async (k, v) => { ws.set(k, v); } }, globalState: { get: (k, d) => kept.has(k) ? kept.get(k) : d, update: async (k, v) => { kept.set(k, v); } },
         extensionUri: vs.Uri.file(root), globalStorageUri: vs.Uri.file(path.join(root, '.g')), storageUri: vs.Uri.file(path.join(root, '.s')), extensionPath: root, secrets: any() });
     } finally { Module._load = load; }
-    const wait = ms => new Promise(r => setTimeout(r, ms));
-    const mergedOf = () => { const d = vs.log.commands.filter(c => c[0] === 'vscode.diff').pop(); return d && d[2]; };
-    const kindOf = t => 'rangeBehavior' in t.o ? 'note' : t.o.borderStyle === 'dashed' ? 'removed' : /55, 148, 255/.test(t.o.backgroundColor || '') ? 'own' : t.o.backgroundColor && t.o.backgroundColor.id === 'merge.incomingContentBackground' ? 'added' : null;
     return { api,
-      vs, deps: () => deps, mergedOf, wait, webviews,
-      show: () => { editorUri = mergedOf(); },
-      edit: async text => { fs.writeFileSync(mergedOf().fsPath, text); for (const f of changes) f({ document: doc(mergedOf()), contentChanges: [] }); await wait(180); },
-      save: async uri => { for (const f of saves) await f(doc(uri)); await new Promise(r => setImmediate(r)); },
-      lenses: () => lensProvider.provideCodeLenses(doc(mergedOf())),
-      hover: line => hoverProvider.provideHover(doc(mergedOf()), new Position(line, 0)),
-      painted: () => { const out = {}; for (const [t, r] of decos) { const k = kindOf(t); if (k && k !== 'note') out[k] = r.map(x => x.start.line); } return out; },
-      // what VS Code writes at the line ends: [line, text]
-      notes: () => { for (const [t, r] of decos) if (kindOf(t) === 'note') return r.map(x => [x.range.start.line, ((x.renderOptions.after || x.renderOptions.before) || {}).contentText.trim()]); return []; },
-      items: async label => { const g = (await panel.getChildren()).find(x => x.label.startsWith(label)); return g ? panel.getChildren(g) : []; },
-      panel: async () => (await panel.getChildren()).map(g => g.label + (g.description != null && g.description !== '' ? ' (' + g.description + ')' : ''))
+      vs, deps: () => deps, webviews
     };
   }
 
@@ -1360,7 +1344,7 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual(fn(marks, merged, saved).map(m => [m.mark.conflict.tag, m.startLine]), [['label', 2]], 'found by its text, a line further down; the checkbox you set otherwise is no longer a conflict');
   });
 
-  ok('the Promotion panel opens Review in merge to save into the resolution, from what you saved, with the sides named - and offers no other choices', async () => {
+  ok('the Promotions tab opens Review in merge to save into the resolution, from what you saved, with the sides named - and offers no other choices', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra rv '));
     const REL = 'force-app/main/default/layouts/Account-Account Layout.layout-meta.xml';
     const target = '<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <relatedLists>\n        <fields>QUOTE.TOTALPRICE</fields>\n    </relatedLists>\n</Layout>\n';
@@ -1411,7 +1395,7 @@ module.exports = function register(ok, section, h) {
 
   section('3.1.0: the sidebar only for what the page does not do; steadier');
 
-  ok('the sidebar: no Promotion view - the page does all of it; Merge, Deploy Check and Branch Conflicts only when they have something; otherwise one button to the page', () => {
+  ok('the sidebar: no Promotion view - the page does all of it; Deploy Check and Branch Conflicts only when they have something; otherwise one button to the page', () => {
     const root = path.join(__dirname, '..');
     const p = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const views = p.contributes.views.cmrContainer;
@@ -1695,7 +1679,7 @@ module.exports = function register(ok, section, h) {
       const target = put('target.layout-meta.xml', T);
       const incoming = put('feature.layout-meta.xml', T.replace('<fields>QUOTE.TOTALPRICE</fields>\n', '<fields>QUOTE.TOTALPRICE</fields>\n        <fields>QUOTE.SUBTOTAL</fields>\n'));
       const resolved = put('resolved.layout-meta.xml', '');
-      const mv = await realMergeView(root, { 'cmr.merge.editor': 'panel' });
+      const mv = await realMergeView(root, {});
       const { vs } = mv;
       let applied = 0;
       const start = () => mv.deps().startSession(vs.Uri.file(target), vs.Uri.file(incoming), null, { labels: { target: 'Target branch (HEAD)', incoming: 'Feature branch', merged: 'Your resolution (editable)' },
@@ -1807,7 +1791,9 @@ module.exports = function register(ok, section, h) {
 
   ok('where your resolution starts: the merged result for permission sets, profiles, labels, translations, objects; the feature branch\u2019s file for everything else - or as set', () => {
     const { startFor } = require('../src/mergeStart');
-    for (const t of ['Profile', 'PermissionSet', 'MutingPermissionSet', 'CustomLabels', 'Translations', 'CustomObjectTranslation', 'CustomObject']) assert.strictEqual(startFor(t, 'auto'), 'merged', t);
+    // an object's own file is like any other: the feature's version - only access and translations add up
+    assert.strictEqual(startFor('CustomObject', 'auto'), 'feature');
+    for (const t of ['Profile', 'PermissionSet', 'MutingPermissionSet', 'CustomLabels', 'Translations', 'CustomObjectTranslation']) assert.strictEqual(startFor(t, 'auto'), 'merged', t);
     for (const t of ['FlexiPage', 'Layout', 'Flow', 'ValidationRule', 'ExpressionSetDefinitionVersion', null]) assert.strictEqual(startFor(t, 'auto'), 'feature', String(t));
     for (const k of ['feature', 'target', 'merged']) assert.strictEqual(startFor('FlexiPage', k), k);
     const pkg = require('../package.json').contributes.configuration;
@@ -1833,7 +1819,7 @@ module.exports = function register(ok, section, h) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra sf '));
     try {
       const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
-      const mv = await realMergeView(root, { 'cmr.merge.editor': 'panel' });
+      const mv = await realMergeView(root, {});
       const { vs } = mv;
       const open = async (name, t, f, extra) => {
         await mv.deps().startSession(vs.Uri.file(put('t-' + name, t)), vs.Uri.file(put('f-' + name, f)), null, Object.assign({ applyToUri: vs.Uri.file(put('r-' + name, '')), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch' }, extra || {}));
@@ -1958,7 +1944,7 @@ module.exports = function register(ok, section, h) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra hide '));
     try {
       const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
-      const mv = await realMergeView(root, { 'cmr.merge.editor': 'panel', 'cmr.merge.hideIdentical': true });
+      const mv = await realMergeView(root, { 'cmr.merge.hideIdentical': true });
       const { vs } = mv;
       await mv.deps().startSession(vs.Uri.file(put('t.flexipage-meta.xml', HT)), vs.Uri.file(put('f.flexipage-meta.xml', HF)), null,
         { applyToUri: vs.Uri.file(put('r.flexipage-meta.xml', '')), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch' });
@@ -2161,6 +2147,19 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(M.snapshot().last.type, 'Layout');
       await M.act('manual.again');
       assert.strictEqual(started.length, 2, 'Open again');
+      // the same two versions: the same folder - unsaved changes can come back for exactly them
+      assert.strictEqual(started[1][0].fsPath, started[0][0].fsPath);
+      // new versions under the same file name: a folder of their own - an earlier merge's file is never read in their place
+      const T2 = T.replace('<fields>A</fields>', '<fields>C</fields>');
+      await M.act('manual.set', { side: 'target', text: T2, name: 'Account-Sales.layout-meta.xml' });
+      await M.act('manual.merge');
+      const [t3, i3] = started[2];
+      assert.notStrictEqual(t3.fsPath, started[0][0].fsPath, 'another folder');
+      assert.deepStrictEqual([path.basename(t3.fsPath), fs.readFileSync(t3.fsPath, 'utf8')], ['Account-Sales.layout-meta.xml', T2], 'the new target, exactly');
+      assert.ok(/<fields>B<\/fields>/.test(fs.readFileSync(i3.fsPath, 'utf8')));
+      // Clear both: the two sides at once
+      await M.act('manual.clearBoth');
+      assert.deepStrictEqual([M.snapshot().target, M.snapshot().incoming], [null, null]);
       // a package from a commit file
       await M.act('manual.commitSet', { text: JSON.stringify([{ t: 'ApexClass', n: 'OpsService', a: 'Add' }, { t: 'Layout', n: 'Account-Sales', a: 'Add' }]) });
       assert.strictEqual(M.snapshot().commit.components, 2);
@@ -2177,7 +2176,7 @@ module.exports = function register(ok, section, h) {
     } finally { rmTree(root); }
   });
 
-  ok('the page\u2019s Manual tab: only when shown; each version with what it is; Merge and review only with both valid; no banner', () => {
+  ok('the page\u2019s Manual tab: only when shown; each version with what it is; Compare only with both valid; no banner', () => {
     const page = runPage();
     const base = { copadoOrg: '', recent: [], current: null, validation: null };
     page.state(Object.assign({}, base, { manual: { show: true } }));
@@ -2187,13 +2186,13 @@ module.exports = function register(ok, section, h) {
     page.state(Object.assign({}, base, { manual: { show: true, target: side('Layout', true), incoming: null, commit: null, last: null } }));
     page.click({ nav: 'Manual' });
     let t = page.text();
-    assert.ok(/Merge two versions/.test(t) && /Target\s+the resolution \u2013 keeps everything\s+Layout \u00b7 412 lines \u00b7 valid/.test(t), t.slice(0, 400));
+    assert.ok(/Compare two versions/.test(t) && /Target\s+the target branch\s+Layout \u00b7 412 lines \u00b7 valid/.test(t), t.slice(0, 400));
     assert.ok(page.html.includes('class="mpaste" data-side="incoming"'), 'the other side: paste here');
     assert.ok(/data-m="manual.merge" disabled/.test(page.html), 'not yet');
     assert.ok(!/isn\u2019t connected|not connected/.test(t), 'no banner');
     page.state(Object.assign({}, base, { manual: { show: true, target: side('Layout', true), incoming: side('Layout', true), commit: { name: 'commit.json', components: 3 }, last: { type: 'Layout', at: new Date().toISOString() } } }));
     t = page.text();
-    assert.ok(!/data-m="manual.merge" disabled/.test(page.html) && /Last merge\s+Layout \u00b7 just now/.test(t) && /commit\.json\s+3 components/.test(t));
+    assert.ok(!/data-m="manual.merge" disabled/.test(page.html) && /Last comparison\s+Layout \u00b7 just now/.test(t) && /commit\.json\s+3 components/.test(t));
     page.click({ m: 'manual.merge' });
     assert.deepStrictEqual(page.posted.pop(), { type: 'act', scope: 'manual', name: 'manual.merge', payload: {} });
     page.click({ m: 'manual.pick', side: 'incoming' });
@@ -2204,24 +2203,20 @@ module.exports = function register(ok, section, h) {
 
   section('3.8.2: Home - one box, recent work, tools');
 
-  ok('the page\u2019s Promotions tab with nothing open: first; one box opens a promotion or a story; recent work; tools - Manual merge opens the Manual tab; set the Copado org first when there is none', () => {
+  ok('the page\u2019s Promotions tab with nothing open: first; one box opens a promotion or a story; recent work; tools - Compare versions opens the Manual tab; set the Copado org first when there is none', () => {
     const page = runPage();
     const base = { copadoOrg: 'copado', recent: [{ name: 'P12340', status: 'Completed', from: 'int', to: 'qa', total: 2, done: 2 }], current: null, validation: null };
     page.state(Object.assign({}, base, { life: { story: {} } }));
     assert.ok(/class="nav on" data-nav="Promotions"/.test(page.html) && !/data-nav="Home"/.test(page.html), 'Promotions first - Home and Promotions are one');
     const t = page.text();
-    assert.ok(!/Release pipeline|Needs you/.test(t), 'no pipeline');
-    assert.ok(!page.posted.some(m => m.name === 'home.load'), 'nothing read from Copado for it');
-    assert.ok(/Open a promotion/.test(t) && /Recent promotions\s+P12340\s+Completed\s+int\s+qa\s+Open/.test(t) && /Tools\s+Validate a deployment/.test(t) && /Manual merge/.test(t), t.slice(0, 400));
+    assert.ok(/Open a promotion/.test(t) && /Recent promotions\s+P12340\s+Completed\s+int\s+qa\s+Open/.test(t) && /Tools\s+Validate a deployment/.test(t) && /Compare versions/.test(t), t.slice(0, 400));
     page.click({ nav: 'Manual' });
-    assert.ok(/class="nav on" data-nav="Manual"/.test(page.html) && /Merge two versions/.test(page.text()), 'Manual merge opens the Manual tab');
+    assert.ok(/class="nav on" data-nav="Manual"/.test(page.html) && /Compare two versions/.test(page.text()), 'Compare versions opens the Manual tab');
     page.click({ nav: 'Promotions' });
     page.click({ a: 'openRecent', ref: 'P12340' });
     assert.deepStrictEqual(page.posted.pop(), { type: 'act', name: 'open', payload: { ref: 'P12340' } }, 'opened like any promotion');
     page.state(Object.assign({}, base, { copadoOrg: '', recent: [], life: { story: {} } }));
     assert.ok(/Set the Copado org to open promotions and stories/.test(page.text()) && /Promotions you open appear here/.test(page.text()), 'not connected: what to do');
-    const L = require('../src/lifecycle');
-    assert.ok(!('home' in L) && !('homeView' in L), 'no pipeline reader');
   });
 
   section('3.8.0: an open-source repository');
@@ -2554,6 +2549,372 @@ module.exports = function register(ok, section, h) {
     assert.ok(tested.includes(22), 'and today\u2019s VS Code\u2019s');
   });
 
+  section('3.11.0: the common ancestor');
+
+  ok('the merge-base of two branches, and a file as it was there - for each provider, from the connected repository', async () => {
+    const R = require('../src/repoHost');
+    const file = 'force-app/main/default/flexipages/Account.flexipage-meta.xml';
+    const g = await h.fakeGitHosts({ baseFiles: { [file]: '<FlexiPage>base</FlexiPage>' }, branches: ['feature/US-0012345', 'uat'] });
+    try {
+      for (const [provider, url, token] of [['azure', g.base + '/org/Proj/_git/repo', 'az-token'], ['github', g.base + '/owner/repo', 'gh-token'],
+        ['gitlab', g.base + '/group/repo', 'gl-token'], ['bitbucket', g.base + '/ws/repo', 'me@example.com:bb-token']]) {
+        const host = R.createHost(R.parseRepoUrl(url, provider), token);
+        const sha = await host.mergeBase('feature/US-0012345', 'uat');
+        assert.strictEqual(sha, 'b'.repeat(40), provider + ': the merge-base');
+        assert.strictEqual((await host.readFileAt(sha, file)).toString(), '<FlexiPage>base</FlexiPage>', provider + ': the file at it');
+        assert.strictEqual(await host.readFileAt(sha, 'force-app/main/default/classes/New.cls'), null, provider + ': a file that was not there');
+      }
+      await assert.rejects(R.createHost(R.parseRepoUrl(g.base + '/owner/repo', 'github'), 'gh-token').readFileAt('main', file), /not a commit/);
+    } finally { g.server.close(); }
+  });
+
+  ok('with the common ancestor, what each branch did since: the target\u2019s own later addition or change is no mark; what the feature removed or changed says so', () => {
+    const it = v => '                        <valueListItems>\n                            <value>' + v + '</value>\n                        </valueListItems>\n';
+    const pg = items => '<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + items.map(it).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
+    const say = (T, F, M, anc) => MA().align(T, F, M, { type: 'FlexiPage', ancestor: anc }).pieces.filter(p => p.kind !== 'same').map(p => p.kind + (p.byFeature ? ' by the feature' : ''));
+    const T = pg(['Edit', 'Share', 'Clone']), F = pg(['Edit', 'Share']);
+    assert.deepStrictEqual(say(T, F, T, null), ['kept'], 'no ancestor: not in the feature, kept');
+    assert.deepStrictEqual(say(T, F, T, pg(['Edit', 'Share'])), [], 'the target added it since: keeping it is right - no mark');
+    assert.deepStrictEqual(say(T, F, T, pg(['Edit', 'Share', 'Clone'])), ['kept by the feature'], 'the feature removed it: kept, and it says so');
+    assert.deepStrictEqual(say(T, F, F, pg(['Edit', 'Share', 'Clone'])), ['removed by the feature'], 'removed, as the feature did');
+    assert.deepStrictEqual(say(T, F, F, pg(['Edit', 'Share'])), ['removed'], 'the target\u2019s own addition removed: a plain removal');
+    // values: the target changed it since - no mark; the feature changed it - says so
+    const lv = (v) => pg(['Edit']).replace('<name>header</name>', '<name>' + v + '</name>');
+    assert.deepStrictEqual(say(lv('header2'), lv('header'), lv('header2'), lv('header')), [], 'the target\u2019s own change kept: no mark');
+    const d = MA().align(lv('header'), lv('top'), lv('header'), { type: 'FlexiPage', ancestor: lv('header') }).pieces.filter(p => p.kind !== 'same');
+    assert.deepStrictEqual(d.map(p => [p.kind, !!p.byFeature]), [['differs', true]], 'the feature changed it, you kept the target\u2019s: it says so');
+  });
+
+  ok('the merge editor takes the ancestor from the session - and not when cmr.merge.useAncestor is off', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra anc '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const it = v => '        <valueListItems>\n            <value>' + v + '</value>\n        </valueListItems>\n';
+      const pg = items => '<?xml version="1.0" encoding="UTF-8"?>\n<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>actionNames</name>\n                    <valueList>\n' + items.map(it).join('') + '                    </valueList>\n                </componentInstanceProperties>\n                <identifier>hp</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n    </flexiPageRegions>\n</FlexiPage>\n';
+      for (const on of [true, false]) {
+        const mv = await realMergeView(root, on ? {} : { 'cmr.merge.useAncestor': false });
+        await mv.deps().startSession(mv.vs.Uri.file(put('t.flexipage-meta.xml', pg(['Edit', 'Share', 'Clone']))), mv.vs.Uri.file(put('f.flexipage-meta.xml', pg(['Edit', 'Share']))), mv.vs.Uri.file(put('o.flexipage-meta.xml', pg(['Edit', 'Share']))),
+          { applyToUri: mv.vs.Uri.file(put('r.flexipage-meta.xml', '')), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', startFrom: pg(['Edit', 'Share', 'Clone']) });
+        const w = mv.webviews[mv.webviews.length - 1];
+        await w.send({ type: 'ready' });
+        const kinds = w.last('init').marks.pieces.filter(p => p.kind !== 'same').map(p => p.kind);
+        assert.deepStrictEqual(kinds, on ? [] : ['kept'], on ? 'with the ancestor: the target\u2019s own addition, no mark' : 'off: compared as branches only');
+        w.panel.dispose();
+      }
+    } finally { rmTree(root); }
+  });
+
+  ok('renamed: gone and come back alike but for its name is one change - not when only flags are alike, nor when it was only its name', () => {
+    const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+    const say = (T, M, type) => { const r = MA().align(T, null, M, { type }); covers(r, M); return r.pieces.filter(p => p.kind !== 'same').map(p => p.kind + ': ' + p.label.replace(/ \(\d+ lines?\)$/, '')); };
+    const lab = list => '<?xml version="1.0" encoding="UTF-8"?>\n<CustomLabels ' + NS + '>\n' + list.map(([n, v]) => '    <labels>\n        <fullName>' + n + '</fullName>\n        <language>en_US</language>\n        <protected>false</protected>\n        <shortDescription>' + v + '</shortDescription>\n        <value>' + v + '</value>\n    </labels>\n').join('') + '</CustomLabels>\n';
+    assert.deepStrictEqual(say(lab([['Bye', 'Bye'], ['Greeting', 'Hello'], ['Thanks', 'Thanks']]), lab([['Bye', 'Bye'], ['Thanks', 'Thanks'], ['Welcome', 'Hello']]), 'CustomLabels'), ['changed-own: Renamed labels: Greeting \u2192 Welcome']);
+    assert.deepStrictEqual(say(lab([['Bye', 'Bye'], ['Greeting', 'Hello']]), lab([['Bye', 'Bye'], ['Welcome', 'Hi']]), 'CustomLabels'), ['removed: labels Greeting', 'own: labels Welcome'], 'renamed and changed: another label');
+    const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+    const ps = b => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet ' + NS + '>\n' + b + '    <label>P</label>\n</PermissionSet>\n';
+    assert.deepStrictEqual(say(ps(fp('A.a__c') + fp('A.b__c')), ps(fp('A.a__c') + fp('A.c__c')), 'PermissionSet'), ['removed: fieldPermissions A.b__c', 'own: fieldPermissions A.c__c'], 'only flags alike: two fields, not a rename');
+  });
+
+  section('3.11.0: code');
+
+  ok('a promotion\u2019s code is Copado\u2019s conflict file as git merged it: no markers, each conflict left out until one of its versions is accepted, named by what it is about', () => {
+    const CM = require('../src/codeMerge'), M = MA();
+    const f = 'public with sharing class InvoiceService {\n    private static final String SOURCE = \'Billing\';\n<<<<<<< HEAD\n    private static final Decimal TAX_RATE = 0.21;\n=======\n    private static final Decimal TAX_RATE = 0.20;\n    private static final Decimal MAX_DISCOUNT = 0.15;\n>>>>>>> feature/US-0012345\n    public static void refund(Id invoiceId) { issueCredit(invoiceId); }\n    public static Decimal total(Decimal amount) {\n<<<<<<< HEAD\n        return amount * (1 + TAX_RATE);\n=======\n        return (amount - discountOf(amount)) * 1.2;\n>>>>>>> feature/US-0012345\n    }\n}\n';
+    const g = CM.fromConflictFile(f);
+    assert.ok(!/^(<{7}|={7}|>{7})/m.test(g.text), 'no markers');
+    assert.ok(!g.text.includes('TAX_RATE = 0.2') && !g.text.includes('discountOf') && g.text.includes('refund'), 'neither version in - git\u2019s merge kept');
+    const look = t => CM.marks({ text: t, conflicts: g.conflicts, language: 'apex' });
+    const k = look(g.text);
+    assert.deepStrictEqual(k.rows.map(r => [r.label, r.chosen, r.needs, r.ghosts.map(x => x.title)]), [['properties TAX_RATE, MAX_DISCOUNT', 'none', true, ['Target', 'Feature']], ['method total(Decimal)', 'none', true, ['Target', 'Feature']]]);
+    assert.deepStrictEqual([k.counts.needs, k.counts.conflicts], [2, 2]);
+    assert.deepStrictEqual(k.rows[0].actions.map(a => a.label), ['Accept target', 'Accept feature', 'Accept both']);
+    // accepted: that version in, ordinary text; the name stays; edited - yours
+    const t1 = applyOps(g.text, [k.rows[1].actions[1].op]);
+    assert.ok(t1.includes('discountOf(amount)) * 1.2;') && !t1.includes('TAX_RATE);'), 'the feature\u2019s lines');
+    const t2 = applyOps(t1, [look(t1).rows[0].actions[2].op]);
+    assert.deepStrictEqual(look(t2).rows.map(r => [r.label, r.chosen]), [['properties TAX_RATE, MAX_DISCOUNT', 'both'], ['method total(Decimal)', 'feature']]);
+    assert.deepStrictEqual([look(t2).counts.needs, look(t2.replace('* 1.2;', '* 1.25;')).rows[1].chosen], [0, 'edited']);
+    assert.deepStrictEqual(look(g.text).rows.map(r => r.chosen), ['none', 'none'], 'undone: to resolve again');
+    // found again by what is either side - and where - not by the first '}' or '/**' that looks the same
+    let many = 'public class B {\n';
+    for (let i = 0; i < 6; i++) many += '    /**\n     * m' + i + '\n     */\n    void m' + i + '() {\n<<<<<<< HEAD\n        a' + i + '();\n=======\n        b' + i + '();\n>>>>>>> feature\n    }\n\n';
+    const gm = CM.fromConflictFile(many + '}\n');
+    const km = CM.marks({ text: gm.text, conflicts: gm.conflicts, language: 'apex' });
+    assert.deepStrictEqual(km.rows.map(r => r.label + ' ' + r.chosen), ['method m0() none', 'method m1() none', 'method m2() none', 'method m3() none', 'method m4() none', 'method m5() none']);
+    const t4 = applyOps(gm.text, [km.rows[3].actions[1].op]);
+    assert.deepStrictEqual(CM.marks({ text: t4, conflicts: gm.conflicts, language: 'apex' }).rows.map(r => r.chosen), ['none', 'none', 'none', 'feature', 'none', 'none'], 'only the one accepted');
+    // one version empty - Accept feature and Accept both are the same text: the one clicked is the one shown
+    const ge = CM.fromConflictFile('public class C {\n<<<<<<< HEAD\n=======\n    // Setup helpers\n>>>>>>> feature\n    void a() {\n    }\n}\n');
+    const ke = CM.marks({ text: ge.text, conflicts: ge.conflicts, language: 'apex' });
+    assert.strictEqual(CM.marks({ text: applyOps(ge.text, [ke.rows[0].actions[1].op]), conflicts: ge.conflicts, language: 'apex' }).rows[0].chosen, 'feature');
+    // an empty version accepted: remembered - resolved, the other's lines struck through
+    const gz = CM.fromConflictFile('public class D {\n    void a() {\n<<<<<<< HEAD\n        retry();\n=======\n>>>>>>> feature\n    }\n}\n');
+    const kz = CM.marks({ text: gz.text, conflicts: gz.conflicts, language: 'apex', reviewed: new Map([[gz.conflicts[0].id, 'feature']]) });
+    assert.deepStrictEqual([kz.rows[0].chosen, kz.rows[0].needs, kz.rows[0].ghosts.map(x => x.cls + ':' + x.lines.join('').trim())], ['feature', false, ['struck:retry();']]);
+    // a comparison: duplicates only where entries add up - a permission set's, never a page's
+    const MP0 = require('../src/mergePanel');
+    const dupPs = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <userPermissions>\n        <enabled>true</enabled>\n        <name>ViewSetup</name>\n    </userPermissions>\n    <userPermissions>\n        <enabled>true</enabled>\n        <name>ViewSetup</name>\n    </userPermissions>\n</PermissionSet>\n';
+    assert.deepStrictEqual([MP0.marksFor({ plain: true, typeName: 'PermissionSet', target: dupPs }, dupPs, 'order').dups.length > 0, MP0.marksFor({ plain: true, typeName: 'FlexiPage', target: dupPs }, dupPs, 'order').dups.length], [true, 0]);
+    // unresolved, the code is not whole: no bracket problems until it is
+    const MP = require('../src/mergePanel');
+    const open = MP.marksFor({ language: 'apex', target: '', incoming: '', code: { conflicts: gm.conflicts } }, gm.text, 'order');
+    assert.deepStrictEqual([open.counts.needs, open.problems], [6, []]);
+    // the members read - they name conflicts: methods by name and parameter types, overloads apart; a banner apart from a member
+    const cls = ms => 'public class A {\n' + ms.join('') + '}\n', m = (sig, body) => '    void ' + sig + ' {\n        ' + body + '\n    }\n';
+    assert.deepStrictEqual(M.units(cls([m('f(Integer a)', ''), m('f(String a)', '')]), 'apex').members.map(u => u.id), ['f(Integer)', 'f(String)']);
+    const banner = 'public class B {\n    // ======\n    // Setup helpers\n    // ======\n\n    /** Makes one. */\n    static void make() {\n        x();\n    }\n}\n';
+    assert.deepStrictEqual(M.units(banner, 'apex').members.map(u => [u.id, u.l0, u.l1]), [['comment Setup helpers', 1, 5], ['make()', 5, 9]]);
+    assert.strictEqual(CM.memberDiffs(cls([m('a()', 'x();')]), cls([m('a()', 'y();'), m('b()', '')]), 'apex'), 2, 'Compare: members that differ');
+  });
+
+
+
+  ok('code checks: conflict markers left, brackets that do not balance (strings, comments, template literals skipped), a member defined twice; conflict blocks with both sides', () => {
+    const C = require('../src/codeChecks');
+    const conflict = 'public class A {\n<<<<<<< HEAD\n    Integer x = 1;\n=======\n    Integer x = 2;\n>>>>>>> feature/US-0012345\n}\n';
+    assert.deepStrictEqual(C.blocks(conflict).map(b => [b.b0, b.b1, b.ours.join('').trim(), b.theirs.join('').trim()]), [[1, 6, 'Integer x = 1;', 'Integer x = 2;']]);
+    assert.deepStrictEqual(C.problems(conflict, 'apex').map(p => [p.line, p.severity, /Conflict markers left/.test(p.message)]), [[2, 'error', true]]);
+    assert.deepStrictEqual(C.problems('public class A {\n    void f() {\n    }\n    }\n}\n', 'apex').map(p => [p.line, p.message]), [[5, 'A closing } with nothing open']]);
+    assert.deepStrictEqual(C.problems('public class A {\n    void f() {\n        String s = "}";\n}\n', 'apex').map(p => [p.line, p.message]), [[1, 'This { is never closed']], 'the brace in a string is not one');
+    assert.deepStrictEqual(C.problems('public class A {\n    void f(Integer a) {\n    }\n    void f(Integer b) {\n    }\n}\n', 'apex').map(p => [p.line, p.severity]), [[4, 'warning']]);
+    assert.deepStrictEqual(C.problems('export default class X {\n    // } not a brace\n    get t() { return `${this.a} }`; }\n}\n', 'javascript'), []);
+    assert.deepStrictEqual(C.problems('<template><p>{x}</p></template>\n', 'html'), [], 'templates: no bracket checks');
+  });
+
+  ok('a promotion\u2019s code opens on Copado\u2019s conflict file - the conflict to resolve in one panel or two; saving with it unresolved warns first', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra code '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const T = 'public class A {\n    Integer x = 1;\n}\n', F = 'public class A {\n    Integer x = 2;\n}\n';
+      const conflict = 'public class A {\n<<<<<<< HEAD\n    Integer x = 1;\n=======\n    Integer x = 2;\n>>>>>>> feature/US-0012345\n}\n';
+      const mv = await realMergeView(root, {});
+      const r = put('r.cls', conflict);
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.cls', T)), mv.vs.Uri.file(put('f.cls', F)), null, { applyToUri: mv.vs.Uri.file(r), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', startFrom: conflict });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const init = w.last('init');
+      assert.deepStrictEqual([init.language, init.text, init.marks.git, init.marks.rows.map(x => x.label + ' ' + x.chosen), init.marks.counts.needs], ['apex', 'public class A {\n}\n', true, ['property x none'], 1]);
+      // two panels: the same conflict, the same count - and the choice is the setting
+      await w.send({ type: 'codeView', view: 'twoPanes', seq: 5, text: init.text });
+      const two = w.last('marks').marks;
+      assert.deepStrictEqual([two.single, two.left, two.rows.length, two.counts.needs, mv.vs.config['cmr.merge.codeView']], [false, T, 1, 1, 'twoPanes']);
+      await w.send({ type: 'codeView', view: 'onePane', seq: 6, text: init.text });
+      // Save & Close with it unresolved: warned first - and No keeps it open
+      mv.vs.answers.warn.push({ re: /not resolved yet/, v: undefined });
+      await w.send({ type: 'save', close: true, text: init.text });
+      assert.strictEqual(fs.readFileSync(r, 'utf8'), conflict, 'nothing written');
+      // the feature's accepted: saved
+      await w.send({ type: 'save', close: true, text: F });
+      assert.strictEqual(fs.readFileSync(r, 'utf8'), F, 'saved');
+    } finally { rmTree(root); }
+  });
+
+
+
+  section('3.11.2: blank lines');
+
+  ok('blank lines and trailing spaces are no difference - in a comparison of code, and in metadata', () => {
+    const cls = body => 'public class A {\n' + body + '}\n', f = (n, b) => '    void ' + n + '() {\n        ' + b + '\n    }\n';
+    const T2 = cls(f('x', 'a();') + f('y', 'b();'));
+    for (const Y of [T2.replace('a();', 'a();   '), cls(f('x', 'a();') + '\n' + f('y', 'b();'))]) assert.deepStrictEqual(MA().align(T2, null, Y, { type: null, mode: 'literal' }).pieces.filter(p => p.kind !== 'same' && p.kind !== 'blank'), []);
+    const ps = '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <fieldPermissions>\n        <editable>true</editable>\n        <field>Account.Region__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n    <label>P</label>\n</PermissionSet>\n';
+    assert.deepStrictEqual(MA().align(ps, ps, ps.replace(/>\n/g, '>   \n'), { type: 'PermissionSet' }).pieces.filter(p => p.kind !== 'same'), [], 'trailing spaces in XML');
+  });
+
+
+
+  section('3.13.0: Clean Working Files');
+
+  ok('Clean Working Files: what the working folder holds listed, promotions with resolutions not uploaded named, emptied only when you say - its .gitignore kept; not while a merge is open', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra clean '));
+    try {
+      const st = path.join(root, '.copado');
+      const put = (f, t) => { fs.mkdirSync(path.dirname(path.join(st, f)), { recursive: true }); fs.writeFileSync(path.join(st, f), t); };
+      put('.gitignore', '*\n'); put('manual/abc123def456/target/x.xml', '<a/>'); put('reports/r.md', 'report');
+      put('promotions/P12345/promotion.json', JSON.stringify({ files: { 'a.xml': { state: 'resolved' }, 'b.xml': { state: 'uploaded' } } }));
+      const mv = await realMergeView(root, {});
+      const run = mv.vs.registered['cmr.storage.clean'];
+      // No: nothing removed - and it said what is there, and what would be lost
+      mv.vs.answers.warn.push({ re: /Empty .copado\?/, v: undefined });
+      await run();
+      const asked = mv.vs.log.warn.find(w => /Empty .copado\?/.test(w));
+      assert.ok(asked, 'asked first: ' + JSON.stringify(mv.vs.log.warn));
+      assert.ok(/manual \(1 file/.test(asked) && /promotions/.test(asked), asked);
+      assert.ok((mv.vs.log.details || []).some(d => /not uploaded to Copado yet will be lost: P12345 \(1\)/.test(d)), 'the promotion named');
+      assert.ok(fs.existsSync(path.join(st, 'reports', 'r.md')), 'nothing removed');
+      // Empty it: everything but its .gitignore
+      mv.vs.answers.warn.push({ re: /Empty .copado\?/, v: 'Empty it' });
+      await run();
+      assert.deepStrictEqual(fs.readdirSync(st), ['.gitignore']);
+    } finally { rmTree(root); }
+  });
+
+  section('3.13.0: Compare');
+
+  ok('the branches, and what differs between two of them - for each provider, from the connected repository', async () => {
+    const R = require('../src/repoHost');
+    const changed = [{ path: 'force-app/main/default/permissionsets/Sales_Ops.permissionset-meta.xml', kind: 'changed' }, { path: 'force-app/main/default/classes/New.cls', kind: 'added' }, { path: 'force-app/main/default/flexipages/Old.flexipage-meta.xml', kind: 'removed' }];
+    const g = await h.fakeGitHosts({ branches: ['feature/US-0012345', 'uat', 'main'], changed });
+    try {
+      for (const [provider, url, token] of [['azure', g.base + '/org/Proj/_git/repo', 'az-token'], ['github', g.base + '/owner/repo', 'gh-token'],
+        ['gitlab', g.base + '/group/repo', 'gl-token'], ['bitbucket', g.base + '/ws/repo', 'me@example.com:bb-token']]) {
+        const host = R.createHost(R.parseRepoUrl(url, provider), token);
+        assert.deepStrictEqual(await host.listBranches(), ['feature/US-0012345', 'main', 'uat'], provider + ': the branches');
+        assert.deepStrictEqual((await host.changedFiles('feature/US-0012345', 'uat')).map(f => f.kind + ' ' + f.path.split('/').pop()), ['changed Sales_Ops.permissionset-meta.xml', 'added New.cls', 'removed Old.flexipage-meta.xml'], provider);
+      }
+    } finally { g.server.close(); }
+    // Azure DevOps a page at a time - two changes a page here, a folder among them: every page read, nothing missing
+    const many = []; for (let i = 0; i < 7; i++) many.push({ path: 'force-app/main/default/' + (i < 5 ? 'objects/O' + i + '.object-meta.xml' : 'profiles/P' + i + '.profile-meta.xml'), kind: 'changed' });
+    const g2 = await h.fakeGitHosts({ changed: many, azurePage: 2 });
+    try {
+      const az = R.createHost(R.parseRepoUrl(g2.base + '/org/Proj/_git/repo', 'azure'), 'az-token');
+      const got = await az.changedFiles('feature/US-0012345', 'uat');
+      assert.deepStrictEqual([got.length, got.incomplete, got.filter(f => /profiles/.test(f.path)).length], [7, undefined, 2], 'the profiles at the end are there');
+    } finally { g2.server.close(); }
+    // GitHub's first 300 files only: the list said to be cut short
+    const lots = []; for (let i = 0; i < 300; i++) lots.push({ path: 'force-app/main/default/classes/C' + i + '.cls', kind: 'changed' });
+    const g3 = await h.fakeGitHosts({ changed: lots });
+    try { assert.strictEqual((await R.createHost(R.parseRepoUrl(g3.base + '/owner/repo', 'github'), 'gh-token').changedFiles('a', 'b')).incomplete, true); } finally { g3.server.close(); }
+  });
+
+  ok('a file\u2019s type and name from its folder; only the project\u2019s metadata; what differs, in a few words', () => {
+    const CB = require('../src/compareBranches');
+    const d = 'force-app/main/default/';
+    assert.deepStrictEqual([d + 'permissionsets/Sales_Ops.permissionset-meta.xml', d + 'objects/Account/fields/Region__c.field-meta.xml', d + 'classes/TaxHelper.cls', d + 'lwc/opsCard/opsCard.js', d + 'objects/Account/Account.object-meta.xml'].map(CB.groupOf),
+      [{ type: 'Permission sets', name: 'Sales_Ops' }, { type: 'Custom fields', name: 'Account.Region__c' }, { type: 'Apex classes', name: 'TaxHelper.cls' }, { type: 'Lightning web components', name: 'opsCard \u00b7 opsCard.js' }, { type: 'Objects', name: 'Account' }]);
+    assert.deepStrictEqual([CB.inProject(d + 'classes/A.cls'), CB.inProject('README.md'), CB.inProject('src/x.cls', ['src'])], [true, false, true]);
+    const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+    const ps = b => '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + b + '    <label>P</label>\n</PermissionSet>\n';
+    assert.strictEqual(CB.summarize('x.permissionset-meta.xml', ps(fp('A.a__c')), ps(fp('A.a__c') + fp('A.b__c') + fp('A.a__c'))), '2 elements differ \u00b7 1 duplicate');
+    assert.strictEqual(CB.summarize('x.permissionset-meta.xml', ps(fp('A.b__c') + fp('A.a__c')), ps(fp('A.a__c') + fp('A.b__c'))), 'only spacing or order differs', 'Salesforce sorts them');
+    assert.strictEqual(CB.summarize('T.cls', 'public class T {\n    void a() {\n        x();\n    }\n}\n', 'public class T {\n    void a() {\n        y();\n    }\n}\n'), '1 member differs');
+    assert.deepStrictEqual([CB.summarize('a.xml', null, '<a/>'), CB.summarize('a.xml', '<a/>', null)], ['only in the From branch', 'only in the To branch']);
+    // only spacing, or order where it does not count: the same file
+    assert.deepStrictEqual(['only spacing differs', 'only spacing or order differs', '1 element differs', '2 members differ', null].map(CB.same), [true, true, false, false, false]);
+    assert.ok(CB.same(CB.summarize('x.permissionset-meta.xml', ps(fp('A.a__c')), ps(fp('A.a__c')).replace(/>\n/g, '>   \n').replace(/^    </gm, '  <'))), 'spacing only: the same');
+  });
+
+  ok('the Compare tab: the branches read, two compared, the files grouped with what differs; one opened in the merge editor - the To branch read-only, a copy of the From to work on; one only on one side opened to read', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra cmp '));
+    try {
+      const vs = fakeCode(root, {});
+      const opened = [];
+      vs.workspace.openTextDocument = async o => { opened.push(o); return { uri: vs.Uri.file(path.join(root, 'x')), getText: () => o.content }; };
+      vs.window.showTextDocument = async () => ({});
+      const [C] = loadWith(vs, ['../compareUi']);
+      const d = 'force-app/main/default/';
+      const T = '<?xml version="1.0" encoding="UTF-8"?>\n<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">\n    <labels>\n        <fullName>A</fullName>\n        <value>Hello</value>\n    </labels>\n</CustomLabels>\n';
+      const files = { uat: { [d + 'labels/CustomLabels.labels-meta.xml']: T, [d + 'flexipages/Old.flexipage-meta.xml']: '<FlexiPage/>' }, 'feature/US-0012345': { [d + 'labels/CustomLabels.labels-meta.xml']: T.replace('Hello', 'Hi'), [d + 'classes/New.cls']: 'public class New {\n}\n' } };
+      let host = null;
+      const started = [];
+      C.activate({ subscriptions: [] }, { host: async () => host, packageDirs: () => ['force-app'], storageDir: async sub => vs.Uri.file(path.join(root, '.copado', sub)), startSession: async (...a) => { started.push(a); } });
+      // nothing connected: said, nothing asked
+      await C.act('compare.load');
+      assert.deepStrictEqual([C.snapshot().connected, C.snapshot().branches], [false, []]);
+      host = { listBranches: async () => ['feature/US-0012345', 'main', 'uat'], readFile: async (b, p) => files[b][p] == null ? null : Buffer.from(files[b][p]),
+        changedFiles: async () => [{ path: d + 'labels/CustomLabels.labels-meta.xml', kind: 'changed' }, { path: d + 'classes/New.cls', kind: 'added' }, { path: d + 'flexipages/Old.flexipage-meta.xml', kind: 'removed' }, { path: 'README.md', kind: 'changed' }] };
+      await C.act('compare.refresh');
+      assert.deepStrictEqual(C.snapshot().branches, ['feature/US-0012345', 'main', 'uat']);
+      await C.act('compare.set', { side: 'from', value: 'feature/US-0012345' });
+      await C.act('compare.set', { side: 'to', value: 'uat' });
+      await C.act('compare.run');
+      // removed or changed first, then what is new; a summary only once its row is shown and asked for
+      assert.deepStrictEqual(C.snapshot().files.map(f => [f.type, f.name, f.kind, f.summary]), [['Lightning pages', 'Old', 'removed', null], ['Custom labels', 'CustomLabels', 'changed', null], ['Apex classes', 'New.cls', 'added', null]], 'README.md is not metadata');
+      await C.act('compare.summaries', { paths: [d + 'labels/CustomLabels.labels-meta.xml'] });
+      assert.deepStrictEqual([C.snapshot().files[1].summary, C.snapshot().files[1].same], ['1 element differs', false]);
+      // opened: the merge editor, the To branch on the left, a copy of the From to work on
+      await C.act('compare.open', { path: d + 'labels/CustomLabels.labels-meta.xml' });
+      const [to, from, anc, so] = started[0];
+      assert.deepStrictEqual([fs.readFileSync(to.fsPath, 'utf8'), fs.readFileSync(from.fsPath, 'utf8'), anc, so.compare, so.manual, so.applyOnSave, so.startFrom, so.labels.target], [T, T.replace('Hello', 'Hi'), null, true, true, false, T.replace('Hello', 'Hi'), 'uat']);
+      // only on one side: opened to read
+      await C.act('compare.open', { path: d + 'classes/New.cls' });
+      assert.deepStrictEqual([opened.length, opened[0].content, started.length], [1, 'public class New {\n}\n', 1]);
+      // Reset: the branches and what was found, at once
+      await C.act('compare.reset');
+      assert.deepStrictEqual([C.snapshot().from, C.snapshot().to, C.snapshot().files], [null, null, null]);
+      await C.act('compare.set', { side: 'from', value: 'feature/US-0012345' });
+      // a list the repository cut short: said
+      const short = Object.assign([{ path: d + 'labels/CustomLabels.labels-meta.xml', kind: 'changed' }], { incomplete: true });
+      const was = host.changedFiles; host.changedFiles = async () => short;
+      await C.act('compare.set', { side: 'to', value: 'uat' });
+      await C.act('compare.run');
+      assert.ok(/listed only the first 1 changed files/.test(C.snapshot().error), C.snapshot().error);
+      host.changedFiles = was;
+      // the same branch twice: not compared
+      await C.act('compare.set', { side: 'to', value: 'feature/US-0012345' });
+      await C.act('compare.run');
+      assert.strictEqual(C.snapshot().error, 'Choose two different branches.');
+    } finally { rmTree(root); }
+  });
+
+  ok('the page\u2019s Compare tab: branches searched, Reset; the files grouped - removed or changed first - one chip, icon and button style; a Types filter with its own search; Search by name; nothing connected - Connect repository', () => {
+    const page = runPage();
+    const d = 'force-app/main/default/', CB = require('../src/compareBranches');
+    const F = (p, kind, summary) => Object.assign({ path: d + p, kind, summary }, CB.groupOf(d + p));
+    page.state({ copadoOrg: 'copado', recent: [], current: null, compare: { connected: false } });
+    page.message({ type: 'nav', nav: 'Compare' });
+    assert.ok(/No repository connected/.test(page.text()) && /data-c="compare.connect"/.test(page.html), 'nothing connected');
+    const files = [F('classes/TaxHelper.cls', 'changed', '2 members differ'), F('permissionsets/Billing.permissionset-meta.xml', 'added', null), F('permissionsets/Sales_Ops.permissionset-meta.xml', 'changed', '4 elements differ \u00b7 1 duplicate'), F('objects/Account/fields/Old__c.field-meta.xml', 'removed', null)];
+    page.state({ copadoOrg: 'copado', recent: [], current: null, compare: { connected: true, branches: ['feature/US-0012345', 'uat'], from: 'feature/US-0012345', to: 'uat', files } });
+    const t = page.text();
+    for (const w of ['Compare branches', '1 removed', '2 changed', '1 new', '1 with duplicates', 'Removed or changed', 'New in feature/US-0012345', 'Apex classes', 'Permission sets', 'Custom fields', '4 elements differ \u00b7 1 duplicate', 'All types', 'Reset']) assert.ok(t.includes(w), w);
+    assert.ok(!/only in /.test(t) && !/Every file the From branch/.test(t), 'no detail a developer does not need');
+    assert.ok(t.indexOf('Removed or changed') < t.indexOf('New in feature/US-0012345'), 'removed or changed first');
+    assert.ok(/data-cq="to" value="uat"/.test(page.html) && /placeholder="Search"/.test(page.html), 'the branches in their search boxes; Search by name');
+    assert.strictEqual((page.html.match(/data-c="compare.open"/g) || []).length, 4);
+    assert.strictEqual((page.html.match(/class="btn secondary small" data-c="compare.open"/g) || []).length, 4, 'Compare and Open: the same button');
+    // the Types filter: its list, with its own search; one type chosen - only it
+    page.click({ ctopen: '1' });
+    assert.ok(/placeholder="Search types"/.test(page.html) && /data-ctype="Permission sets"/.test(page.html));
+    page.click({ ctype: 'Permission sets' });
+    const t2 = page.text();
+    assert.ok(t2.includes('Sales_Ops') && t2.includes('Billing') && !t2.includes('TaxHelper.cls'), 'only permission sets');
+    page.click({ ctclear: '1' });
+    assert.ok(page.text().includes('TaxHelper.cls'), 'all types again');
+    page.click({ c: 'compare.reset' });
+    assert.deepStrictEqual(page.posted.filter(m => m.scope === 'compare').pop(), { type: 'act', scope: 'compare', name: 'compare.reset', payload: {} });
+  });
+
+
+  ok('comparing code - Manual, Compare: the two versions side by side, nothing merged, no conflicts, no choices', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra cmpc '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const T = 'public class A {\n    Integer x = 1;\n}\n', F = 'public class A {\n    Integer x = 2;\n}\n';
+      const mv = await realMergeView(root, {});
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.cls', T)), mv.vs.Uri.file(put('f.cls', F)), null, { manual: true, compare: true, applyOnSave: false, openAfterApply: false, theirs: 'feature/US-0012345', startFrom: F, labels: { target: 'uat', incoming: 'feature/US-0012345', merged: 'feature/US-0012345' } });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const init = w.last('init');
+      assert.deepStrictEqual([init.plain, init.text, init.marks.plain, init.marks.counts.differs, init.marks.rows, init.marks.left], [true, F, true, 1, [], T]);
+      // the other side edited: compared again
+      await w.send({ type: 'text', side: 'left', seq: 3, text: F });
+      assert.strictEqual(w.last('marks').marks.counts.differs, 0, 'the same now');
+    } finally { rmTree(root); }
+  });
+
+
+  section('3.13.1: working files kept only so long');
+
+  ok('old working files removed by themselves - never a promotion with resolutions not uploaded, never what is in use, never the history; 0 days: never', () => {
+    const R = require('../src/retention');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra keep '));
+    try {
+      const put = (f, t, daysAgo) => { const p = path.join(root, f); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t || 'x'); const when = new Date(Date.now() - daysAgo * 86400000); fs.utimesSync(p, when, when); fs.utimesSync(path.dirname(p), when, when); };
+      put('compare/aaa/to/x.xml', '', 30);
+      put('compare/bbb/to/x.xml', '', 2);
+      put('promotions/P10001/promotion.json', JSON.stringify({ files: { 'a.xml': { state: 'uploaded' } } }), 40);
+      put('promotions/P10002/promotion.json', JSON.stringify({ files: { 'a.xml': { state: 'resolved' } } }), 40);
+      put('manual/ccc/target/x.xml', '', 30);
+      put('history/v.json', '[]', 400);
+      for (const d of ['compare/aaa', 'promotions/P10001', 'promotions/P10002', 'manual/ccc']) { const when = new Date(Date.now() - 30 * 86400000); fs.utimesSync(path.join(root, d), when, when); }
+      assert.deepStrictEqual(R.prune(root, { days: 0 }), [], '0: never');
+      const busy = p => p === path.join(root, 'manual', 'ccc');
+      assert.deepStrictEqual(R.prune(root, { days: 14, busy }).sort(), ['compare/aaa', 'promotions/P10001']);
+      for (const f of ['compare/bbb', 'promotions/P10002', 'manual/ccc', 'history/v.json']) assert.ok(fs.existsSync(path.join(root, f)), f + ' kept');
+    } finally { rmTree(root); }
+  });
+
   section('3.0: what is shipped');
 
   ok('the package: every command registered and contributed, every setting read, the Command Palette short, nothing removed left behind', () => {
@@ -2572,7 +2933,7 @@ module.exports = function register(ok, section, h) {
     const hidden = p.contributes.menus.commandPalette.filter(m => m.when === 'false').map(m => m.command);
     const visible = declared.filter(c => !hidden.includes(c));
     // the starting points: preparing, inspecting and validating a story are on its page, merging two files on the Manual tab
-    assert.deepStrictEqual(visible.sort(), ['cmr.git.check', 'cmr.openSettings', 'cmr.page.open', 'cmr.policy.create', 'cmr.promotion.open', 'cmr.repo.connect', 'cmr.repo.forget', 'cmr.writeWorkspaceSettings'],
+    assert.deepStrictEqual(visible.sort(), ['cmr.git.check', 'cmr.openSettings', 'cmr.page.open', 'cmr.policy.create', 'cmr.promotion.open', 'cmr.repo.connect', 'cmr.repo.forget', 'cmr.storage.clean', 'cmr.writeWorkspaceSettings'],
       'the Command Palette keeps its starting points: ' + visible.join(', '));
     const settings = Object.assign({}, ...p.contributes.configuration.map(g => g.properties));
     const keys = Object.keys(settings).map(k => k.slice(4));

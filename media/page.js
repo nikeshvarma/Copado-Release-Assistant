@@ -15,7 +15,7 @@
   });
   const app = document.getElementById('app');
   const saved = vscode.getState() || {};
-  const NAVS = ['Promotions', 'Stories', 'Manual'];
+  const NAVS = ['Promotions', 'Stories', 'Manual', 'Compare'];
   const navs = () => NAVS;
   const ui = { nav: NAVS.includes(saved.nav) ? saved.nav : 'Promotions', href: '', sel: saved.sel || null, tab: saved.tab || 'Files', filter: '', modal: false, setStatus: true, choices: saved.choices || {}, busy: false,
     ref: '', sref: saved.sref || '', asked: {}, earlier: false, setRecreate: true };
@@ -26,6 +26,7 @@
   const act = (name, payload) => vscode.postMessage({ type: 'act', name, payload: payload || {} });
   const lact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'life', name, payload: payload || {} });
   const mact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'manual', name, payload: payload || {} });
+  const cact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'compare', name, payload: payload || {} });
   const keep = () => vscode.setState({ nav: ui.nav, sel: ui.sel, tab: ui.tab, choices: ui.choices, sref: ui.sref });
   const ago = iso => { if (!iso) return ''; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
   const time = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -442,7 +443,7 @@
     const recent = data.recent || [];
     const tools = [['cmr.validate.run', 'shield', 'Validate a deployment', 'Check-only, against an org'], ['cmr.git.check', 'branch', 'Branch conflicts', 'Two git branches, nothing changed']]
       .map(([id, ic, t, d]) => '<button class="htool" data-tool="' + id + '"><span class="ti">' + I[ic] + '</span><span class="tt"><b>' + t + '</b><small>' + d + '</small></span></button>').join('') +
-      '<button class="htool" data-nav="Manual"><span class="ti">' + I.branch + '</span><span class="tt"><b>Manual merge</b><small>Two versions, pasted or chosen</small></span></button>';
+      '<button class="htool" data-nav="Manual"><span class="ti">' + I.branch + '</span><span class="tt"><b>Compare versions</b><small>Two versions, pasted or chosen</small></span></button>';
     return '<div class="scroll home">' + hero + '<div class="hgrid"><div>' +
       (recent.length ? '<div class="section-title">Recent promotions</div><div class="card hrecent">' + recent.map(r => '<div class="hrow"><b>' + esc(r.name) + '</b>' + chip(r.status) + '<span class="muted">' + esc(r.from || '?') + ' ' + I.arrow + ' ' + esc(r.to || '?') + '</span><span class="spacer"></span>' +
         '<button class="btn ghost small" data-a="openRecent" data-ref="' + esc(r.name) + '">' + (r.total && r.done !== r.total ? 'Continue' : 'Open') + '</button></div>').join('') + '</div>'
@@ -466,12 +467,12 @@
     const ready = m.target && m.incoming && m.target.valid && m.incoming.valid;
     const c = m.commit;
     return '<div class="scroll"><div class="manual">' +
-      '<div class="sect">Merge two versions</div>' +
-      '<div class="mpair">' + card('target', 'Target', 'the resolution \u2013 keeps everything') +
+      '<div class="sect">Compare two versions</div>' +
+      '<div class="mpair">' + card('target', 'Target', 'the target branch') +
       '<div class="mmid"><button class="btn secondary icon" data-m="manual.swap" title="Swap the two sides" aria-label="Swap the two sides"' + (m.target || m.incoming ? '' : ' disabled') + '>\u21c4</button></div>' +
-      card('incoming', 'Incoming', 'the feature branch \u2013 merged in') + '</div>' +
-      '<div class="actions"><button class="btn primary" data-m="manual.merge"' + (ready ? '' : ' disabled') + '>Merge and review</button><span class="muted">Opens the merge editor \u2013 every change marked, every decision yours; then copy the result or save it as a file</span></div>' +
-      (m.last ? '<div class="card mlast"><b>Last merge</b><span class="muted">' + esc(m.last.type) + ' \u00b7 ' + esc(ago(m.last.at)) + '</span><span class="spacer"></span><button class="btn secondary small" data-m="manual.again">Open again</button></div>' : '') +
+      card('incoming', 'Incoming', 'the feature branch') + '</div>' +
+      '<div class="actions"><button class="btn primary" data-m="manual.merge"' + (ready ? '' : ' disabled') + '>Compare</button><button class="btn secondary" data-m="manual.clearBoth"' + (m.target || m.incoming ? '' : ' disabled') + '>\u2715 Clear both</button><span class="muted">Side by side \u2013 both editable: format, sort, remove duplicates, save either as a file</span></div>' +
+      (m.last ? '<div class="card mlast"><b>Last comparison</b><span class="muted">' + esc(m.last.type) + ' \u00b7 ' + esc(ago(m.last.at)) + '</span><span class="spacer"></span><button class="btn secondary small" data-m="manual.again">Open again</button></div>' : '') +
       '<div class="sect">Package from a Copado commit</div>' +
       '<div class="card mside" data-drop="commit">' + (c ? '<div class="mhead"><b>' + esc(c.name || 'Commit') + '</b><span class="muted">' + plural(c.components || 0, 'component') + '</span><span class="spacer"></span><button class="link" data-m="manual.commitClear">Clear</button></div>'
         : '<textarea class="mpaste small" data-side="commit" aria-label="Paste a Copado commit file here" placeholder="Paste or drop a Copado commit file \u2013 the \u201cCopado Commit changes\u201d of a story"></textarea>') +
@@ -480,6 +481,97 @@
       '</div></div>';
   }
   // pasting or dropping into a card: its text to the extension, which keeps it
+  // ---- Compare: two branches, every file that differs - opened in the merge editor ----
+  // ---- Compare: the same chips, icons and buttons throughout ----
+  const CPLUS = sv('<path d="M12 5v14M5 12h14"/>');
+  const KIND = { removed: ['bad', I.x, 'removed'], changed: ['info', I.diff, 'changed'], added: ['resolved', CPLUS, 'new'] };
+  const kindChip = (k, text) => '<span class="chip ' + KIND[k][0] + ' ichip">' + KIND[k][1] + esc(text == null ? KIND[k][2] : text) + '</span>';
+  const ctypeIcon = t => CICON[/^Apex/.test(t) ? 'code' : /field|object|value set|record type|list view|compact|label|metadata record/i.test(t) ? 'field'
+    : /page|layout|tab|app/i.test(t) ? 'page' : /component|resource|agentforce|bot/i.test(t) ? 'cube' : /permission|profile|role|group|queue|sharing/i.test(t) ? 'person'
+      : /flow|process|approval|workflow/i.test(t) ? 'flow' : 'box'];
+  function compareView() {
+    const c = data.compare || {};
+    // a branch picker that searches: thousands of branches, the first 50 that match shown under it
+    const pick = (side, label) => {
+      const q = ui.cq && ui.cq[side] != null ? ui.cq[side] : (c[side] || '');
+      const open = ui.copen === side;
+      const all = c.branches || [], ql = q.toLowerCase();
+      const hits = open ? all.filter(b => !ql || b.toLowerCase().includes(ql)) : [];
+      return '<span class="cpick"><span class="muted">' + label + '</span><span class="cbox">' + I.branch + '<input class="cq mono" id=\"cq-' + side + '\" data-cq="' + side + '" value="' + esc(q) + '" placeholder="' + (all.length ? 'Search branches' : 'Reading the branches\u2026') + '"' + (all.length ? '' : ' disabled') + ' aria-label="' + label + ' branch" autocomplete="off" spellcheck="false">' +
+        (open ? '<div class="clist" role="listbox">' + (hits.length ? hits.slice(0, 50).map(b => '<div class="copt mono' + (b === c[side] ? ' on' : '') + '" role="option" data-cpick="' + side + '" data-branch="' + esc(b) + '">' + esc(b) + '</div>').join('') +
+          (hits.length > 50 ? '<div class="cmore muted">' + (hits.length - 50) + ' more \u2013 keep typing</div>' : '') : '<div class="cmore muted">No branch matches</div>') + '</div>' : '') + '</span></span>';
+    };
+    if (c.connected === false) return '<div class="scroll"><div class="manual"><div class="sect">Compare branches</div><div class="card cempty"><b>No repository connected</b><span class="spacer"></span><button class="btn primary" data-c="compare.connect">' + I.key + 'Connect repository</button></div></div></div>';
+    // what differs only in spacing or order is the same as the other: not listed, not counted
+    const files = (c.files || []).filter(f => !f.same);
+    // the types, to choose from - with how many of each
+    const types = [];
+    for (const f of files) { const t = types.find(x => x.type === f.type); if (t) t.n++; else types.push({ type: f.type, n: 1 }); }
+    types.sort((a, b) => a.type.localeCompare(b.type));
+    const chosen = new Set((ui.ctypes || []).filter(t => types.some(x => x.type === t)));
+    const q = (ui.cfilter || '').toLowerCase();
+    const shown = files.filter(f => (!chosen.size || chosen.has(f.type)) && (!q || (f.name + ' ' + f.path).toLowerCase().includes(q)));
+    const n = k => shown.filter(f => f.kind === k).length, dups = shown.filter(f => / duplicate/.test(f.summary || '')).length;
+    const row = f => '<div class="crow2"><span class="ck">' + kindChip(f.kind) + '</span><span class="cn mono">' + esc(f.name) + '</span>' +
+      (f.kind === 'changed' ? '<span class="muted">' + esc(f.summary || '\u2026') + '</span>' : '') + '<span class="spacer"></span>' +
+      '<button class="btn secondary small" data-c="compare.open" data-path="' + esc(f.path) + '">' + (f.kind === 'changed' ? I.diff + 'Compare' : I.file + 'Open') + '</button></div>';
+    // what was removed or changed first, then what is new - and only so many at once
+    const limit = ui.climit || 50;
+    let left = limit;
+    const section = (title, list) => {
+      if (!list.length || left <= 0) return '';
+      const take = list.slice(0, left); left -= take.length;
+      const groups = [];
+      for (const f of take) { const g = groups.find(x => x.type === f.type); if (g) g.files.push(f); else groups.push({ type: f.type, files: [f] }); }
+      return '<div class="csect">' + esc(title) + ' <span class="muted">' + list.length + '</span></div>' + groups.map(g => '<div class="cgroup"><div class="cgh">' + ctypeIcon(g.type) + esc(g.type) + ' <span class="muted">' + g.files.length + '</span></div>' + g.files.map(row).join('') + '</div>').join('');
+    };
+    const first = shown.filter(f => f.kind !== 'added'), later = shown.filter(f => f.kind === 'added');
+    ui.cvisible = shown.slice(0, limit).filter(f => f.kind === 'changed' && !f.summary).map(f => f.path);
+    // the types: a button, and under it a list with its own search
+    const tq = (ui.ctq || '').toLowerCase();
+    const typeMenu = ui.ctopen ? '<div class="clist ctlist"><div class="ctsearch">' + I.search + '<input class="ctq" id=\"ctq\" placeholder="Search types" value="' + esc(ui.ctq || '') + '" aria-label="Search types"></div>' +
+      types.filter(t => !tq || t.type.toLowerCase().includes(tq)).map(t => '<div class="copt ctopt' + (chosen.has(t.type) ? ' on' : '') + '" data-ctype="' + esc(t.type) + '"><span class="cbx">' + (chosen.has(t.type) ? I.check : '') + '</span>' + ctypeIcon(t.type) + '<span>' + esc(t.type) + '</span><span class="spacer"></span><span class="muted">' + t.n + '</span></div>').join('') +
+      (chosen.size ? '<div class="ctfoot"><button class="link" data-ctclear="1">Show all types</button></div>' : '') + '</div>' : '';
+    const typeBtn = '<span class="cbox"><button class="btn secondary" data-ctopen="1" aria-expanded="' + !!ui.ctopen + '">' + I.filter + (chosen.size === 1 ? esc([...chosen][0]) : chosen.size ? chosen.size + ' types' : 'All types') + I.chevD + '</button>' + typeMenu + '</span>';
+    return '<div class="scroll"><div class="manual">' +
+      '<div class="sect">Compare branches</div>' +
+      '<div class="card cbar">' + pick('from', 'From') + '<span class="muted">\u2192</span>' + pick('to', 'To') +
+      '<button class="btn secondary icon" data-c="compare.swap" title="Swap" aria-label="Swap the branches">\u21c4</button>' +
+      '<button class="btn primary" data-c="compare.run"' + (c.from && c.to && c.from !== c.to && !c.busy ? '' : ' disabled') + '>' + I.diff + 'Compare</button>' +
+      '<button class="btn secondary" data-c="compare.reset"' + (c.from || c.to || c.files ? '' : ' disabled') + '>' + I.reset + 'Reset</button>' +
+      '<span class="spacer"></span><span class="muted">' + esc(c.busy ? c.busy + '\u2026' : c.at ? ago(c.at) : '') + '</span><button class="btn secondary icon" data-c="compare.refresh" title="Read the branches again" aria-label="Read the branches again">' + I.refresh + '</button></div>' +
+      (c.error ? '<div class="card cerr">' + esc(c.error) + '</div>' : '') +
+      (c.files ? '<div class="csum">' + (n('removed') ? kindChip('removed', n('removed') + ' removed') : '') + (n('changed') ? kindChip('changed', n('changed') + ' changed') : '') + (n('added') ? kindChip('added', n('added') + ' new') : '') +
+        (dups ? '<span class="chip warn ichip">' + I.warn + dups + ' with duplicates</span>' : '') + (files.length ? '' : '<span class="muted">No differences.</span>') +
+        '<span class="spacer"></span>' + typeBtn + '<span class="csearch">' + I.search + '<input class="cfilter" id=\"cfilter\" placeholder="Search" value="' + esc(ui.cfilter || '') + '" aria-label="Search"></span></div>' +
+        section('Removed or changed', first) + section('New in ' + c.from, later) +
+        (shown.length > limit ? '<div class="cpage"><button class="btn secondary" data-cmore="1">' + I.chevD + 'Show ' + Math.min(50, shown.length - limit) + ' more</button><span class="muted">' + (shown.length - limit) + ' more</span></div>' : '') : '') +
+      '</div></div>';
+  }
+  function compareEvents() {
+    if (typeof document.querySelectorAll !== 'function') return;
+    const c = data.compare || {};
+    if (c.branches == null && !c.busy && c.connected !== false && !ui.cloading) { ui.cloading = true; cact('compare.load'); }
+    // the rows shown: their summaries asked for, once
+    ui.casked = ui.casked || new Set();
+    const ask = (ui.cvisible || []).filter(p => !ui.casked.has(p));
+    if (ask.length) { for (const p of ask) ui.casked.add(p); cact('compare.summaries', { paths: ask }); }
+    const keepFocus = (sel, at) => { const g = document.querySelector(sel); if (g) { g.focus(); if (at != null && g.setSelectionRange) g.setSelectionRange(at, at); } };
+    for (const inp of document.querySelectorAll('input[data-cq]')) {
+      const side = inp.dataset.cq;
+      inp.addEventListener('focus', () => { if (!ui.restoring && ui.copen !== side) { ui.copen = side; ui.cq = Object.assign({}, ui.cq, { [side]: '' }); render(); keepFocus('input[data-cq="' + side + '"]', 0); } });
+      inp.addEventListener('input', () => { ui.cq = Object.assign({}, ui.cq, { [side]: inp.value }); const at = inp.selectionStart; render(); keepFocus('input[data-cq="' + side + '"]', at); });
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { ui.copen = null; ui.cq = {}; render(); }
+        if (e.key === 'Enter') { const o = document.querySelector('.copt'); if (o) { e.preventDefault(); ui.copen = null; ui.cq = {}; cact('compare.set', { side, value: o.dataset.branch }); } }
+      });
+    }
+    const f = document.querySelector('.cfilter');
+    if (f) f.addEventListener('input', () => { ui.cfilter = f.value; ui.climit = 50; const at = f.selectionStart; render(); keepFocus('.cfilter', at); });
+    const tq = document.querySelector('.ctq');
+    if (tq) tq.addEventListener('input', () => { ui.ctq = tq.value; const at = tq.selectionStart; render(); keepFocus('.ctq', at); });
+  }
+
   function manualEvents() {
     if (typeof document.querySelectorAll !== 'function') return;
     const send = (side, text, name) => side === 'commit' ? mact('manual.commitSet', { text, name }) : mact('manual.set', { side, text, name });
@@ -506,16 +598,18 @@
     if (!data) { app.innerHTML = '<div class="empty">Loading\u2026</div>'; return; }
     // keep the caret where it was: a redraw replaces every element
     const a = document.activeElement, focus = a && a.id ? { id: a.id, pos: a.selectionStart } : null;
-    const body = ui.nav === 'Stories' ? storiesView() : ui.nav === 'Manual' ? manualView() : promotions();
+    const body = ui.nav === 'Stories' ? storiesView() : ui.nav === 'Manual' ? manualView() : ui.nav === 'Compare' ? compareView() : promotions();
     app.className = ui.busy ? 'is-busy' : '';
     app.innerHTML = topbar(ui.nav === 'Promotions' ? data.current : null) + body;
     const bind = (id, key, submit) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('input', () => { ui[key] = el.value; keep(); }); el.addEventListener('keydown', ev => { if (ev.key === 'Enter') submit(); }); };
     bind('ref', 'ref', openRef); bind('sref', 'sref', openStory); bind('href', 'href', openAny);
     const cn = document.getElementById('cname'); if (cn) cn.addEventListener('input', () => { ui.compName = cn.value; render(); });
     if (ui.nav === 'Manual') manualEvents();
+    if (ui.nav === 'Compare') compareEvents();
     const f = document.getElementById('filter'); if (f) f.addEventListener('input', () => { ui.filter = f.value; render(); });
     const back = focus && document.getElementById(focus.id);
-    if (back) { back.focus(); if (focus.pos != null && back.setSelectionRange) back.setSelectionRange(focus.pos, focus.pos); }
+    // putting the caret back is not a new focus: a branch list closed stays closed
+    if (back) { ui.restoring = true; back.focus(); ui.restoring = false; if (focus.pos != null && back.setSelectionRange) back.setSelectionRange(focus.pos, focus.pos); }
     else if (ui.nav === 'Promotions' && !data.current) { const r = document.getElementById('ref'); if (r) r.focus(); }
   }
   const openRef = () => { if (ui.ref.trim()) act('open', { ref: ui.ref.trim() }); };
@@ -528,7 +622,9 @@
   };
 
   app.addEventListener('click', ev => {
-    const t = ev.target.closest('[data-a],[data-sel],[data-tab],[data-tool],[data-choose],[data-nav],[data-l],[data-m]');
+    const t = ev.target.closest('[data-a],[data-sel],[data-tab],[data-tool],[data-choose],[data-nav],[data-l],[data-m],[data-c],[data-cpick],[data-cmore],[data-ctopen],[data-ctype],[data-ctclear]');
+    // a click outside an open list closes it
+    if ((ui.copen || ui.ctopen) && !ev.target.closest('.cbox')) { ui.copen = null; ui.cq = {}; ui.ctopen = false; if (!t) { render(); return; } }
     if (!t) return;
     ev.preventDefault();
     if (t.dataset.nav) {
@@ -537,6 +633,12 @@
     }
     if (t.dataset.tool) return vscode.postMessage({ type: 'tool', id: t.dataset.tool });
     if (t.dataset.m) { if (!t.disabled) mact(t.dataset.m, { side: t.dataset.side }); return; }
+    if (t.dataset.cpick) { ui.copen = null; ui.cq = {}; cact('compare.set', { side: t.dataset.cpick, value: t.dataset.branch }); return; }
+    if (t.dataset.cmore) { ui.climit = (ui.climit || 50) + 50; render(); return; }
+    if (t.dataset.ctopen) { ui.ctopen = !ui.ctopen; ui.ctq = ''; render(); if (ui.ctopen && typeof document.querySelector === 'function') { const g = document.querySelector('.ctq'); if (g) g.focus(); } return; }
+    if (t.dataset.ctype) { const set = new Set(ui.ctypes || []); if (set.has(t.dataset.ctype)) set.delete(t.dataset.ctype); else set.add(t.dataset.ctype); ui.ctypes = [...set]; ui.climit = 50; render(); return; }
+    if (t.dataset.ctclear) { ui.ctypes = []; ui.climit = 50; render(); return; }
+    if (t.dataset.c) { if (!t.disabled) { if (t.dataset.c === 'compare.run' || t.dataset.c === 'compare.reset') { ui.climit = 50; ui.casked = new Set(); ui.ctypes = []; ui.cfilter = ''; ui.cq = {}; ui.copen = null; ui.ctopen = false; } cact(t.dataset.c, { path: t.dataset.path }); } return; }
     if (t.dataset.l) {
       const n = t.dataset.l;
       if (n === 'story.open') return t.dataset.ref ? lact(n, { ref: t.dataset.ref }) : openStory();

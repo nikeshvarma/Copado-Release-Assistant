@@ -905,9 +905,11 @@ ok('selective wins over a plain Add or RetrieveOnly of the same component', () =
   assert.strictEqual(asDeploy.counts.retrieve, 1);
 });
 
-ok('a selective-commit download is recognised by its name, however the browser saved it', () => {
+ok('the story report recognises a selective-commit file by its name, however it was saved', () => {
   const sel = require('../src/selective');
-  const h = sel.hashFor('Layout', 'Account-ACME Account Layout');
+  // Copado names it the base64 of Type:Name
+  const hashFor = (type, name) => Buffer.from(type + ':' + name, 'utf8').toString('base64');
+  const h = hashFor('Layout', 'Account-ACME Account Layout');
   assert.strictEqual(h, 'TGF5b3V0OkFjY291bnQtQUNNRSBBY2NvdW50IExheW91dA==', 'base64 of Type:Name, as Copado writes it');
   for (const name of [h, h + '.xml', h.replace(/=+$/, ''), h + ' (2)', h + ' (2).xml']) {
     const d = sel.decodeFileName(name);
@@ -915,11 +917,10 @@ ok('a selective-commit download is recognised by its name, however the browser s
   }
   assert.strictEqual(sel.decodeFileName(h + ' (2)').copy, 2);
   // "+" and "/" in base64 cannot be in a file name; the URL-safe form decodes the same
-  const odd = sel.hashFor('Profile', '[N] Sales ~~~?');
+  const odd = hashFor('Profile', '[N] Sales ~~~?');
   assert.ok(/[+/]/.test(odd));
   assert.deepStrictEqual(sel.decodeFileName(odd.replace(/\+/g, '-').replace(/\//g, '_')).name, '[N] Sales ~~~?');
   for (const junk of ['notes.txt', 'README', 'package.xml', 'QUJD', 'TGF5b3V0']) assert.strictEqual(sel.decodeFileName(junk), null, junk + ' is not a selective file');
-  assert.strictEqual(sel.rootOf('\uFEFF<?xml version="1.0"?>\n<!-- c -->\n<Layout xmlns="x"/>'), 'Layout');
 });
 
 ok('session tokens never reach the log; identities are masked when asked', () => {
@@ -1086,7 +1087,7 @@ ok('Phase 0: keys and credentials are never opened; JSON is described by its sha
   const api = fakeCopadoOrg();
   const downloaded = [];
   const base = api.query;
-  const selName = sel.hashFor('RecordType', 'Account.Partner') + '_commit';
+  const selName = ((t, n) => Buffer.from(t + ':' + n, 'utf8').toString('base64'))('RecordType', 'Account.Partner') + '_commit';
   api.query = async q => {
     if (/FROM Attachment WHERE ParentId IN \('a0G000000000001AAA'\)/.test(q)) return [
       { Id: '00P0000000000K1AAA', Name: 'id_rsa', BodyLength: 2304, ParentId: 'a0G000000000001AAA' },
@@ -1121,7 +1122,7 @@ ok('Phase 1: a story brings its commit file, its selective files and where it go
   const sel = require('../src/selective');
   const api = fakeCopadoOrg();
   const base = { describe: api.describe, query: api.query, download: api.download };
-  const selName = sel.hashFor('Layout', 'Account-Main') + '_commit';
+  const selName = ((t, n) => Buffer.from(t + ':' + n, 'utf8').toString('base64'))('Layout', 'Account-Main') + '_commit';
   api.describe = async o => o === 'copado__Deployment_Flow_Step__c'
     ? ['Id', 'copado__Branch__c', 'copado__Source_Environment__c', 'copado__Destination_Environment__c'].map(n => ({ name: n, relationshipName: n.endsWith('Environment__c') ? n.replace('__c', '__r') : null }))
     : base.describe(o);
@@ -1461,10 +1462,34 @@ async function fakeGitHosts(opts) {
     const u = new URL(req.url, 'http://x'), q = k => u.searchParams.get(k);
     const send = (code, body, type) => { res.writeHead(code, { 'Content-Type': type || 'application/octet-stream' }); res.end(body); };
     seen.push(req.method + ' ' + u.pathname);
+    // the merge-base of two branches, and files as they were at it - each provider's own call
+    const SHA_B = 'b'.repeat(40), BASE = (opts && opts.baseFiles) || {};
+    // what differs between two branches, and the branches - each provider's own shape
+    const CH = (opts && opts.changed) || [];
+    if (u.pathname.startsWith('/api/v3/repos/owner/repo/compare/')) return send(200, JSON.stringify({ merge_base_commit: { sha: SHA_B }, files: CH.map(c => ({ filename: c.path, status: { added: 'added', removed: 'removed', changed: 'modified' }[c.kind] })) }), 'application/json');
+    if (u.pathname.endsWith('/repository/compare')) return send(200, JSON.stringify({ diffs: CH.map(c => ({ new_path: c.path, old_path: c.path, new_file: c.kind === 'added', deleted_file: c.kind === 'removed' })) }), 'application/json');
+    if (u.pathname.includes('/diffstat/')) return send(200, JSON.stringify({ values: CH.map(c => ({ status: c.kind === 'changed' ? 'modified' : c.kind, new: c.kind === 'removed' ? null : { path: c.path }, old: { path: c.path } })) }), 'application/json');
+    if (u.pathname.endsWith('/diffs/commits')) {
+      const all = [{ item: { path: '/force-app', isFolder: true }, changeType: 'edit' }].concat(CH.map(c => ({ item: { path: '/' + c.path }, changeType: { added: 'add', removed: 'delete', changed: 'edit' }[c.kind] })));
+      const page = (opts && opts.azurePage) || all.length, skip = +(u.searchParams.get('$skip') || 0);
+      return send(200, JSON.stringify({ changes: all.slice(skip, skip + page), allChangesIncluded: skip + page >= all.length }), 'application/json');
+    }
+    const BR = (opts && opts.branches) || [];
+    if (u.pathname === '/api/v3/repos/owner/repo/branches') return send(200, JSON.stringify(BR.map(b => ({ name: b }))), 'application/json');
+    if (u.pathname.endsWith('/repository/branches')) return send(200, JSON.stringify(BR.map(b => ({ name: b }))), 'application/json');
+    if (u.pathname.endsWith('/refs/branches')) return send(200, JSON.stringify({ values: BR.map(b => ({ name: b })) }), 'application/json');
+    if (u.pathname.endsWith('/repository/merge_base')) return send(200, JSON.stringify({ id: SHA_B }), 'application/json');
+    if (u.pathname.includes('/merge-base/')) return send(200, JSON.stringify({ hash: SHA_B }), 'application/json');
+    if (u.pathname.endsWith('/mergebases')) return send(200, JSON.stringify({ value: [{ commitId: SHA_B }] }), 'application/json');
+    const at = q('ref') === SHA_B || q('versionDescriptor.version') === SHA_B || u.pathname.includes('/src/' + SHA_B + '/');
+    if (at) {
+      const fp = q('path') ? q('path').replace(/^\//, '') : decodeURIComponent((u.pathname.split('/src/' + SHA_B + '/')[1] || u.pathname.split('/contents/')[1] || (u.pathname.split('/repository/files/')[1] || '').replace(/\/raw$/, '')));
+      return BASE[fp] != null ? send(200, BASE[fp]) : send(404, '{}');
+    }
     if (u.pathname.startsWith('/org/Proj/_apis/git/repositories/repo')) {                    // Azure DevOps
       if (req.headers.authorization !== 'Basic ' + Buffer.from(':az-token').toString('base64')) return send(203, '<html>sign in</html>', 'text/html');
       if (u.pathname.endsWith('/repo')) return send(200, '{"name":"repo"}', 'application/json');
-      if (u.pathname.endsWith('/refs')) return send(200, JSON.stringify({ value: BRANCHES.filter(b => ('heads/' + b).startsWith(q('filter'))).map(b => ({ name: 'refs/heads/' + b })) }), 'application/json');
+      if (u.pathname.endsWith('/refs')) return send(200, JSON.stringify({ value: BRANCHES.filter(b => ('heads/' + b).startsWith(q('filter'))).map(b => ({ name: 'refs/heads/' + b, objectId: 'a'.repeat(40) })) }), 'application/json');
       if (!BRANCHES.includes(q('versionDescriptor.version'))) return send(404, '{}');
       if (q('scopePath')) return send(200, JSON.stringify({ value: [{ path: q('scopePath'), isFolder: true }].concat(under(q('scopePath').slice(1)).map(f => ({ path: '/' + f, isFolder: false }))) }), 'application/json');
       const f = FILES[q('path').slice(1)]; return f ? send(200, f) : send(404, '{}');
@@ -1645,7 +1670,7 @@ ok('the Copado client: direct REST in parallel, describes cached, and the CLI wh
   rmTree(path.dirname(cache));
 });
 
-ok('the Promotion panel, end to end: open, sorted groups, accept, save a code file, upload all with the status, undo - driven from the page, as there is no sidebar for it', async () => {
+ok('the Promotions tab, end to end: open, sorted groups, accept, save a code file, upload all with the status, undo - driven from the page, as there is no sidebar for it', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra panel '));
   const api = promoOrg();
   const baseDescribe = api.describe, baseQuery = api.query;
@@ -1767,74 +1792,6 @@ ok('a component\'s file is located in a source-format project', () => {
   assert.deepStrictEqual(manifest.sourcePaths('SomethingElse', 'X'), []);
 });
 
-/* ------------------------------------------------------------ quick merge */
-section('quick merge of the conflict files');
-
-ok('the conflict-file pair is found, and its names cannot leave the folder', () => {
-  const qp = require('../src/quickPair');
-  const root = path.join(os.tmpdir(), 'proj');
-  const d = qp.pairPaths(root, {});
-  assert.strictEqual(d.target, path.join(root, 'conflict', 'metadata', 'resolution.xml'));
-  assert.strictEqual(d.incoming, path.join(root, 'conflict', 'metadata', 'feature.xml'));
-  const c = qp.pairPaths(root, { folder: 'merge/in', target: '../../evil.xml', incoming: 'b.xml' });
-  assert.strictEqual(c.target, path.join(root, 'merge', 'in', 'evil.xml'), 'a name is only ever a file name');
-  assert.strictEqual(qp.pairPaths(root, { folder: '../outside' }).folder, path.join(root, 'conflict', 'metadata'));
-});
-
-ok('auto-merge waits for both pastes, and never re-runs on its own result', () => {
-  const qp = require('../src/quickPair');
-  const xml = v => '<?xml version="1.0"?>\n<PermissionSet xmlns="x"><label>' + v + '</label></PermissionSet>\n';
-  let base = qp.autoDecision(null, xml('r1'), xml('f1')).baseline;
-  assert.ok(base, 'a starting point is recorded first');
-  let d = qp.autoDecision(base, xml('r2'), xml('f1'));
-  assert.deepStrictEqual([d.run, d.waiting], [false, 'incoming'], 'one file pasted: wait for the other');
-  d = qp.autoDecision(base, xml('r2'), xml('f2'));
-  assert.strictEqual(d.run, true, 'both pasted: merge');
-  base = d.baseline;
-  assert.strictEqual(qp.autoDecision(base, xml('r2'), xml('f2')).run, false, 'saving without a change');
-  assert.strictEqual(qp.autoDecision(base, '', xml('f3')).run, false, 'an empty file');
-  assert.strictEqual(qp.autoDecision(base, xml('r3'), '<PermissionSet xmlns="x"><label>half').run, false, 'a paste still in progress');
-});
-
-function fakeVscode(root, settings) {
-  const events = {};
-  const on = name => fn => { (events[name] = events[name] || []).push(fn); return { dispose() {} }; };
-  const item = { shown: false, text: '', tooltip: null, show() { this.shown = true; }, hide() { this.shown = false; }, dispose() {} };
-  const watchers = [], registered = {}, contexts = {}, messages = [];
-  const config = Object.assign({}, settings);
-  return {
-    item, events, watchers, registered, contexts, messages, config,
-    StatusBarAlignment: { Left: 1, Right: 2 }, ConfigurationTarget: { Global: 1, Workspace: 2 },
-    Uri: { file: p => ({ scheme: 'file', fsPath: p, toString: () => 'file://' + p }) },
-    RelativePattern: function (base, pattern) { this.base = base; this.pattern = pattern; },
-    MarkdownString: function () { this.value = ''; this.appendMarkdown = t => { this.value += t; return this; }; },
-    window: {
-      createStatusBarItem: () => item, onDidChangeActiveTextEditor: on('active'), activeTextEditor: undefined,
-      setStatusBarMessage: t => { messages.push(t); return { dispose() {} }; },
-      showInformationMessage: t => { messages.push(t); }, showErrorMessage: t => { messages.push('ERROR ' + t); }
-    },
-    workspace: {
-      workspaceFolders: [{ uri: { fsPath: root } }], textDocuments: [],
-      getConfiguration: () => ({
-        get: (k, dflt) => (k in config ? config[k] : dflt),
-        update: async (k, v) => { config[k] = v; for (const f of events.config || []) f({ affectsConfiguration: x => ('cmr.' + k).startsWith(x) }); }
-      }),
-      onDidChangeConfiguration: on('config'), onDidChangeWorkspaceFolders: on('folders'), onDidSaveTextDocument: on('save'),
-      createFileSystemWatcher: pat => {
-        const w = { pat, h: {}, onDidCreate(f) { this.h.create = f; }, onDidChange(f) { this.h.change = f; }, onDidDelete(f) { this.h.delete = f; }, dispose() { this.disposed = true; } };
-        watchers.push(w); return w;
-      }
-    },
-    commands: {
-      registerCommand: (id, fn) => { registered[id] = fn; return { dispose() {} }; },
-      executeCommand: async (id, k, v) => { if (id === 'setContext') contexts[k] = v; }
-    }
-  };
-}
-
-
-
-/* ------------------------------------------------------------ large files */
 section('large files');
 
 function bigPermissionSet(variant) {

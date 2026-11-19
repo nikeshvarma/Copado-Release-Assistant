@@ -8,7 +8,7 @@ Thanks for helping. A few things keep this project easy to work on.
 git clone <this repository>
 cd copado-release-assistant
 npm test                  # the unit tests - no dependencies to install
-npm run check             # no unused code; the extension activates with every command
+npm run check             # no unused code - an export is not a use, a module nothing requires is found; the extension activates with every command
 
 # the merge editor in a real browser, with the real Monaco
 npm install --no-save playwright && npx playwright install chromium
@@ -42,7 +42,7 @@ The package is the files git tracks, less what `.vscodeignore` leaves out - comm
 
 ## Ground rules
 
-- **No runtime dependencies.** Everything is plain Node.js and the VS Code API. The one thing shipped from outside is Monaco Editor in `media/monaco/` (MIT, Microsoft) - only the files the merge editor loads; `scripts/check-package.js` checks they are all there.
+- **No runtime dependencies.** Everything is plain Node.js and the VS Code API. The one thing shipped from outside is Monaco Editor in `media/monaco/` (MIT, Microsoft) - only the files the merge editor loads: the editor, and the colours of XML, Apex, JavaScript, HTML and CSS (their language services are not shipped - they need a worker, and the merge editor runs none); `scripts/check-package.js` checks they are all there.
 - **Nothing ever deploys.** Validation is check-only; a test enforces that every `deploy start` carries `--dry-run`. Git is read-only. Copado is written only when the user confirms an upload, a status or the re-create checkbox.
 - **Nothing is resolved without the user.** A merge is a suggestion until it is reviewed; the merge editor marks everything either branch has.
 - **A test with every change.** Unit checks go in `test/smoke.js` / `test/smoke3.js` (the engine, and the VS Code-facing modules against a stand-in VS Code); the merge editor's page in `test/browser.js`; behaviour that needs VS Code itself in `test/integration/suite/`. Add a check that fails without your change. Tests must pass on Windows and macOS too: build paths with `path.join`, never assume `/` or `\n` line endings from the file system.
@@ -55,14 +55,16 @@ The package is the files git tracks, less what `.vscodeignore` leaves out - comm
 extension.js     entry point: diagnostics, formatting, merge sessions in the merge editor
 release.js       package.xml, branch conflicts, validation, user stories
 promotionUi.js   promotions on the Release Assistant page
-releasePage.js   the Release Assistant page - Home, Promotions, Stories, Manual        media/page.js   its script
+releasePage.js   the Release Assistant page - Promotions, Stories, Manual               media/page.js   its script
 manualUi.js      the page's Manual tab: two versions merged by hand, a package from a commit file
-lifecycleUi.js   the page's Home (the release pipeline) and Stories
+lifecycleUi.js   the page's Stories: a story's journey, validate, package
+compareUi.js     the page's Compare: two branches of the connected repository (src/compareBranches: by type, in a few words)
 media/merge.*    the merge editor's page            media/monaco/   Monaco Editor (MIT)
 src/             the engine - no VS Code dependency, fully unit-tested: merge, mergeAlign (the merge
-                 editor's pieces and moves), mergeDuplicates, xmlCompare, mergeStart, mergePanel (the panel), registry and
-                 keys (what identifies each metadata element), the Copado side (copadoClient, promotion,
-                 promotionWork), guard (the team policy), ...
+                 editor's pieces - metadata by element), codeMerge (code merged by its members, and its marks in
+                 one pane), codeChecks (code's problems as you type), mergeDuplicates, xmlCompare, mergeStart, mergePanel (the panel),
+                 registry and keys (what identifies each metadata element), repoHost (the repository: files,
+                 merge-bases), the Copado side (copadoClient, promotion, promotionWork), guard (the team policy), ...
 scripts/         packaging and checks - plain Node
 test/            smoke.js and smoke3.js, browser.js, integration/, fixtures/
 ```

@@ -277,4 +277,10 @@ function leafLabel(type, path, parent, x) {
 
 const clip = t => { const s = String(t).replace(/\s+/g, ' '); return s.length > 40 ? s.slice(0, 39) + '\u2026' : s; };
 
-module.exports = { compare, identity, describe, match, side, kids, isLeaf, val, leafLabel, clip };
+/** Whether a field's name says it identifies its element: a key the registry names, a known identity, or name-like. */
+function identityField(type, path, el, name) {
+  const spec = registry.specFor(type, path, el.name);
+  return !!((spec && spec.key && spec.key.includes(name)) || IDS.includes(name) || NAME_LIKE.test(name));
+}
+
+module.exports = { compare, identity, describe, match, side, kids, isLeaf, val, leafLabel, clip, identityField };

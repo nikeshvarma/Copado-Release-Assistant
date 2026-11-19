@@ -237,15 +237,24 @@ async function review(rel) {
   if (!e) return;
   const s = current.s;
   if (e.revising) { await vscode.window.showTextDocument(vscode.Uri.file(s.file('resolved', rel)), { preview: false }); return; }
-  if (e.kind === 'xml' && fs.existsSync(s.file('promotion', rel)) && fs.existsSync(s.file('feature', rel))) {
+  // code too, in the merge editor - unless VS Code's own conflict view is chosen (cmr.merge.codeIn)
+  const codeHere = e.kind !== 'xml' && vscode.workspace.getConfiguration('cmr').get('merge.codeIn', 'mergeEditor') !== 'vscode';
+  if ((e.kind === 'xml' || codeHere) && fs.existsSync(s.file('promotion', rel)) && fs.existsSync(s.file('feature', rel))) {
     const lb = e.labels || {};
+    // Copado's conflict file has no common ancestor: the repository's merge-base can give it
+    if (!fs.existsSync(s.file('base', rel)) && h.ancestorFor && current.info && current.info.destinationBranch && e.story && !(current.info && current.info.back)) {
+      const pattern = vscode.workspace.getConfiguration('cmr').get('repo.featureBranch', 'feature/{story}');
+      const body = await h.ancestorFor({ rel, featureBranch: pattern.split('{story}').join(e.story), destinationBranch: current.info.destinationBranch });
+      if (body) { fs.mkdirSync(path.dirname(s.file('base', rel)), { recursive: true }); fs.writeFileSync(s.file('base', rel), body); }
+    }
     await h.deps.startSession(vscode.Uri.file(s.file('promotion', rel)), vscode.Uri.file(s.file('feature', rel)),
       fs.existsSync(s.file('base', rel)) ? vscode.Uri.file(s.file('base', rel)) : null, {
         labels: { target: 'Target branch' + (lb.ours ? ' (' + lb.ours + ')' : ''), incoming: theirsLabel() + (lb.theirs ? ' (' + lb.theirs + ')' : ''), ancestor: 'Common ancestor', merged: 'Your resolution (editable)' },
         applyToUri: vscode.Uri.file(s.file('resolved', rel)),
         // what you save in the merge view is your resolution: saving moves the file on, nothing else to choose
         applyOnSave: true, openAfterApply: false, theirs: current.info && current.info.back ? (current.promotion.from || 'the source') : 'the feature branch',
-        startFrom: e.state === 'resolved' ? s.read('resolved', rel) : null,
+        // code starts from Copado's conflict file, its blocks to choose - or what you resolved
+        startFrom: e.state === 'resolved' || e.kind !== 'xml' ? s.read('resolved', rel) : null,
         appliedMessage: path.basename(rel) + ' is ready to upload - what you saved is your resolution.',
         // the first save makes it yours; saving again only refreshes the page - no new entry each time
         onApplied: () => { const f = entry(rel); if (f && f.state === 'resolved' && f.note === 'your resolution from the merge view') changed.fire(); else setState(rel, 'resolved', 'your resolution from the merge view'); }
@@ -823,4 +832,7 @@ async function actOnce(name, p) {
 /** Opens a promotion from elsewhere on the page (the pipeline, a story's journey). */
 async function openById(id) { return openRef(id); }
 
-module.exports = { activate, promotionRef, snapshot, act, openById, onChange: f => changed.event(f), fire: () => changed.fire(), componentsView };
+/** The working folders in use: the promotion open on the page. */
+function openDirs() { return current && current.s && current.s.dir ? [current.s.dir] : []; }
+
+module.exports = { openDirs, activate, promotionRef, snapshot, act, openById, onChange: f => changed.event(f), fire: () => changed.fire(), componentsView };
