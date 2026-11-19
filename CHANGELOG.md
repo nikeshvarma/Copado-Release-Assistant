@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.16.5
+
+- CI: `npm run check` failed in a repository that still had files earlier versions removed (`src/quickPair.js`, `src/liveMarks.js`) - a new version copied over an old one never deletes anything. The unused-code check now leaves out what `scripts/removed.txt` lists and names any it finds, with `npm run tidy` to remove them.
+- CI: the in-VS-Code test of the Manual tab still expected a merge. It now checks a comparison: *Compare · resolution.xml*, the incoming version as it is, nothing of the target merged in.
+
 ## 3.16.4
 
 - Fixed: **Compare** could leave out whole folders - often permission sets and profiles. A repository lists a comparison's files a page at a time, in path order, and only the first page was read, so a large comparison stopped before the folders that come last. Azure DevOps: every page now, until it says all changes are in (folders count towards its pages). GitHub gives a comparison's first 300 files only, and GitLab stops at its own limit: a list cut short is now said to be, rather than looking whole.

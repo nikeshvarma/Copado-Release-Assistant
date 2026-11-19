@@ -8,8 +8,11 @@
 const fs = require('fs'), path = require('path');
 const root = path.resolve(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
+// files earlier versions had and this one does not (scripts/removed.txt): left over in a clone, not this version's code
+const removed = new Set(fs.readFileSync(path.join(root, 'scripts', 'removed.txt'), 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#')));
+const leftovers = [...removed].filter(f => fs.existsSync(path.join(root, f)));
 const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'manualUi.js', 'compareUi.js', 'media/page.js', 'media/merge.js']
-  .concat(fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith('.js')).map(f => 'src/' + f)).filter(f => fs.existsSync(path.join(root, f)));
+  .concat(fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith('.js')).map(f => 'src/' + f)).filter(f => fs.existsSync(path.join(root, f)) && !removed.has(f));
 const all = files.map(f => [f, read(f)]);
 // the controls: a function nothing calls; one only exported; a module nothing requires
 all.push(['(planted)', 'function plantedNeverUsed() {}\n']);
@@ -41,5 +44,6 @@ const controls = ['unused function (planted) plantedNeverUsed', 'unused function
 const missed = controls.filter(c => !found.includes(c));
 if (missed.length) { console.error('the scan did not find its planted controls - it is broken: ' + missed.join('; ')); process.exit(1); }
 const real = found.filter(x => !controls.includes(x) && !/src\/planted(Export|Module)\.js/.test(x) && !ALLOWED[x]);
+if (leftovers.length) console.log('left over from earlier versions, not checked: ' + leftovers.join(', ') + ' \u2013 npm run tidy removes them');
 console.log(real.length ? real.join('\n') : 'no unused code (' + files.length + ' files)');
 process.exit(real.length ? 1 : 0);
