@@ -32,7 +32,8 @@ if (!tracked || !tracked.length) {
 }
 // never what the project has removed, nor a README picture the README does not show - whatever a clone still holds
 const ship = require('./ship').keep(root);
-const files = tracked.filter(f => !ignore.some(r => r.test(f)) && ship(f) && fs.existsSync(path.join(root, f))).sort();
+// the README's pictures are linked from the repository, not shipped: VS Code's extension page would not show them
+const files = tracked.filter(f => !ignore.some(r => r.test(f)) && ship(f) && !/^media\/readme\//.test(f) && fs.existsSync(path.join(root, f))).sort();
 
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const manifest = `<?xml version="1.0" encoding="utf-8"?>
@@ -81,7 +82,7 @@ const types = '<?xml version="1.0" encoding="utf-8"?>\n<Types xmlns="http://sche
   exts.map(e => '<Default Extension="' + e + '" ContentType="' + TYPES[e] + '" />').join('') + '</Types>\n';
 
 const entries = [{ name: '[Content_Types].xml', data: Buffer.from(types) }, { name: 'extension.vsixmanifest', data: Buffer.from(manifest) }]
-  .concat(files.map(f => ({ name: inside(f), data: fs.readFileSync(path.join(root, f)) })));
+  .concat(files.map(f => ({ name: inside(f), data: f === 'README.md' ? Buffer.from(require('./ship').readmeForPackage(fs.readFileSync(path.join(root, f), 'utf8'), pkg.repository), 'utf8') : fs.readFileSync(path.join(root, f)) })));
 const outDir = path.resolve(process.argv[2] || path.join(root, 'dist'));
 fs.mkdirSync(outDir, { recursive: true });
 const out = path.join(outDir, pkg.name + '-' + pkg.version + '.vsix');

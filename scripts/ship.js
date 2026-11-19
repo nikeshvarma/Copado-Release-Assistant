@@ -13,6 +13,18 @@ function removed(root) {
   return fs.readFileSync(f, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
 }
 
+/**
+ * The README as packaged: its pictures linked over https, from the repository - VS Code's extension page loads no
+ * image from the extension's own folder (its page allows only https), so a relative link shows a broken picture.
+ * What vsce does when it packages; the README in the repository keeps its relative links, for GitHub.
+ */
+function readmeForPackage(text, repository) {
+  const url = String((repository && repository.url) || repository || '').replace(/^git\+/, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(url)) throw new Error('package.json repository must be https://github.com/<owner>/<repo> - the README\u2019s pictures are linked from it');
+  const base = url + '/raw/HEAD/';
+  return String(text).replace(/(!\[[^\]]*\]\()(?!https?:|data:|#)\.?\/?([^)\s]+)/g, (m, a, p) => a + base + p).replace(/(<img\b[^>]*\bsrc=")(?!https?:|data:)\.?\/?([^"]+)/g, (m, a, p) => a + base + p);
+}
+
 /** The README's pictures: media/readme/<name>.png it shows. */
 function shown(root) {
   const f = path.join(root, 'README.md');
@@ -40,4 +52,4 @@ function leftovers(root) {
   return out.sort();
 }
 
-module.exports = { removed, shown, keep, leftovers };
+module.exports = { removed, shown, keep, leftovers, readmeForPackage };

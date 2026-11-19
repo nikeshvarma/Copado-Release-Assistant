@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.16.6
+
+- Fixed: the README's pictures showed broken in VS Code's extension page. That page shows images only over https - never from the extension's own folder - so a picture linked relatively, as the README is written for GitHub, cannot load there. The packaged README now links each picture from the repository (`https://github.com/<owner>/<repo>/raw/HEAD/...`, as vsce does); the README in the repository is unchanged. The pictures are no longer shipped in the extension (about 1 MB smaller), and the package check fails on a picture that is not https or not in the repository.
+
 ## 3.16.5
 
 - CI: `npm run check` failed in a repository that still had files earlier versions removed (`src/quickPair.js`, `src/liveMarks.js`) - a new version copied over an old one never deletes anything. The unused-code check now leaves out what `scripts/removed.txt` lists and names any it finds, with `npm run tidy` to remove them.
