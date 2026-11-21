@@ -3558,12 +3558,12 @@ module.exports = function register(ok, section, h) {
     const item = f => '            <layoutItems>\n                <behavior>Edit</behavior>\n                <field>' + f + '</field>\n            </layoutItems>\n';
     // as Copado's file had it (Contact layout, P202852): the block opens inside mkto_si__Mkto_Lead_Score__c's item
     const lay = '<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <layoutSections>\n        <label>Marketo</label>\n        <layoutColumns>\n' + item('Lead_Source_History__c') +
-      '            <layoutItems>\n                <behavior>Edit</behavior>\n<<<<<<< HEAD\n=======\n                <field>NWL_Person_Source__c</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n                <field>NWL_Person_Status__c</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n>>>>>>> feature/US-0236997\n                <field>mkto_si__Mkto_Lead_Score__c</field>\n            </layoutItems>\n        </layoutColumns>\n    </layoutSections>\n</Layout>\n';
+      '            <layoutItems>\n                <behavior>Edit</behavior>\n<<<<<<< HEAD\n=======\n                <field>Acme_Person_Source__c</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n                <field>Acme_Person_Status__c</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n>>>>>>> feature/US-0236997\n                <field>mkto_si__Mkto_Lead_Score__c</field>\n            </layoutItems>\n        </layoutColumns>\n    </layoutSections>\n</Layout>\n';
     const t = tidy(lay);
     assert.deepStrictEqual(sidesOf(t), sidesOf(lay), 'both sides exactly as they were');
-    assert.strictEqual(blocks(t)[0].theirs.join(''), item('NWL_Person_Source__c') + item('NWL_Person_Status__c'));
+    assert.strictEqual(blocks(t)[0].theirs.join(''), item('Acme_Person_Source__c') + item('Acme_Person_Status__c'));
     const g = CM.fromConflictFile(lay), c = g.conflicts[0];
-    assert.strictEqual(c.about, 'Section Marketo: only the feature has fields NWL_Person_Source__c, NWL_Person_Status__c \u2013 Accept feature adds it');
+    assert.strictEqual(c.about, 'Section Marketo: only the feature has fields Acme_Person_Source__c, Acme_Person_Status__c \u2013 Accept feature adds it');
     const r = CM.marks({ text: g.text, conflicts: g.conflicts, language: null, typeName: 'Layout' }).rows[0];
     // accepted, the file is the feature's - the existing item whole after the two new ones
     const L = g.text.split(/(?<=\n)/), f = r.actions.find(a => a.choice === 'feature').op;
