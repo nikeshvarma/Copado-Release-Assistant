@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.1.3
+
+- **README and its pictures brought up to date.** Rows say only what they are, and what each conflict is about is on the Release Assistant page (*What you are choosing between*). Blocks are shown as whole elements. *Also in conflict for …* is described. A save offers to keep the target's version. The pre-check no longer mentions validating a story's own branch. Every picture is drawn again from this version's code, and a new one shows the upload dialog's checklist.
+- **Client-specific names replaced with generic ones** in a code comment, the tests and this changelog - example field and layout names that had come from a real org. Behaviour is unchanged; every test passes as before.
+
 ## 5.1.2
 
 - **A row shows its label only**: *Conflict*, *Resolved*, *Removed*, *Left out*. There is no location, explanation or member name after it, including on hover. In three panels, each branch's row shows only its arrow button, and in one and two panels each version's heading is only *Target* or *Feature*. A version with no lines still says *removes these lines*, because otherwise the heading would sit over nothing. The Release Assistant page still lists what each conflict is about.
@@ -9,7 +14,7 @@
 Conflicts read the way the file is built, and the buttons never cover what a row says.
 
 - **C11: a field added before another is shown as new fields, whole.** Git lines up text, and every layout item starts with the same two lines, so Copado's file often has a block that opens inside the existing item: the new field's lines, its close, then the next item's open. It made a valid file but looked as if fields were being put inside `mkto_si__Mkto_Lead_Score__c`. Such a block is now slid to whole elements: the two new `<layoutItems>` before the existing one, which is left untouched. The same happens for flows, picklists and pages, and for code, where a method added after another no longer starts at the brace before it. Each side of the file stays exactly as it was; only blocks that one side added to or removed from are moved, and only to a place where they are whole.
-- **Rows say where, the buttons stay clear.** A metadata row now names only the place and what the block holds, for example *Section Marketo › fields NWL_Person_Source__c, NWL_Person_Status__c*. Hover over it for the full explanation; the version under it and each side's row still say what that version does. The words always stop before the row's buttons, whatever their number or width, in one, two and three panels. Before, the editor's own zone styling undid the row's layout and long words ran under *Accept feature*.
+- **Rows say where, the buttons stay clear.** A metadata row now names only the place and what the block holds, for example *Section Marketo › fields Acme_Person_Source__c, Acme_Person_Status__c*. Hover over it for the full explanation; the version under it and each side's row still say what that version does. The words always stop before the row's buttons, whatever their number or width, in one, two and three panels. Before, the editor's own zone styling undid the row's layout and long words ran under *Accept feature*.
 
 ## 5.1.0
 

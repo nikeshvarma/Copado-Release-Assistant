@@ -206,7 +206,7 @@ function explain(type, S, k, c, ok) {
     if (!els || !els.length) return null;
     const ns = els.slice(0, 2).map(el => named(type, cpath, el) || (XC.isLeaf(el) ? leafWord(el.name).toLowerCase() : words(el.name)));
     const more = els.length > 2 ? ' and ' + (els.length - 2) + ' more' : '';
-    // two of a kind said once: "fields NWL_Person_Source__c, NWL_Person_Status__c"
+    // two of a kind said once: "fields Acme_Person_Source__c, Acme_Person_Status__c"
     const kind = /^([a-z]+) (.+)$/.exec(ns[0]);
     if (ns.length > 1 && kind && els.every(el => el.name === els[0].name) && ns.every(n => n.startsWith(kind[1] + ' '))) return kind[1] + 's ' + ns.map(n => n.slice(kind[1].length + 1)).join(', ') + more;
     return ns.join(', ') + more;

@@ -646,13 +646,13 @@ ok('5.1.1 - a row is its label alone and never runs under its buttons, in every 
   // as Copado's file has it: the block opens inside the existing item, after its <behavior>
   const odd = (fs, next) => '            <layoutItems>\n                <behavior>Edit</behavior>\n<<<<<<< HEAD\n=======\n' + fs.map(x => '                <field>' + x + '</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n').join('') + '>>>>>>> feature/US-0236997\n                <field>' + next + '</field>\n            </layoutItems>\n';
   const f = '<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <layoutSections>\n        <label>Marketo - Email Preferences and Professional Profile</label>\n        <layoutColumns>\n' + item('Lead_Source_History__c') +
-    odd(['NWL_Person_Source_With_A_Long_Name__c', 'NWL_Person_Status_With_A_Long_Name__c'], 'mkto_si__Mkto_Lead_Score__c') + item('Pref_Commodities__c') + odd(['NWL_Pref_Index_Insights__c'], 'Pref_Insurance__c') +
+    odd(['Acme_Person_Source_With_A_Long_Name__c', 'Acme_Person_Status_With_A_Long_Name__c'], 'mkto_si__Mkto_Lead_Score__c') + item('Pref_Commodities__c') + odd(['Acme_Pref_Index_Insights__c'], 'Pref_Insurance__c') +
     '        </layoutColumns>\n    </layoutSections>\n</Layout>\n';
   const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
   const g = CM.fromConflictFile(f);
   assert.ok(g.conflicts.every(c => /^            <layoutItems>\n/.test(c.feature) && /<\/layoutItems>\n$/.test(c.feature)), 'each block whole items');
   for (const view of ['onePane', 'twoPanes', 'threePanes']) {
-    await run(Object.assign({}, base, { file: 'Contact-SPDJI LEX Contact.layout-meta.xml', typeName: 'Layout', git: true, target: T, incoming: F, text: g.text, codeView: view, gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }), async (p, h) => {
+    await run(Object.assign({}, base, { file: 'Contact-Sales Contact.layout-meta.xml', typeName: 'Layout', git: true, target: T, incoming: F, text: g.text, codeView: view, gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }), async (p, h) => {
       const rows = await p.$$eval('#right .zone.head.conf', n => n.map(x => x.textContent));
       assert.deepStrictEqual(rows, ['Conflict', 'Conflict'], view);
       assert.deepStrictEqual(await p.$$eval('.zone.alt .alt-t', n => n.map(x => x.textContent.trim())).then(t => t.filter(x => !/^\u25be (Target|Feature)$/.test(x))), [], view + ': each version only its name');
