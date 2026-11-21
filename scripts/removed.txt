@@ -29,3 +29,4 @@ src/drift.js
 src/liveMarks.js
 treeView.js
 src/quickPair.js
+lifecycleUi.js

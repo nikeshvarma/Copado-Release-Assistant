@@ -8,7 +8,7 @@
  *
  * Whatever the start, the merge editor marks what the other side has.
  */
-const ADDITIVE = new Set(['Profile', 'PermissionSet', 'MutingPermissionSet', 'CustomLabels', 'Translations', 'CustomObjectTranslation']);
+const ADDITIVE = new Set(['Profile', 'PermissionSet', 'MutingPermissionSet', 'CustomLabels', 'Translations', 'CustomObjectTranslation', 'GlobalValueSetTranslation', 'StandardValueSetTranslation']);
 const KINDS = ['merged', 'feature', 'target'];
 
 function startFor(typeName, setting) {

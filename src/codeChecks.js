@@ -15,7 +15,7 @@ function blocks(text) {
   let cur = null;
   lines.forEach((l, i) => {
     const t = l.replace(/\r?\n$/, '');
-    if (/^<{7}(\s|$)/.test(t)) cur = { b0: i, ours: [], base: null, theirs: [], part: 'ours' };
+    if (/^<{7}(\s|$)/.test(t)) cur = { b0: i, ours: [], base: null, theirs: [], part: 'ours', label: t.slice(7).trim() || null };
     else if (cur && /^\|{7}(\s|$)/.test(t)) { cur.base = []; cur.part = 'base'; }
     else if (cur && /^={7}$/.test(t)) cur.part = 'theirs';
     else if (cur && /^>{7}(\s|$)/.test(t)) { cur.b1 = i + 1; delete cur.part; out.push(cur); cur = null; }

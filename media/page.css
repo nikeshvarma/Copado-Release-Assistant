@@ -476,3 +476,41 @@ button.crow { cursor: pointer; } button.crow:hover { background: var(--vscode-li
 .bres { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--line); cursor: pointer; } .bres.sel { background: color-mix(in srgb, var(--vscode-charts-blue) 10%, transparent); }
 /* a job's depth, built as "job d" + depth */
 .job.d1 { padding-left: 36px; background: var(--panel); } .job.d2 { padding-left: 58px; font-size: 12px; background: var(--panel); }
+
+/* the home box's answer - a story's number is not a promotion's */
+.boxnote { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--warn); font-size: 12.5px; } .boxnote svg { width: 14px; height: 14px; }
+
+/* 4.0: the breadcrumb, the status pills, one primary action, the menus */
+.crumbs { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; } .crumbs .sepc { opacity: .7; } .crumbs b { color: var(--vscode-foreground); font-weight: 600; }
+.link { background: none; border: 0; padding: 0; color: var(--vscode-textLink-foreground); cursor: pointer; font: inherit; } .link:hover { text-decoration: underline; }
+.row .pill { flex: none; margin-left: 8px; align-self: center; }
+.pill { display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 10px; font-size: 11px; white-space: nowrap; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.pill.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); } .pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.pill.bad { background: color-mix(in srgb, var(--vscode-charts-red) 16%, transparent); color: var(--vscode-charts-red); } .pill.info { background: color-mix(in srgb, var(--vscode-charts-blue) 16%, transparent); color: var(--vscode-charts-blue); }
+.pill.mute { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); }
+.cta { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--vscode-sideBar-background, transparent); }
+.cta-t { flex: 1; font-weight: 600; } .btn.big { height: 32px; padding: 0 16px; font-size: 13px; } .btn.icon { min-width: 28px; justify-content: center; }
+.pmw, .fmw { position: relative; display: inline-flex; }
+.pmenu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 210px; padding: 4px 0; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); color: var(--vscode-menu-foreground, inherit);
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--line))); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.pmenu .mi { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: 0; padding: 6px 14px; color: inherit; font: inherit; cursor: pointer; }
+.pmenu .mi:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, inherit); }
+.pmenu .mi svg { width: 14px; height: 14px; } .pmenu .sep { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, var(--line)); }
+
+/* B3.4: a file with duplicate entries - uploaded as it is, said */
+.check.warnl { color: var(--warn); } .check.warnl svg { color: var(--warn); }
+
+/* 5.0: the upload checklist, what to recommit, errors by cause */
+.card.warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+.card.warn h3 { color: var(--warn); }
+.bwrecommit { border-color: color-mix(in srgb, var(--vscode-charts-blue) 45%, transparent); }
+.bwrecommit h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 13px; color: var(--vscode-charts-blue); }
+.bwrecommit h3 svg { width: 14px; height: 14px; }
+.err.cause { box-shadow: inset 3px 0 0 var(--warn); }
+.err.cause .errh svg { width: 14px; height: 14px; color: var(--warn); }
+.err.cause details { margin-top: 6px; }
+.err.cause details summary { cursor: pointer; color: var(--vscode-textLink-foreground); }
+.err.cause details .err { margin-top: 6px; }
+.modal .mbody .sect:first-of-type { margin-top: 8px; }
+.modal .mbody .check .link { margin-left: 4px; }
+

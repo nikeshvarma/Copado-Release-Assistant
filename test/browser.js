@@ -24,7 +24,9 @@ const base = { file: 'Account_Record_Page.flexipage-meta.xml', labels: { target:
 const look = p => p.evaluate(() => ({
   chips: document.querySelector('#chips').textContent,
   counter: document.getElementById('pos').textContent,
+  // each row's tag - "Conflict", "Resolved" - all a row says
   rows: [...document.querySelectorAll('#right .zone.head:not(.l)')].map(z => z.textContent),
+  words: [...document.querySelectorAll('#right .zone.head:not(.l)')].map(z => z.textContent),
   buttons: [...document.querySelectorAll('.acts button')].map(b => b.title),
   ghost: document.querySelectorAll('#right .zone.ghost .gl').length,
   level: (() => { const y = s => { const l = [...document.querySelectorAll(s + ' .view-line')].find(v => /RecordTeam_cField/.test(v.textContent)); return l ? Math.round(l.getBoundingClientRect().top) : null; }; return [y('#left'), y('#right')]; })(),
@@ -449,7 +451,9 @@ ok('a promotion\u2019s code: only the conflicts marked - both versions shown, ne
   const g = CM.fromConflictFile(f);
   await run({ labels: { target: 'uat', merged: 'Your resolution' }, theirs: 'feature/US-0012345', short: 'the feature', typeName: null, file: 'InvoiceService.cls', language: 'apex', target: T, incoming: F, text: g.text, code: { conflicts: g.conflicts } }, async (p, h) => {
     const a = await look(p);
-    assert.deepStrictEqual(a.rows, ['Conflict', 'Conflict'], 'only the conflicts - the tag, nothing after it');
+    assert.deepStrictEqual(a.rows, ['Conflict', 'Conflict'], 'only the conflicts');
+    // C10: each names what it is about
+    assert.deepStrictEqual(a.words, ['Conflict', 'Conflict'], 'the row\u2019s label alone');
     // the target's version greyed out, the feature's - replacing it - in the feature's colour
     assert.deepStrictEqual(await p.$$eval('#right .zone.alt', n => n.map(x => (x.classList.contains('tgt') ? 'tgt' : x.classList.contains('fea') ? 'fea' : '?') + ':' + x.querySelector('.alt-t').textContent.trim())), ['tgt:\u25be Target', 'fea:\u25be Feature', 'tgt:\u25be Target', 'fea:\u25be Feature']);
     assert.strictEqual(a.chips, '2 conflicts to resolve');
@@ -566,13 +570,163 @@ ok('three panels, a removal: the feature\u2019s side says it removes the lines; 
     assert.ok(flat(await level()), JSON.stringify(await level()));
     assert.strictEqual(await p.$$eval('#feat .zone.alt .alt-t', n => n.map(x => x.textContent.trim()).join()), '\u25be Feature \u00b7 removes these lines');
     await p.$$eval('.acts button[title="Accept feature"]', b => b[0].click());
-    await eventually(async () => assert.deepStrictEqual(await p.$$eval('#right .zone.head b', n => n.map(x => x.textContent)), ['Removed']));
+    await eventually(async () => assert.deepStrictEqual(await p.$$eval('#right .zone.head b', n => n.map(x => x.textContent.split(' \u00b7 ')[0])), ['Removed']));
     assert.deepStrictEqual(await p.$$eval('#right .zone.ghost.gone .gl', n => n.map(x => x.textContent.trim())), ['// retry', 'retry();']);
     // under its row, not above it
     assert.ok(await p.evaluate(() => { const row = document.querySelector('#right .zone.head'), st = document.querySelector('#right .zone.ghost.gone'); return row.getBoundingClientRect().top < st.getBoundingClientRect().top; }));
     assert.ok(flat(await level()), 'still level: ' + JSON.stringify(await level()));
     assert.deepStrictEqual(h.errors, []);
   });
+});
+
+ok('a version of thousands of lines: one panel shows its first 300 and how many more - accepting it still takes it whole', async () => {
+  const CM = require('../src/codeMerge');
+  let big = ''; for (let i = 0; i < 2000; i++) big += '    <fieldPermissions><field>Obj__c.F' + i + '__c</field></fieldPermissions>\n';
+  const f = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n' + big + '=======\n    <label>A</label>\n>>>>>>> origin/feature/US-0012345\n</PermissionSet>\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'T', merged: 'R' }, theirs: 'feature', short: 'the feature', typeName: 'PermissionSet', file: 'P.xml', git: true, target: T, incoming: F, text: g.text, codeView: 'onePane', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    assert.strictEqual(await p.$$eval('#right .zone.alt.tgt .alt-l', n => n.length), 301, 'its first 300 lines, and one saying how many more');
+    assert.ok(/1,700 more lines/.test(await p.$eval('#right .zone.alt.tgt .alt-more', e => e.textContent)));
+    await p.$$eval('.acts button[title="Accept target"]', n => n[0].click());
+    await eventually(() => assert.strictEqual((h.text().match(/<fieldPermissions>/g) || []).length, 2000, 'all of it, not what was shown'));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('a permission set: one that grants less offers target or feature, never both - in every layout; one that did not join never offers the feature\u2019s, nor Accept all feature', async () => {
+  const CM = require('../src/codeMerge');
+  const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n    </fieldPermissions>\n';
+  const f = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + fp('A__c.Y__c', 'true') + '<<<<<<< HEAD\n' + fp('A__c.X__c', 'true') + '=======\n' + fp('A__c.X__c', 'false') + '>>>>>>> origin/feature/US-0012345\n</PermissionSet>\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  const titles = p => p.$$eval('.acts button', n => [...new Set(n.map(x => x.title))].sort());
+  for (const view of ['onePane', 'twoPanes', 'threePanes']) {
+    await run({ labels: { target: 'T', merged: 'R' }, theirs: 'feature', short: 'the feature', typeName: 'PermissionSet', file: 'P.xml', git: true, unionKind: 'narrowed', target: T, incoming: F, text: g.text, codeView: view, gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+      const t = await titles(p);
+      assert.ok(!t.includes('Accept both') && t.some(x => /Accept (target|promotion)/.test(x)) && t.includes('Accept feature'), view + ': ' + t.join());
+      assert.deepStrictEqual(h.errors, []);
+    });
+  }
+  await run({ labels: { target: 'T', merged: 'R' }, theirs: 'feature', short: 'the feature', typeName: 'PermissionSet', file: 'P.xml', git: true, unionKind: 'fallback', target: T, incoming: F, text: g.text, codeView: 'twoPanes', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    assert.ok(!(await titles(p)).includes('Accept feature'), 'no Accept feature');
+    await p.click('#moreBtn');
+    const items = await p.$$eval('#moreMenu .mi', n => n.map(x => x.textContent));
+    assert.ok(items.includes('Accept all target') && !items.includes('Accept all feature'), items.join());
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('5.1 - three panels, metadata: each row its label alone, each side its arrow alone; two stories adding their own entry get Accept both, which keeps the two', async () => {
+  const CM = require('../src/codeMerge');
+  const NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+  const val = n => '                <fullName>' + n + '</fullName>\n                <default>false</default>\n                <label>' + n + '</label>\n';
+  const f = '<CustomField ' + NS + '>\n    <fullName>Status__c</fullName>\n    <valueSet>\n        <valueSetDefinition>\n            <value>\n' + val('Open') + '            </value>\n            <value>\n<<<<<<< HEAD\n' + val('On Hold') + '=======\n' + val('Escalated') + '>>>>>>> origin/feature/US-0012345\n            </value>\n            <value>\n                <fullName>Closed</fullName>\n<<<<<<< HEAD\n                <default>true</default>\n=======\n                <default>false</default>\n>>>>>>> origin/feature/US-0012345\n                <label>Closed</label>\n            </value>\n        </valueSetDefinition>\n    </valueSet>\n</CustomField>\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'T', merged: 'R' }, theirs: 'feature', short: 'the feature', typeName: 'CustomField', file: 'Status__c.field-meta.xml', git: true, target: T, incoming: F, text: g.text, codeView: 'threePanes', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    const a = await look(p);
+    // the label alone - no place, no explanation - on the row and on hover; each side's row only its arrow
+    assert.deepStrictEqual(a.words, ['Conflict', 'Conflict']);
+    assert.deepStrictEqual(await p.$$eval('#right .zone.head.conf', n => n.map(x => x.title)), ['Conflict', 'Conflict']);
+    assert.deepStrictEqual(await p.$$eval('#left .zone.head, #feat .zone.head', n => n.map(x => x.textContent).filter(Boolean)), []);
+    // Accept both only where both stories added their own entry
+    assert.strictEqual(await p.$$eval('.acts button[title="Accept both"]', n => n.length), 1);
+    await p.$$eval('.acts button[title="Accept both"]', n => n[0].click());
+    await eventually(() => assert.ok(/<fullName>On Hold<\/fullName>[\s\S]*<\/value>\n            <value>\n                <fullName>Escalated<\/fullName>/.test(h.text()), h.text()));
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved', 'Conflict']));
+    assert.strictEqual(await p.$$eval('.acts button.on', n => n.map(x => x.title).join()), 'Accept both');
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('5.1.1 - a row is its label alone and never runs under its buttons, in every layout; a field added before another is shown as whole new items, the existing one untouched', async () => {
+  const CM = require('../src/codeMerge');
+  const item = f => '            <layoutItems>\n                <behavior>Edit</behavior>\n                <field>' + f + '</field>\n            </layoutItems>\n';
+  // as Copado's file has it: the block opens inside the existing item, after its <behavior>
+  const odd = (fs, next) => '            <layoutItems>\n                <behavior>Edit</behavior>\n<<<<<<< HEAD\n=======\n' + fs.map(x => '                <field>' + x + '</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n').join('') + '>>>>>>> feature/US-0236997\n                <field>' + next + '</field>\n            </layoutItems>\n';
+  const f = '<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <layoutSections>\n        <label>Marketo - Email Preferences and Professional Profile</label>\n        <layoutColumns>\n' + item('Lead_Source_History__c') +
+    odd(['NWL_Person_Source_With_A_Long_Name__c', 'NWL_Person_Status_With_A_Long_Name__c'], 'mkto_si__Mkto_Lead_Score__c') + item('Pref_Commodities__c') + odd(['NWL_Pref_Index_Insights__c'], 'Pref_Insurance__c') +
+    '        </layoutColumns>\n    </layoutSections>\n</Layout>\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  assert.ok(g.conflicts.every(c => /^            <layoutItems>\n/.test(c.feature) && /<\/layoutItems>\n$/.test(c.feature)), 'each block whole items');
+  for (const view of ['onePane', 'twoPanes', 'threePanes']) {
+    await run(Object.assign({}, base, { file: 'Contact-SPDJI LEX Contact.layout-meta.xml', typeName: 'Layout', git: true, target: T, incoming: F, text: g.text, codeView: view, gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }), async (p, h) => {
+      const rows = await p.$$eval('#right .zone.head.conf', n => n.map(x => x.textContent));
+      assert.deepStrictEqual(rows, ['Conflict', 'Conflict'], view);
+      assert.deepStrictEqual(await p.$$eval('.zone.alt .alt-t', n => n.map(x => x.textContent.trim())).then(t => t.filter(x => !/^\u25be (Target|Feature)$/.test(x))), [], view + ': each version only its name');
+      // the words end before the buttons begin, on every row shown
+      const over = await p.evaluate(() => {
+        const bad = [];
+        for (const z of document.querySelectorAll('.zone.head')) {
+          const w = z.querySelector('b, .sv'); if (!w || !w.textContent) continue;
+          const r = w.getBoundingClientRect(); if (!r.width) continue;
+          for (const a of document.querySelectorAll('.acts')) { const q = a.getBoundingClientRect(); if (q.width && q.top < r.bottom - 2 && q.bottom > r.top + 2 && q.left < r.right - 1 && q.right > r.left) bad.push(w.textContent); }
+        }
+        return bad;
+      });
+      assert.deepStrictEqual(over, [], view);
+      assert.deepStrictEqual(h.errors, []);
+    }, { width: 1100, height: 800 });
+  }
+});
+
+ok('C5: each conflict\u2019s lines tracked by the editor - its neighbouring lines edited, it stays what it is; a choice still replaces exactly its lines; undo puts it back', async () => {
+  const CM = require('../src/codeMerge');
+  const f = 'public class A {\n    void a() {\n        one();\n        two();\n<<<<<<< HEAD\n        old();\n=======\n        nw();\n        more();\n>>>>>>> origin/feature/US-0012345\n        three();\n    }\n}\n';
+  const T = f.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), F = f.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1');
+  const g = CM.fromConflictFile(f);
+  await run({ labels: { target: 'T', merged: 'R' }, theirs: 'f', short: 'f', typeName: null, file: 'A.cls', language: 'apex', target: T, incoming: F, text: g.text, codeView: 'onePane', gitLabels: g.labels, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+    await p.$$eval('.acts button[title="Accept feature"]', b => b[0].click());
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved']));
+    // the two lines above it - what finding it again by its neighbours relied on - changed
+    await p.evaluate(() => { const ed = window.monaco.editor.getEditors()[1], md = ed.getModel(); const ln = md.getLinesContent().findIndex(l => l.includes('two();')) + 1;
+      ed.executeEdits('t', [{ range: new window.monaco.Range(ln - 1, 1, ln + 1, 1), text: '        uno();\n        dos();\n' }]); });
+    await eventually(() => assert.ok(h.text().includes('dos();') && h.text().includes('nw();')));
+    await p.waitForTimeout(400);
+    assert.deepStrictEqual((await look(p)).rows, ['Resolved'], 'still resolved - its own lines tracked');
+    // Accept target: exactly its two lines replaced by the target's one
+    await p.$$eval('.acts button[title="Accept target"]', b => b[0].click());
+    await eventually(() => assert.ok(h.text().includes('        dos();\n        old();\n        three();') && !h.text().includes('nw();'), JSON.stringify(h.text())));
+    await p.click('#right .view-lines'); await p.keyboard.press('Control+z');
+    await eventually(() => assert.ok(h.text().includes('nw();\n        more();') && !h.text().includes('old();')));
+    await eventually(async () => assert.deepStrictEqual((await look(p)).rows, ['Resolved']));
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('D2 - the box takes promotions: a story\u2019s number is said to be one, and nothing is opened', async () => {
+  const { runPage } = require('./browserHarness');
+  await runPage({ copadoOrg: 'copado', recent: [], current: null, validation: null }, async (p, h) => {
+    await p.fill('#href', 'US-0012345');
+    await p.click('[data-a="homeOpen"]');
+    await eventually(async () => assert.ok(/Enter the promotion\u2019s number or its Copado link \u2013 US-0012345 is a user story/.test(await p.textContent('body'))));
+    assert.ok(!(await h.sent()).some(m => m.type === 'act' && m.name === 'open'), 'nothing opened');
+    assert.deepStrictEqual(h.errors, []);
+  });
+});
+
+ok('B2.11, B2.12 in every layout - a copy the target had twice, taken out: Duplicate, Keep; twice and different: the copy granting more kept, Keep its other setting instead; level', async () => {
+  const CM = require('../src/codeMerge'), U = require('../src/unionMerge'), MD = require('../src/mergeDuplicates'), { blocks } = require('../src/codeChecks');
+  const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n    </fieldPermissions>\n';
+  const conflict = '<PermissionSet xmlns="x">\n' + fp('A__c.One__c', 'true') + fp('A__c.Two__c', 'true') + '<<<<<<< HEAD\n' + fp('A__c.One__c', 'true') + fp('A__c.Three__c', 'true') + fp('A__c.Three__c', 'false') + '=======\n' + fp('A__c.Four__c', 'true') + '>>>>>>> f\n    <label>L</label>\n</PermissionSet>\n';
+  const L = conflict.split(/(?<=\n)/); let T = [], F = [], i = 0; for (const b of blocks(conflict)) { T.push(...L.slice(i, b.b0), ...b.ours); F.push(...L.slice(i, b.b0), ...b.theirs); i = b.b1; } T.push(...L.slice(i)); F.push(...L.slice(i));
+  const u = U.resolve(conflict, 'PermissionSet'), g = CM.fromConflictFile(u.text);
+  assert.deepStrictEqual([u.narrowed, u.removedAt.length], [0, 2]);
+  for (const view of ['onePane', 'twoPanes', 'threePanes']) {
+    await run({ labels: { target: 'T', merged: 'R' }, theirs: 'f', short: 'f', typeName: 'PermissionSet', file: 'P.xml', git: true, unionKind: 'narrowed', target: T.join(''), incoming: F.join(''), text: g.text, codeView: view, gitLabels: g.labels,
+      removedDups: new Set(u.removedDups.map(d => MD.flat(d))), dupRemovedAt: u.removedAt, dupRemovedInfo: u.removedInfo, code: { conflicts: g.conflicts, reviewed: new Map() } }, async (p, h) => {
+      const rows = (await p.$$eval('#right .zone.head b', n => n.map(x => x.textContent))).sort();
+      const titles = await p.$$eval('.acts button', n => [...new Set(n.map(x => x.title))].sort());
+      assert.deepStrictEqual([rows, titles], [['Duplicate', 'Duplicate \u00b7 the copy granting more kept'], ['Keep', 'Keep editable: false instead']], view);
+      const level = await p.evaluate(() => { const es = window.monaco.editor.getEditors().filter(e => e.getDomNode().offsetParent); return es.map(e => e.getTopForLineNumber(e.getModel().getLineCount())); });
+      assert.ok(level.every(x => x === level[0]), view + ' level: ' + JSON.stringify(level));
+      await p.$$eval('.acts button[title="Keep editable: false instead"]', b => b[0].click());
+      await eventually(() => assert.ok(/<editable>false<\/editable>\n        <field>A__c\.Three__c/.test(h.text()) && (h.text().match(/A__c\.Three__c/g) || []).length === 1, view + ': the other copy in its place'));
+      assert.deepStrictEqual(h.errors, []);
+    });
+  }
 });
 
 ok('a comparison - Manual, Compare: both sides editable, each formatted on its own, compared again as either changes; nothing saved, nothing merged', async () => {

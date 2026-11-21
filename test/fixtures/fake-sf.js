@@ -39,7 +39,7 @@ const say = t => process.stdout.write(t);
     return done({ status: 0, result: { name: 'copado__User_Story__c', fields: [{ name: 'Id' }, { name: 'copado__Project__c', relationshipName: 'copado__Project__r' }] } }, 0);
   }
   if (cmd.startsWith('org display') && process.env.FAKE_SF_COUNT) require('fs').appendFileSync(process.env.FAKE_SF_COUNT, 'display\n');
-  if (cmd.startsWith('org display')) return done({ status: 0, result: { accessToken: process.env.FAKE_SF_TOKEN || '00D000000000001!fake', instanceUrl: process.env.FAKE_SF_INSTANCE || 'http://127.0.0.1:9', apiVersion: '62.0' } }, 0);
+  if (cmd.startsWith('org display')) return done({ status: 0, result: { accessToken: process.env.FAKE_SF_REDACT ? "[REDACTED] Use 'sf org auth show-access-token' to view" : process.env.FAKE_SF_TOKEN || '00D000000000001!fake', instanceUrl: process.env.FAKE_SF_INSTANCE || 'http://127.0.0.1:9', apiVersion: '62.0' } }, 0);
   // the components of a type an org has: the source org (qa) two fields more than the target (uat)
   if (cmd === 'org list metadata') {
     const org = flag('--target-org'), type = flag('--metadata-type');
@@ -61,6 +61,8 @@ const say = t => process.stdout.write(t);
     }
     process.stdout.write('Retrieved Source\n'); process.exit(0);
   }
+  // the CLI since May 2026: org display hides the token (FAKE_SF_REDACT) - org auth show-access-token gives it
+  if (cmd === 'org auth show-access-token') return done({ status: 0, result: { accessToken: '00Dfake!session.' + (flag('--target-org') || 'org') } });
   if (cmd === 'org list') return done({ status: 0, result: { nonScratchOrgs: [{ alias: 'qa', username: 'me@example.com.qa', isSandbox: true }] } }, 0);
 
   if (cmd === 'project retrieve start' && !json && process.env.FAKE_SF_STYLE === 'frames') {

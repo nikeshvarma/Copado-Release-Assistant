@@ -72,23 +72,19 @@ function activate(context, d) {
   cmd('cmr.validate.openFailure', cmdOpenFailure);
   cmd('cmr.validate.copyErrors', cmdCopyErrors);
   cmd('cmr.policy.create', cmdCreatePolicy);
-  cmd('cmr.copado.inspect', () => cmdInspectStory());
-  cmd('cmr.copado.prepare', () => cmdPrepareStory());
   cmd('cmr.repo.connect', cmdConnectRepo);
   cmd('cmr.repo.forget', cmdForgetRepo);
-  cmd('cmr.repo.validateStory', () => validateFromBranch());
   const helpers = { output, deps, rc, cmd, requireTrust, projectRoot, apiVersion, copadoApi, cmdValidate, runBranchCheck, orgForEnvironment, orgList, sfcli, needCopado,
-    credentialsFor, validatePromotionBranch, validateFromBranch, prepareStory: cmdPrepareStory, inspectStory: cmdInspectStory, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
+    credentialsFor, validatePromotionBranch, onValidation, validationStatus, showCopadoErrors, readinessReport, ensureRepo };
   exported.helpers = helpers;
   require('./promotionUi').activate(context, helpers);
   // the promotion open on the page is in use: never removed by the clean-up
   if (deps.inUse) deps.inUse(() => require('./promotionUi').openDirs());
-  require('./lifecycleUi').activate(context, helpers);
   const page = require('./releasePage');
   manual.activate(context, { startSession: (...a) => deps.startSession(...a), generatePackage, storageDir: sub => deps.storageDir(sub), showPage: nav => page.show(nav) }, cmd);
   // the Compare tab: the connected repository only - it never asks for a token
   compare.activate(context, { host: connectedHost, packageDirs, storageDir: sub => deps.storageDir(sub), startSession: (...a) => deps.startSession(...a) });
-  page.activate(context, require('./promotionUi'), require('./lifecycleUi'), cmd, manual, compare);
+  page.activate(context, require('./promotionUi'), cmd, manual, compare);
   cmd('cmr.validate.clear', () => {
     state.validation = null;
     deployDiagnostics.clear();
@@ -311,47 +307,6 @@ async function cmdCreatePolicy() {
   vscode.window.showInformationMessage('copado-policy.json created. Adjust it, then commit it - it applies to everyone who opens this project.');
 }
 
-/**
- * Phase 0: a read-only report of what the Copado org holds for one user story,
- * written to .copado/inspect/ and opened. Nothing in Copado is changed.
- */
-/** The report of what Copado holds about a story - for the story on the page, or one asked for. */
-async function cmdInspectStory(storyInput) {
-  requireTrust('Inspecting Copado runs the Salesforce CLI');
-  const c = rc();
-  if (!c.copadoOrg) {
-    const p = await vscode.window.showInformationMessage('Set the Copado org first - the alias of the org where Copado runs, logged in with the Salesforce CLI.', 'Open settings');
-    if (p) vscode.commands.executeCommand('workbench.action.openSettings', 'cmr.copado.org');
-    return;
-  }
-  const input = typeof storyInput === 'string' && storyInput ? storyInput : await vscode.window.showInputBox({
-    title: 'Inspect a user story in Copado (read-only)',
-    prompt: 'User story number or record id',
-    placeHolder: 'US-0012345',
-    ignoreFocusOut: true,
-    validateInput: v => inspectLib.parseStoryRef(v) ? null : 'A story number such as US-0012345 or 12345, or a record id'
-  });
-  if (!input) return;
-  const ref = inspectLib.parseStoryRef(input);
-  const root = projectOrFolder();
-  const api = copadoApi(c, root, (await apiVersion()) || '62.0');
-  let result;
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Looking up ' + input + ' in Copado', cancellable: false }, async progress => {
-    progress.report({ message: 'Reading the story and everything attached to it' });
-    let localOrgs = [];
-    try { localOrgs = await orgList(c, root); } catch (e) { /* no matching then */ }
-    result = await inspectLib.inspect(ref, api, { localOrgs });
-  });
-  const text = redact(inspectLib.report(result), c.maskIdentities);
-  const dir = await deps.storageDir('inspect');
-  const file = vscode.Uri.joinPath(dir, result.story.name + '-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.md');
-  await vscode.workspace.fs.writeFile(file, Buffer.from(text, 'utf8'));
-  await vscode.window.showTextDocument(file, { preview: false });
-  output.appendLine('copado: inspected ' + result.story.name + ' - ' + result.commits.length + ' commits, ' + result.promotions.length + ' promotions, ' + result.files.length + ' files; report ' + path.basename(file.fsPath));
-  vscode.window.showInformationMessage('Inspection of ' + result.story.name + ' written to .copado/inspect. Read-only - nothing in Copado was changed.' +
-    (c.maskIdentities ? '' : ' Turn on Mask identities before sharing it.'));
-}
-
 /** Read-only access to the Copado org through the Salesforce CLI. */
 const clients = new Map();
 function copadoApi(c, root, version) {
@@ -371,50 +326,6 @@ function needCopado(c) {
   vscode.window.showInformationMessage('Set the Copado org first - the alias of the org where Copado runs, logged in with the Salesforce CLI.', 'Open settings')
     .then(p => { if (p) vscode.commands.executeCommand('workbench.action.openSettings', 'cmr.copado.org'); });
   return false;
-}
-
-/**
- * Everything for one user story, straight from Copado: its commit file
- * becomes the package (with the usual pre-flight checks), and it is validated
- * from its feature branch against the next environment in the pipeline.
- */
-/** The story's package.xml from its commit - for the story on the page, or one asked for. */
-async function cmdPrepareStory(storyInput) {
-  requireTrust('Preparing a story runs the Salesforce CLI');
-  const c = rc();
-  if (!needCopado(c)) return;
-  const input = typeof storyInput === 'string' && storyInput ? storyInput : await vscode.window.showInputBox({ title: 'Prepare a user story from Copado', prompt: 'User story number or record id', placeHolder: 'US-0012345',
-    ignoreFocusOut: true, validateInput: v => inspectLib.parseStoryRef(v) ? null : 'A story number such as US-0012345 or 12345, or a record id' });
-  if (!input) return;
-  const root = projectRoot();
-  const api = copadoApi(c, root, (await apiVersion()) || '62.0');
-  let r;
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Getting ' + input + ' ready' }, async progress => {
-    progress.report({ message: 'Finding what the story changed' });
-    let localOrgs = [];
-    try { localOrgs = await orgList(c, root); } catch (e) { /* matched later */ }
-    r = await inspectLib.inspect(inspectLib.parseStoryRef(input), api, { localOrgs, keepContent: true, only: ['User Story'], peekLimit: 100 });
-  });
-  const story = r.story;
-  const commits = r.files.filter(f => f.content && f.what.kind === 'commit-json');
-  if (!commits.length) {
-    throw new Error('No Copado commit file on ' + story.name + '. Commit the story in Copado first - "Copado: Inspect User Story in Copado" shows what the story holds.');
-  }
-  const storyDir = vscode.Uri.joinPath(await deps.storageDir('stories'), story.name);
-  await vscode.workspace.fs.createDirectory(storyDir);
-  const uris = [];
-  for (const f of commits) {
-    const uri = vscode.Uri.joinPath(storyDir, String(f.name).replace(/[\\/:*?"<>|]/g, '_'));
-    await vscode.workspace.fs.writeFile(uri, f.content);
-    uris.push(uri);
-  }
-  output.appendLine('copado: ' + story.name + ' - ' + commits.length + ' commit file' + (commits.length === 1 ? '' : 's') + ' from Copado');
-  await cmdPackage(uris[0], uris);
-  if (!state.pkg) return;
-  const go = await vscode.window.showInformationMessage(story.name + ' is prepared: ' + state.pkg.result.counts.deploy + ' components to deploy.',
-    { detail: (story.title ? story.title + '\n' : '') + 'Validate from its feature branch against ' + (story.next ? story.next.name + ', the next environment in the pipeline.' : 'an org you choose (no next environment found in the pipeline).') },
-    'Validate from feature branch');
-  if (go === 'Validate from feature branch') await validateFromBranch(story.name);
 }
 
 /**
@@ -546,40 +457,6 @@ async function ensureRepo(o) {
 }
 
 /**
- * Validates a story from its feature branch: the commit file gives the
- * components, the branch gives their files exactly as Copado committed them,
- * in a separate check workspace - no retrieve, the project untouched. The
- * branch is the one Copado's records name when they do, else the pattern.
- */
-async function validateFromBranch(storyInput) {
-  requireTrust('Validating from the branch runs the Salesforce CLI');
-  const c = rc();
-  if (!needCopado(c)) return;
-  const input = storyInput || await vscode.window.showInputBox({ title: 'Validate a user story from its feature branch', prompt: 'User story number', placeHolder: 'US-0012345', ignoreFocusOut: true,
-    validateInput: v => inspectLib.parseStoryRef(v) ? null : 'A story number such as US-0012345' });
-  if (!input) return;
-  const root = projectRoot();
-  const version = (await apiVersion()) || '62.0';
-  const api = copadoApi(c, root, version);
-  let localOrgs = [];
-  let r, fb, hotfix = false;
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Getting the changes of ' + input + ' from Copado' }, async () => {
-    try { localOrgs = await orgList(c, root); } catch (e) { /* asked below */ }
-    r = await inspectLib.inspect(inspectLib.parseStoryRef(input), api, { localOrgs, keepContent: true, only: ['User Story'], peekLimit: 100 });
-    fb = await lifecycle.featureBranch(api, { id: r.story.id, name: r.story.name }, c.featureBranch);
-    if (r.story.pipelineId && r.story.baseBranch) {
-      try { hotfix = lifecycle.isHotfix(r.story, await lifecycle.pipeline(api, r.story.pipelineId)); } catch (e) { /* not a hotfix then */ }
-    }
-  });
-  const rows = [].concat(...r.files.filter(f => f.content && f.what.kind === 'commit-json').map(f => JSON.parse(f.content.toString('utf8'))));
-  if (!rows.length) throw new Error('No Copado commit file on ' + r.story.name + ' - commit the story in Copado first.');
-  output.appendLine('branch check: ' + r.story.name + (hotfix ? ' is a hotfix (based on the production branch)' : '') + ' - its branch is ' + fb.branch + ', from ' + fb.source);
-  const target = r.story.next ? await orgForEnvironment(c, r, r.story.next.id, r.story.next.name, localOrgs, 'target - validated against, nothing is deployed') : null;
-  await runBranchCheck({ rows, branches: [fb.branch], name: r.story.name, target, label: r.story.name + (hotfix ? ' (hotfix)' : ''), environment: r.story.next ? r.story.next.name : null,
-    api, pipelineId: r.story.pipelineId, envId: r.story.environmentId, meta: { source: hotfix ? 'hotfix branch' : 'feature branch', stories: [r.story.name] } });
-}
-
-/**
  * Validates exactly what a promotion deploys: its components, read from the
  * promotion branch Copado builds (promotion/{promotion}), check-only against
  * its destination org. p: { id, name, to, toId, from, fromId, pipelineId }.
@@ -700,7 +577,6 @@ async function branchCheckOnce(o) {
     files: { deploy: vscode.Uri.file(deployFile), retrieve: vscode.Uri.file(deployFile), destructive: destructive ? vscode.Uri.file(destructive) : null } };
   await cmdValidate({ root: dir, pkg, mode: 'workspace', targetOrg: o.target, label: o.label, environment: o.environment, meta: Object.assign({ branches: used }, o.meta || {}), onEvent: o.onEvent, quiet: o.quiet });
 }
-
 
 async function apiVersion() {
   const c = rc();

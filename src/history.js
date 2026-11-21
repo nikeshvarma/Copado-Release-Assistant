@@ -24,10 +24,27 @@ function load(dir) {
 function add(dir, entry) {
   const all = load(dir).concat([Object.assign({ at: new Date().toISOString() }, entry)]).slice(-MAX);
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = file(dir) + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(all, null, 1));
-  fs.renameSync(tmp, file(dir));
+  writeAtomic(file(dir), JSON.stringify(all, null, 1));
   return all[all.length - 1];
+}
+
+/**
+ * Writes a file through a temporary copy and a rename, so a crash never leaves
+ * half a file. On Windows the rename can fail for a moment (EPERM, EBUSY,
+ * EACCES) while a virus scanner or the indexer holds the target: it is tried
+ * again, then the content is written in place and the temporary copy removed.
+ */
+function writeAtomic(target, text) {
+  const tmp = target + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, text);
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(tmp, target); return; } catch (e) {
+      if (!/^(EPERM|EBUSY|EACCES|EEXIST)$/.test(e.code || '')) { try { fs.unlinkSync(tmp); } catch (x) { /* gone */ } throw e; }
+      if (attempt < 4) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * (attempt + 1)); continue; }
+      try { fs.copyFileSync(tmp, target); } finally { try { fs.unlinkSync(tmp); } catch (x) { /* gone */ } }
+      return;
+    }
+  }
 }
 
 /**
@@ -40,4 +57,4 @@ function about(entries, o) {
     .slice().reverse();
 }
 
-module.exports = { load, add, about };
+module.exports = { load, add, about, writeAtomic };

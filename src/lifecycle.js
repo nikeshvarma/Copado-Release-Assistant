@@ -173,7 +173,7 @@ async function promotionById(api, id, notes) {
 /** The stories promoted together in a promotion. */
 async function promotionStories(api, promotionId, notes) {
   const rows = await q(api, OBJ.promoted, ['Id', 'copado__User_Story__c', 'copado__User_Story__r.Name', 'copado__User_Story__r.copado__User_Story_Title__c'],
-    "copado__Promotion__c = '" + clean(promotionId) + "'", 'LIMIT 500', notes);
+    "copado__Promotion__c = '" + clean(promotionId) + "'", 'LIMIT 5000', notes);
   const seen = new Set();
   return rows.filter(r => r.copado__User_Story__c && !seen.has(r.copado__User_Story__c) && seen.add(r.copado__User_Story__c))
     .map(r => ({ id: r.copado__User_Story__c, name: get(r, 'copado__User_Story__r.Name'), title: get(r, 'copado__User_Story__r.copado__User_Story_Title__c') || '' }));
@@ -190,40 +190,10 @@ function storyOf(s) {
     baseBranch: s.copado__Base_Branch__c || get(s, 'copado__Release__r.copado__Base_Branch__c') || null };
 }
 
-/** A story by number (US-0012345, 12345) or id. */
-async function findStory(api, ref, notes) {
-  const s = String(ref || '').trim();
-  const isId = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(s) && /[a-zA-Z]/.test(s) && !/^US-?\d+$/i.test(s);
-  const digits = s.replace(/\D/g, '');
-  if (!isId && !/^(US-?)?\d{1,9}$/i.test(s)) throw new Error('A user story such as US-0012345.');
-  const rows = await q(api, OBJ.story, STORY_FIELDS, isId ? "Id = '" + clean(s) + "'" : "Name LIKE '%" + digits + "'", 'ORDER BY Name LIMIT 20', notes);
-  const hit = rows.find(r => isId || Number(String(r.Name).replace(/\D/g, '')) === Number(digits));
-  if (!hit) throw new Error('No user story ' + s + ' in this org.');
-  return storyOf(hit);
-}
-
 /** A hotfix: a story based on the production branch rather than the pipeline's base branch. */
 function isHotfix(story, map) {
   const prod = map && map.productionBranch;
   return !!(story && story.baseBranch && prod && story.baseBranch.toLowerCase() === String(prod).toLowerCase());
-}
-
-/** Every promotion a story was in, newest first. */
-async function storyPromotions(api, storyIds, map, notes) {
-  if (!storyIds.length) return [];
-  const back = await backPromotionField(api);
-  const promoFields = PROMO_FIELDS.map(f => 'copado__Promotion__r.' + f).filter(f => !/\.Id$/.test(f)).concat(back ? ['copado__Promotion__r.' + back] : []);
-  const out = [];
-  for (const part of chunks(storyIds, 100)) {
-    const rows = await q(api, OBJ.promoted, ['Id', 'copado__User_Story__c', 'copado__Promotion__c', 'CreatedDate'].concat(promoFields), 'copado__User_Story__c IN (' + quote(part) + ')', 'ORDER BY CreatedDate DESC LIMIT 2000', notes);
-    for (const r of rows) {
-      const p = r.copado__Promotion__r;
-      if (!r.copado__Promotion__c || !p) continue;
-      const x = promotionOf(Object.assign({ Id: r.copado__Promotion__c }, p), back);
-      out.push(Object.assign(x, { storyId: r.copado__User_Story__c, back: isBackPromotion(x, map) }));
-    }
-  }
-  return out.sort((a, b) => String(b.created).localeCompare(String(a.created)));
 }
 
 /**
@@ -261,15 +231,6 @@ function journey(story, promotions, map) {
   const backTo = hotfix && map && story.envId === map.productionId
     ? map.order.filter(id => !path.includes(id) && !promotions.some(p => p.back && p.toId === id && !isOpen(p.status))).map(id => map.envs[id].name) : [];
   return { story, hotfix, stages, next, backPromotions: promotions.filter(p => p.back), backTo };
-}
-
-async function storyJourney(api, ref, o) {
-  const notes = [];
-  const story = await findStory(api, ref, notes);
-  const pid = story.pipelineId || await pipelineIdFor(api, { envId: story.envId }, notes);
-  const map = pid ? await pipeline(api, pid, notes) : null;
-  const promotions = await storyPromotions(api, [story.id], map, notes);
-  return Object.assign(journey(story, promotions, map), { pipeline: map, promotions, notes });
 }
 
 /** Stories by record id, with their stage fields. */
@@ -420,6 +381,6 @@ async function repositoryUri(api, repoId, notes) {
 
 module.exports = {
   OBJ, isOpen, isBlocking, pipelines, pipeline, build, reaches, isBackPromotion, backPromotionField, pipelineIdFor, logins, promotionById,
-  promotionStories, storiesByIds, findStory, isHotfix, storyPromotions, journey, storyJourney, storyComponents, promotionComponents,
+  promotionStories, storiesByIds, isHotfix, journey, storyComponents, promotionComponents,
   forecast, featureBranch, repositoryUri
 };

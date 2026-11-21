@@ -22,7 +22,11 @@ function readmeForPackage(text, repository) {
   const url = String((repository && repository.url) || repository || '').replace(/^git\+/, '').replace(/\.git$/, '').replace(/\/+$/, '');
   if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(url)) throw new Error('package.json repository must be https://github.com/<owner>/<repo> - the README\u2019s pictures are linked from it');
   const base = url + '/raw/HEAD/';
-  return String(text).replace(/(!\[[^\]]*\]\()(?!https?:|data:|#)\.?\/?([^)\s]+)/g, (m, a, p) => a + base + p).replace(/(<img\b[^>]*\bsrc=")(?!https?:|data:)\.?\/?([^"]+)/g, (m, a, p) => a + base + p);
+  // its links to the repository's own pages - docs/... - likewise, to the page on GitHub
+  const blob = url + '/blob/HEAD/';
+  return String(text).replace(/(!\[[^\]]*\]\()(?!https?:|data:|#)\.?\/?([^)\s]+)/g, (m, a, p) => a + base + p).replace(/(<img\b[^>]*\bsrc=")(?!https?:|data:)\.?\/?([^"]+)/g, (m, a, p) => a + base + p)
+    .replace(/((?:^|[^!])\[[^\]]*\]\()(?!https?:|data:|#|mailto:)\.?\/?([^)\s]+\.md(?:#[^)\s]*)?)\)/gm, (m, a, p) => a + blob + p + ')')
+    .replace(/(<a\b[^>]*\bhref=")(?!https?:|#|mailto:)\.?\/?([^"]+\.md(?:#[^"]*)?)"/g, (m, a, p) => a + blob + p + '"');
 }
 
 /** The README's pictures: media/readme/<name>.png it shows. */

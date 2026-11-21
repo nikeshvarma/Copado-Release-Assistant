@@ -4,7 +4,7 @@
  * The Copado Release Assistant page: one place to start. Two views - a
  * promotion (its conflicts, Copado's deployment and activity) and a story's
  * journey - drawn from the state the two sides send: the Promotion workspace
- * (promotionUi) and the Stories view (lifecycleUi). Styled only with VS
+ * (promotionUi), Manual and Compare. Styled only with VS
  * Code's theme variables, so it follows the user's theme.
  */
 const vscode = require('vscode');
@@ -13,14 +13,12 @@ const crypto = require('crypto');
 
 let panel = null;
 let ui = null;
-let life = null;
 let manual = null;
 let compare = null;
 let ctx = null;
 
-function activate(context, promotionUi, lifecycleUi, cmd, manualUi, compareUi) {
+function activate(context, promotionUi, cmd, manualUi, compareUi) {
   ui = promotionUi;
-  life = lifecycleUi;
   manual = manualUi || null;
   ctx = context;
   if (manual) manual.onChange(() => push());
@@ -28,7 +26,6 @@ function activate(context, promotionUi, lifecycleUi, cmd, manualUi, compareUi) {
   if (compare) compare.onChange(() => push());
   cmd('cmr.page.open', () => show());
   ui.onChange(() => push());
-  if (life) life.onChange(() => push());
 }
 
 /** The page - on a tab of it, when one is named (Compare in Release Assistant opens Manual). */
@@ -57,7 +54,6 @@ async function push(extra) {
   if (!panel) return;
   try {
     const data = await ui.snapshot();
-    if (life) data.life = life.snapshot();
     if (manual) data.manual = manual.snapshot();
     if (compare) data.compare = compare.snapshot();
     panel.webview.postMessage(Object.assign({ type: 'state', data }, extra || {}));
@@ -81,11 +77,7 @@ async function onMessage(m) {
   running++;
   panel.webview.postMessage({ type: 'busy', on: true, what: m.name });
   try {
-    if (m.scope === 'life' && m.name === 'promotion.open') {
-      await ui.openById((m.payload || {}).id);
-      if (panel) panel.webview.postMessage({ type: 'nav', nav: 'Promotions' });
-    } else if (m.scope === 'life') await life.act(m.name, m.payload || {});
-    else if (m.scope === 'manual' && manual) await manual.act(m.name, m.payload || {});
+    if (m.scope === 'manual' && manual) await manual.act(m.name, m.payload || {});
     else if (m.scope === 'compare' && compare) await compare.act(m.name, m.payload || {});
     else await ui.act(m.name, m.payload || {});
   } catch (e) {

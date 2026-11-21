@@ -23,6 +23,9 @@ async function run(o, script, opts) {
   // opts.clipboard: the real clipboard, for the find box's own copy and paste
   const ctx = await b.newContext(Object.assign({ viewport: { width: opts.width || sw, height: opts.height || sh } }, opts.clipboard ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}));
   const p = await ctx.newPage();
+  // CRA_PROFILE=1: the page's CPU time while the editor opens - for the speed work - saved to /tmp/cra-profile.json
+  const cdp = process.env.CRA_PROFILE ? await ctx.newCDPSession(p) : null;
+  if (cdp) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start'); }
   const errors = [], sent = [];
   p.on('pageerror', e => errors.push('pageerror: ' + e.message));
   p.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 160)); });
@@ -32,7 +35,7 @@ async function run(o, script, opts) {
   await p.exposeFunction('__toHost', async m => {
     sent.push(m);
     const reply = r => p.evaluate(r => window.postMessage(r, '*'), r);
-    if (m.type === 'ready') await reply({ type: 'init', title: (o.plain ? 'Compare' : 'Merge') + ' \u00b7 ' + o.file, labels: o.labels, theirs: o.theirs, short: o.short, mode: 'order', text, savedText: o.savedText || null, starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, language: o.language || 'xml', plain: !!o.plain, gitLabels: o.gitLabels || null, tidy: !o.language && require('../src/mergeStart').ADDITIVE.has(o.typeName), marks: MP.marksFor(o, text, 'order'), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
+    if (m.type === 'ready') await reply({ type: 'init', title: (o.plain ? 'Compare' : 'Merge') + ' \u00b7 ' + o.file, labels: o.labels, theirs: o.theirs, short: o.short, mode: 'order', text, savedText: o.savedText || null, starts: o.starts || null, start: o.start || null, hideIdentical: !!o.hideIdentical, language: o.language || 'xml', plain: !!o.plain, gitLabels: o.gitLabels || null, unionKind: o.unionKind || null, tidy: !o.language && require('../src/mergeStart').ADDITIVE.has(o.typeName), marks: MP.forPage(MP.marksFor(o, text, 'order'), true, o), versions: MP.versionsOf(o), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] });
     // VS Code's clipboard, as the extension answers it
     else if (m.type === 'clipboard') state.clip = m.text;
     else if (m.type === 'paste') {
@@ -40,11 +43,11 @@ async function run(o, script, opts) {
       // and as VS Code may also pass the keystroke on as a native paste: it must not paste twice
       if (opts.nativeToo) await p.evaluate(t => { const d = new DataTransfer(); d.setData('text/plain', t); document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); }, state.clip || '');
     }
-    else if (m.type === 'text' && m.side === 'left') { o.target = m.text; await reply({ type: 'marks', seq: m.seq, marks: MP.marksFor(o, text, 'order'), conflicts: [] }); }
-    else if (m.type === 'text') { text = m.text; const marks = MP.marksFor(o, text, state.mode); await reply(marks.hold ? { type: 'marks', seq: m.seq, hold: true, xmlError: marks.xmlError } : { type: 'marks', seq: m.seq, mode: state.mode, marks, conflicts: o.conflictsFor ? o.conflictsFor(text) : [] }); }
-    else if (m.type === 'codeView') { o.codeView = m.view; state.codeView = m.view; if (typeof m.text === 'string') text = m.text; await reply({ type: 'marks', seq: m.seq, marks: MP.marksFor(o, text, 'order'), conflicts: [] }); }
-    else if (m.type === 'review' && o.code && o.code.reviewed instanceof Map) { o.code.reviewed.set(String(m.id), String(m.choice)); await reply({ type: 'marks', seq: m.seq, marks: MP.marksFor(o, typeof m.text === 'string' ? (text = m.text) : text, 'order'), conflicts: [] }); }
-    else if (m.type === 'review') { if (o.code) o.code.reviewed.add(String(m.id)); if (typeof m.text === 'string') text = m.text; await reply({ type: 'marks', seq: m.seq, marks: MP.marksFor(o, text, 'order'), conflicts: [] }); }
+    else if (m.type === 'text' && m.side === 'left') { o.target = m.text; await reply({ type: 'marks', seq: m.seq, marks: MP.forPage(MP.marksFor(o, text, 'order'), m.type === 'codeView', o), conflicts: [] }); }
+    else if (m.type === 'text') { if ('regions' in m) o.regions = m.regions || null; text = m.text; const marks = MP.marksFor(o, text, state.mode); await reply(marks.hold ? { type: 'marks', seq: m.seq, hold: true, xmlError: marks.xmlError } : { type: 'marks', seq: m.seq, mode: state.mode, marks: MP.forPage(marks, false, o), conflicts: o.conflictsFor ? o.conflictsFor(text) : [] }); }
+    else if (m.type === 'codeView') { if ('regions' in m) o.regions = m.regions || null; o.codeView = m.view; state.codeView = m.view; if (typeof m.text === 'string') text = m.text; await reply({ type: 'marks', seq: m.seq, marks: MP.forPage(MP.marksFor(o, text, 'order'), m.type === 'codeView', o), conflicts: [] }); }
+    else if (m.type === 'review' && o.code && o.code.reviewed instanceof Map) { if ('regions' in m) o.regions = m.regions || null; o.code.reviewed.set(String(m.id), String(m.choice)); await reply({ type: 'marks', seq: m.seq, marks: MP.forPage(MP.marksFor(o, typeof m.text === 'string' ? (text = m.text) : text, 'order'), m.type === 'codeView', o), conflicts: [] }); }
+    else if (m.type === 'review') { if ('regions' in m) o.regions = m.regions || null; if (o.code) o.code.reviewed.add(String(m.id)); if (typeof m.text === 'string') text = m.text; await reply({ type: 'marks', seq: m.seq, marks: MP.forPage(MP.marksFor(o, text, 'order'), m.type === 'codeView', o), conflicts: [] }); }
     else if (m.type === 'dedupe') {
       // as the extension does: the duplicates found, the copies taken out (identical ones - no question here)
       const X = require('../src/xmlParser'), D = require('../src/duplicates');
@@ -64,6 +67,7 @@ async function run(o, script, opts) {
   await p.addInitScript(() => { window.acquireVsCodeApi = () => ({ postMessage: m => window.__toHost(m), setState() {}, getState() { return null; } }); });
   await p.goto('file://' + file);
   await p.waitForFunction(() => document.querySelectorAll('.monaco-editor').length === 3 && document.querySelector('#chips').textContent, null, { timeout: 30000 });
+  if (cdp) { const { profile } = await cdp.send('Profiler.stop'); fs.writeFileSync('/tmp/cra-profile.json', JSON.stringify(profile)); }
   await p.waitForTimeout(400);
   const out = await script(p, { sent, errors, text: () => text, state, clip: () => state.clip, setClip: t => { state.clip = t; } });
   await b.close();

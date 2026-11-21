@@ -5,7 +5,7 @@
 <h1 align="center">Copado Release Assistant</h1>
 
 <p align="center">
-  Resolve Copado promotion conflicts and validate user stories — without leaving VS Code.
+  Resolve Copado promotion conflicts, pre-check them and upload — without leaving VS Code.
 </p>
 
 <p align="center">
@@ -19,18 +19,21 @@
 <p align="center">
   <a href="#features">Features</a> ·
   <a href="#getting-started">Getting started</a> ·
+  <a href="docs/RESOLUTION.md">How resolution works</a> ·
   <a href="#safety">Safety</a> ·
   <a href="#configuration">Configuration</a> ·
   <a href="#development">Development</a>
 </p>
 
-![The merge editor in three panels: a Lightning page's conflict - the promotion branch's side, the resolution, the feature branch's side, with Accept promotion, Accept both and Accept feature](media/readme/merge-editor.png)
+![The merge editor in three panels: a Lightning page's conflict - the promotion branch's side, the resolution, the feature branch's side, with Accept promotion and Accept feature](media/readme/merge-editor.png)
 
 ## Features
 
+What it reads, what it writes, and the rules for each kind of file, in one page: [How resolution works](docs/RESOLUTION.md) — and every rule, numbered, in the [Rule book](docs/RULES.md).
+
 ### Promotion conflicts, resolved without losing anything
 
-Open a promotion that stopped on a merge conflict — by its number, a user story or its Copado link, in the **Promotions** tab's one box — and every conflicted file is fetched at once: **Copado's own conflict files**, nothing read from a branch. Metadata and code open in the same merge editor with git's merge kept as it is, each of its conflicts yours to choose. Upload all resolutions in one step, read back from Copado, with undo.
+Open a promotion that stopped on a merge conflict — by its number or its Copado link, in the **Promotions** tab's one box — and every conflicted file is fetched at once: **Copado's own conflict files**, nothing read from a branch. The files are grouped *To resolve*, *Ready to upload*, *Uploaded* and *Resolve in Copado* — each with a status pill — and each file's panel has one primary action, **Resolve in editor**, with what it will do beside it. Files that are neither code nor metadata (static resources, images, JSON, text) are resolved in Copado: never opened here, never uploaded from here. Metadata and code open in the same merge editor with git's merge kept as it is, each of its conflicts yours to choose. Upload all resolutions in one step, read back from Copado, with undo.
 
 ![A promotion's conflict files, each with what happened and what to do](media/readme/promotion.png)
 
@@ -42,13 +45,15 @@ The **Components** tab lists every component the promotion's stories committed, 
 
 ### A merge editor built for Salesforce metadata and code
 
-Everything comes from **Copado's conflict file**, as Copado's own merge made it: git had the common ancestor, so whatever only one story changed is already merged — the feature's deletions applied, other stories' work kept — and stays as it is. Only git's **conflicts** are marked, metadata and code alike: both versions shown — the target's greyed out, the feature's in its colour — and neither in your resolution until you choose **Accept target**, **Accept feature** or **Accept both**. A resolved conflict says so, in green, still a click from changing; **⋯ › Accept all target** or **Accept all feature** resolves every one at once. It opens in **Copado's own three panels** — *Conflicts in Promotion branch*, *Resolution*, *Conflicts in Feature branch*, each branch named as Copado's file names it — level with each other, the words that differ lit within a line; **→** and **←** take a side's lines into the resolution, **Accept both** sits between. **View › Layout** switches to one panel or two, and remembers it (`cmr.merge.codeView`); each version is shown once — in two panels, the target's lines stay on the left, with **Accept target** beside them, and only the feature's version sits under the conflict. Every choice is undone with `Ctrl+Z`.
+Everything comes from **Copado's conflict file**, as Copado's own merge made it: git had the common ancestor, so whatever only one story changed is already merged — the feature's deletions applied, other stories' work kept — and stays as it is. Only git's **conflicts** are marked, metadata and code alike: both versions shown — the target's greyed out, the feature's in its colour — and neither in your resolution until you choose **Accept target** or **Accept feature** (code also offers **Accept both**; two versions of one metadata element are rarely valid, so metadata offers it only where the two stories each add their own entry at the same place — two picklist values, two flow formulas — and it keeps the two). **Each row says what you are choosing**: the element the conflict is in and what each version sets — *Section Case Information › field Dispute_Amount__c: Behavior Required → Readonly* — with each side's value beside its own version; in code, the member — *Conflict · method total(Decimal)*. A flow's conflict that only moves the canvas — `locationX`/`locationY` — is the feature's, marked, with **Use target**. A resolved conflict says so, in green, still a click from changing; **⋯ › Accept all target** or **Accept all feature** resolves every one at once. It opens in **Copado's own three panels** — *Conflicts in Promotion branch*, *Resolution*, *Conflicts in Feature branch*, each branch named as Copado's file names it — level with each other, the words that differ lit within a line; **→** and **←** take a side's lines into the resolution, **Accept both** sits between. **View › Layout** switches to one panel or two, and remembers it (`cmr.merge.codeView`); each version is shown once — in two panels, the target's lines stay on the left, with **Accept target** beside them, and only the feature's version sits under the conflict. Every choice is undone with `Ctrl+Z`.
 
-**Permission sets, profiles, labels and translations** — files whose entries add up — need no choosing: inside each of git's blocks the target's entries are kept as they are, and the feature's are added beside their kind, or applied where it changed one — each marked, each undoable, nothing removed. Entries are matched by what identifies them: a field permission by its field, a user permission by its name. If git cut through the middle of an entry, the file's blocks are conflicts to choose instead, and the editor says so.
+**Permission sets, profiles, muting permission sets, labels and translations (global and standard value set translations too)** — files whose entries add up — are joined, whatever git's blocks: the two sides are rebuilt from Copado's file and joined entry by entry. The target's entries are kept as they are, the feature's are added beside their kind, or applied where it changed one; an entry both have stays once. Entries are matched by what identifies them: a field permission by its field, a user permission by its name. A label or translation whose value the target and the feature hold differently is yours to choose. **Nothing of the target is removed — and nothing that grants less is taken for you**: where the feature would turn access off (`editable`, `readable`, `enabled`, `visible`, an `allow…`, a tab's visibility — in a muting permission set, turning one on), that entry is a conflict for you to choose, target or feature. Should a file's sides not join, its blocks are conflicts and **Accept feature** is not offered, so the target's access is never one click from gone. A profile's security settings — IP ranges, login hours, password and session settings — are always yours to choose. An entry the target itself has twice, the same, loses its second copy, shown as *Duplicate* with **Keep**; twice and different, the copy granting more is kept — *Duplicate · the copy granting more kept*, with **Keep … instead** to use the other.
+
+**A save never leaves a gap**: with conflicts unresolved, **Save** offers to keep the target's version for them, or to go back — and a file with a conflict unresolved is never uploaded. Each conflict's lines are tracked by the editor as you type, so editing around one never loses it.
 
 Broken XML is underlined exactly where it breaks. For permission sets, profiles, labels and translations a duplicate entry is marked on its own lines with the line it repeats, and **Format and Order Metadata** and **Remove Duplicate Entries** are in the right-click menu.
 
-![A duplicate marked in the merge editor](media/readme/duplicates.png)
+![A permission set joined: an entry the target had twice shown as Duplicate, with Keep; the feature's entry added](media/readme/duplicates.png)
 
 It is an editor you can work in all day: the parent elements stay pinned as you scroll, elements fold (the target with them), matching tags light up and an opening tag closes itself, **Format and Order Metadata** in the right-click menu puts a permission set or profile in Salesforce's order, and **View** has zoom, word wrap that keeps the panes level, and a divider to drag.
 
@@ -64,7 +69,13 @@ Check a promotion's resolutions, or a user story straight from its feature branc
 
 When a pre-check stops at something the target does not have — a field, a class — what is missing is read from the errors and listed, each with what needs it. **Add to pre-check** borrows it from the source org, read-only, and runs the pre-check again, so the errors it was hiding show; **Add components…** picks any others by type and name. Borrowed components are for the pre-check alone — never deployed, never added to the story or the promotion — and the pre-check says the promotion still needs them.
 
+Errors are grouped by cause: something missing in the target, a component a story has in an older version, or an error in the code itself. Every story in the promotion is read. **To commit to a story** lists everything the pre-check borrowed or found missing. **Open as package.xml** or **Copy the list** gives you the whole list, so the items can be committed to a story at once.
+
 ![A failed pre-check: what the target is missing, to add from the source org, above the errors](media/readme/precheck.png)
+
+### Upload knowing what goes up
+
+Before anything is uploaded, the dialog runs a checklist: files still to resolve, files changed since the pre-check, a pre-check that failed or never ran, access a resolution takes away, duplicates, and borrowed components no story has. Each item says what to do, followed by a list of the files that will go up. Each file is saved as uploaded as soon as it is up, and **Undo** tries every file, so an interrupted upload never loses track. In metadata, a conflict row says what the choice means, such as *Edit access true → false – the feature removes access*. **⋯ › Save review to share…** writes the whole review as a Markdown report.
 
 ### Compare two versions, with or without Copado
 
@@ -94,7 +105,7 @@ For permission sets, profiles, labels and translations, the extension's own **Fo
 
 1. Download the `.vsix` from the [latest release](https://github.com/nikeshvarma/Copado-Release-Assistant/releases/latest) and install it:
    ```bash
-   code --install-extension copado-release-assistant-3.20.0.vsix
+   code --install-extension copado-release-assistant-5.1.2.vsix
    ```
 2. Open your Salesforce project folder.
 3. Run **Copado: Open Settings** and set **Copado org** — the Salesforce CLI alias of the org where Copado runs.

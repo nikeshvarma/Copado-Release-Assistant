@@ -2,7 +2,7 @@
   "name": "copado-release-assistant",
   "displayName": "Copado Release Assistant",
   "description": "Copado release work for Salesforce metadata and code: resolve promotion conflicts - metadata element by element, Apex and Lightning web components by member - validate exactly what each stage deploys from the branch, follow a story through the pipeline, follow Copado deployments - plus package.xml from commit JSON, three-way merges and deploy-breaking checks.",
-  "version": "3.20.0",
+  "version": "5.1.2",
   "publisher": "nikeshvarma",
   "license": "MIT",
   "repository": {
@@ -154,18 +154,6 @@
         "category": "Copado"
       },
       {
-        "command": "cmr.copado.inspect",
-        "title": "Inspect User Story in Copado (read-only)",
-        "category": "Copado",
-        "icon": "$(search)"
-      },
-      {
-        "command": "cmr.copado.prepare",
-        "title": "Prepare User Story from Copado",
-        "category": "Copado",
-        "icon": "$(rocket)"
-      },
-      {
         "command": "cmr.promotion.open",
         "title": "Open Promotion from Copado",
         "category": "Copado",
@@ -181,12 +169,6 @@
         "command": "cmr.repo.forget",
         "title": "Remove Repository Token",
         "category": "Copado"
-      },
-      {
-        "command": "cmr.repo.validateStory",
-        "title": "Validate User Story from Its Feature Branch",
-        "category": "Copado",
-        "icon": "$(git-branch)"
       },
       {
         "command": "cmr.manual.mergeWith",
@@ -279,18 +261,6 @@
         },
         {
           "command": "cmr.validate.clear",
-          "when": "false"
-        },
-        {
-          "command": "cmr.copado.prepare",
-          "when": "false"
-        },
-        {
-          "command": "cmr.copado.inspect",
-          "when": "false"
-        },
-        {
-          "command": "cmr.repo.validateStory",
           "when": "false"
         },
         {
@@ -1058,7 +1028,8 @@
     "package": "node scripts/package.js",
     "package:check": "node scripts/check-package.js",
     "tidy": "node scripts/tidy.js",
-    "package:vsce": "npx @vscode/vsce package"
+    "package:vsce": "npx @vscode/vsce package",
+    "corpus": "node scripts/corpus.js"
   },
   "author": {
     "name": "Nikesh Varma"

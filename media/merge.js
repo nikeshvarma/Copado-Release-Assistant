@@ -208,7 +208,9 @@
   let timer = null;
   function typed() {
     clearTimeout(timer);
-    timer = setTimeout(() => { S.seq++; api.postMessage({ type: 'text', seq: S.seq, text: R.getValue() }); }, 250);
+    // a very large file waits a little longer after the last keystroke: a burst of typing is one update, not one per key
+    const wait = R.getModel() && R.getModel().getLineCount() > 20000 ? 600 : 250;
+    timer = setTimeout(() => { S.seq++; api.postMessage({ type: 'text', seq: S.seq, text: R.getValue(), regions: regionsNow() }); }, wait);
   }
   function dirty() {
     if (S.applyOnly || S.manual) return status();
@@ -226,20 +228,27 @@
   // ---- three panels, Copado's own: the promotion branch's side, your resolution, the feature branch's side ----
   function drawThree(m, items, ld, rd, fd, whole, zone, HEAD, colours) {
     const { GREEN, YELLOW } = colours;
-    if (F.getValue() !== (m.feat || '')) F.getModel().setValue(m.feat || '');
+    const sideOf = r => { let l = r, f = r; for (const x of m.segs || []) { if (x.r1 > r) break; l = r + (x.l1 - x.r1); f = r + (x.f1 - x.r1); } return { l, f }; };
+    if (m.feat != null && F.getValue() !== m.feat) F.getModel().setValue(m.feat);
     const segs = m.segs || [];
     // the rows first: at the same line a row stands above the padding, so each conflict's row is level in all three
     for (const r of m.rows || []) {
-      const s = segs.find(x => x.r0 === r.at) || segs.find(x => x.r0 <= r.at && r.at <= x.r1);
-      if (!s) continue;
+      // its place: where it begins, or holding it - or, none such, where its line is on each side
+      const s = segs.find(x => x.r0 === r.at) || segs.find(x => x.r0 <= r.at && r.at <= x.r1) || (() => { const p = sideOf(r.at); return { l0: p.l, l1: p.l, r0: r.at, r1: r.at, f0: p.f, f1: p.f, synthetic: true }; })();
       const done = !r.needs, tag = tagOf(r), cls = ROW(tag)[0];
       // what was removed or left out: struck through in the resolution; a feature version that removes: said on its side
-      const act = c => { const a = r.actions.find(x => x.choice === c); return Object.assign([a.op], { review: r.id, choice: c }); };
+      const act = c => { const a = r.actions.find(x => x.choice === c); return a ? Object.assign([a.op], { review: r.id, choice: c }) : null; };
       const mark = c => r.chosen === c ? ' on' : '';
       // the resolution's row: what it is, and both; each side's: its arrow into the resolution, the same height
-      items.right.push({ after: s.r0, lines: 0, px: HEAD, node: rowNode(cls, ROW(tag)[1]), buttons: [['\u2261', 'Accept both', act('both'), cls + mark('both')]], cls });
-      items.left.push({ after: s.l0, lines: 0, px: HEAD, node: zoneNode('head side3'), buttons: [['\u2192', 'Accept promotion', act('target'), 'arw' + mark('target')]], cls: 'arw' });
-      items.feat.push({ after: s.f0, lines: 0, px: HEAD, node: zoneNode('head side3'), buttons: [['\u2190', 'Accept feature', act('feature'), 'arw fea' + mark('feature')]], cls: 'arw' });
+      // each button only where its action is offered - a union type's conflict has no both; one that did not join, no feature
+      const only = bs => bs.filter(b => b[2]);
+      // the middle panel is a third of the width: a long explanation takes two lines - the three rows the same height,
+      // the words clear of the button beside them
+      const bothB = only([['\u2261', 'Accept both', act('both'), cls + mark('both')]]), PX = HEAD;
+      items.right.push({ after: s.r0, lines: 0, px: PX, node: rowNode(cls, wordOf(tag)), buttons: bothB, cls });
+      // each side's row: its arrow alone, level with the resolution's
+      items.left.push({ after: s.l0, lines: 0, px: PX, node: zoneNode('head side3'), buttons: only([['\u2192', 'Accept promotion', act('target'), 'arw' + mark('target')]]), cls: 'arw' });
+      items.feat.push({ after: s.f0, lines: 0, px: PX, node: zoneNode('head side3'), buttons: only([['\u2190', 'Accept feature', act('feature'), 'arw fea' + mark('feature')]]), cls: 'arw' });
       // under the rows - each at its line, after them: what was removed or left out, struck; that the feature removes
       const struck = (r.ghosts || []).find(g => g.cls === 'struck');
       if (struck && s.r1 === s.r0) { items.right.push({ after: s.r0, lines: struck.lines.length, node: struckNode(r, struck.lines) }); s.rExtra = struck.lines.length; }
@@ -256,6 +265,13 @@
       // the words that differ, line for line
       if (nL === nF) for (let k = 0; k < nL; k++) wordsApart(s.l0 + k, s.f0 + k, ld, fd);
     }
+    for (const d of m.dupRows || []) {
+      const s = segs.find(x => x.l0 <= d.t0 && d.t0 < Math.max(x.l1, x.l0 + 1)), f = s ? s.f0 : sideOf(d.b0).f;
+      items.right.push({ after: d.b0, lines: 0, px: HEAD, node: rowNode('dupr', ROW(dupKey(d))[1]), buttons: d.kept ? (d.swap ? [['\u21b6', 'Keep ' + d.label + ' instead', d.swap, 'dupr']] : []) : [['\u21b6', 'Keep', keepOp(d), 'dupr']], cls: 'dupr' });
+      items.left.push({ after: d.t0, lines: 0, px: HEAD, node: zoneNode('head side3') });
+      items.feat.push({ after: f, lines: 0, px: HEAD, node: zoneNode('head side3') });
+      whole(ld, d.t0, d.t1, 'dupl-l', null);
+    }
     // the headings: Copado's - each branch as Copado's file names it
     const lb = S.gitLabels || {};
     $('lefthead').innerHTML = '<b>Conflicts in Promotion branch</b>' + (lb.ours ? ' \u00b7 ' + esc(lb.ours) : '');
@@ -263,6 +279,41 @@
     $('feathead').innerHTML = '<b>Conflicts in Feature branch</b>' + (lb.theirs ? ' \u00b7 ' + esc(lb.theirs) : '');
   }
   // within a line both sides changed: only what differs lit - what comes before and after is the same
+  // a row that names its conflict and version: what its buttons insert, and what is shown under it, from the table
+  function hydrate(m) {
+    if (!m || !m.git || !S.versions) return;
+    // Accept both: the two one after the other - or, two entries added at one place, the two whole (B3.6)
+    const textOf = (id, c) => { const v = S.versions[id] || { target: '', feature: '' }; return c === 'both' ? (v.both != null ? v.both : v.target + v.feature) : c === 'target' ? v.target : v.feature; };
+    const trimmedLines = t => { const ls = String(t).split(/(?<=\n)/).filter((l, i, a) => l !== '' || i < a.length - 1); let a = 0, z = ls.length; while (a < z && !ls[a].trim()) a++; while (z > a && !ls[z - 1].trim()) z--; return ls.slice(a, z); };
+    for (const r of m.rows || []) {
+      for (const a of r.actions) if (a.op && a.op.insert == null) a.op.insert = textOf(r.id, a.choice);
+      for (const g of r.ghosts || []) if (!g.lines) g.lines = trimmedLines(textOf(r.id, g.of));
+    }
+  }
+  // ---- C5: each conflict's lines tracked by the editor itself, as you type - exact, never searched for ----
+  // a range that grows at its edges: a version accepted into an empty conflict is in it; undo puts it back as it was
+  const lineRange = (b0, b1) => { const md = R.getModel(), n = md.getLineCount();
+    const at = l => l < n ? [l + 1, 1] : [n, md.getLineMaxColumn(n)];
+    const [a1, a2] = at(b0), [z1, z2] = at(b1); return new monaco.Range(a1, a2, z1, z2); };
+  function trackFrom(m) {
+    if (!m || !m.git || m.tracked || !R.getModel()) return;
+    const rows = m.rows || [];
+    const ids = R.getModel().deltaDecorations((S.track || []).map(t => t[1]), rows.map(r => ({ range: lineRange(r.b0, r.b1), options: { stickiness: 0 } })));
+    S.track = rows.map((r, i) => [r.id, ids[i]]);
+  }
+  function regionsNow() {
+    if (!S.track || !R.getModel()) return null;
+    const md = R.getModel(), n = md.getLineCount(), out = {};
+    for (const [id, dec] of S.track) {
+      const r = md.getDecorationRange(dec);
+      if (!r) return null;
+      const b0 = r.startLineNumber - 1 + (r.startColumn > 1 && r.startLineNumber === n && r.startColumn === md.getLineMaxColumn(n) ? 1 : 0);
+      const b1 = r.endColumn === 1 ? r.endLineNumber - 1 : r.endLineNumber;
+      out[id] = [b0, Math.max(b0, b1)];
+    }
+    return out;
+  }
+
   function middle(a, b) {
     if (a === b) return [-1, -1];
     let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
@@ -278,6 +329,29 @@
     if (b.length - q > p) fd.push({ range: new monaco.Range(f + 1, p + 1, f + 1, b.length - q + 1), options: { inlineClassName: 'w3f' } });
   }
   // identical lines folded away in all three - where they agree, between the places they differ
+  // C6: a row is never folded away - every conflict, every copy taken out, every position: the lines around it stay
+  function keepRowsOut(runs, m) {
+    const at = [];
+    for (const r of m.rows || []) { at.push(r.at); for (let l = r.b0; l < r.b1; l++) at.push(l); for (const g of r.ghosts || []) at.push(g.at); }
+    for (const d of m.dupRows || []) at.push(d.b0);
+    if (!at.length) return runs;
+    at.sort((x, y) => x - y);
+    const ctx = 3, out = [];
+    for (const run of runs) {
+      let b = run.b0;
+      for (const v of at) {
+        if (v + ctx < b || v - ctx >= run.b1) continue;
+        const e = Math.min(run.b1, Math.max(b, v - ctx));
+        if (e - b >= 4) out.push(slice(run, b, e));
+        b = Math.max(b, v + ctx + 1);
+        if (b >= run.b1) break;
+      }
+      if (run.b1 - b >= 4) out.push(slice(run, b, run.b1));
+    }
+    return out;
+    // a part of a run - every side moved alike, the run being the same lines on each
+    function slice(run, b0, b1) { const d0 = b0 - run.b0, d1 = b1 - run.b0, o = { a0: run.a0 + d0, a1: run.a0 + d1, b0, b1 }; if (run.f0 != null) { o.f0 = run.f0 + d0; o.f1 = run.f0 + d1; } return o; }
+  }
   function threeRuns(m) {
     const ctx = 3, out = [], segs = (m.segs || []).concat([{ l0: L.getModel().getLineCount(), r0: R.getModel().getLineCount(), f0: F.getModel().getLineCount(), end: true }]);
     let l = 0, r = 0, f = 0;
@@ -287,18 +361,24 @@
       if (s.end) break;
       l = s.l1; r = s.r1; f = s.f1;
     }
-    return out;
+    return keepRowsOut(out, m);
   }
   // what a conflict's row says: to resolve; resolved - its lines in the file; or, an empty version accepted, removed by
   // the feature or left out by you - lines not in the file, struck through in their colour
-  const tagOf = r => r.needs ? 'conflict' : r.outcome === 'removed' ? 'removedRes' : r.outcome === 'leftout' ? 'leftOut' : 'resolved';
+  const byChoice = (r, leave) => { const o = {}; for (const a of r.actions) if (a.choice !== leave) o[a.choice] = Object.assign([a.op], { review: r.id, choice: a.choice }); return o; };
+  const keepOp = d => d.kept ? d.swap : [{ b0: d.b0, b1: d.b0, insert: d.ghost.join(''), expect: [] }];
+  const dupKey = d => d.kept ? (d.swap ? 'dupKept' : 'dupGone') : 'dupRemoved';
+  const dupButton = (it, d) => { if (it && d.kept) it.buttons = d.swap ? it.buttons.map(b => [b[0], 'Keep ' + d.label + ' instead'].concat(b.slice(2))) : []; return it; };
+  const tagOf = r => r.positions && !r.needs && r.chosen === 'feature' ? 'positions' : r.needs ? 'conflict' : r.outcome === 'removed' ? 'removedRes' : r.outcome === 'leftout' ? 'leftOut' : 'resolved';
   const struckNode = (r, lines) => ghostNode(lines, r.outcome === 'leftout' ? 'leftout' : 'gone');
   // a conflict's row: the version accepted shown as chosen; nothing chosen yet, said
   function markChoice(it, r) {
     if (!it) return;
-    const pick = { target: 0, feature: 1, both: 2 }[r.chosen];
-    it.buttons.forEach((b, i) => { if (i === pick) b[3] = (b[3] || '') + ' on'; });
+    // the chosen one, by its action's name - a duplicate's buttons say Keep first, Keep second
+    it.buttons.forEach(b => { if (b[2] && b[2].choice === r.chosen) b[3] = (b[3] || '') + ' on'; });
   }
+  const SHOWN = 300;
+  const shownOf = lines => lines.length > SHOWN ? SHOWN + 1 : lines.length;
   function altNode(title, lines, removes) {
     const d = document.createElement('div');
     d.className = 'zone alt';
@@ -306,8 +386,10 @@
     const lh = R.getOption(monaco.editor.EditorOption.lineHeight);
     d.style.fontFamily = fontFamily(); d.style.fontSize = fontSize() + 'px'; d.style.lineHeight = lh + 'px'; d.style.setProperty('--lh', lh + 'px');
     d.className += title === 'Target' ? ' tgt' : title === 'Feature' ? ' fea' : '';
+    // the version's name alone - a version with no lines says it removes them, or its heading would stand over nothing
     d.innerHTML = '<div class="alt-t">\u25be <b>' + esc(title) + '</b>' + (removes ? ' \u00b7 removes these lines' : '') + '</div>' +
-      lines.map(l => '<div class="alt-l">' + (esc(l.replace(/\r?\n$/, '')) || '&nbsp;') + '</div>').join('');
+      lines.slice(0, SHOWN).map(l => '<div class="alt-l">' + (esc(l.replace(/\r?\n$/, '')) || '&nbsp;') + '</div>').join('') +
+      (lines.length > SHOWN ? '<div class="alt-l alt-more">\u2026 ' + (lines.length - SHOWN).toLocaleString() + ' more lines \u2013 two or three panels show them all</div>' : '');
     return d;
   }
   function ghostNode(lines, cls) {
@@ -341,7 +423,10 @@
     feature: ['feat', 'Added', [['\u21b6', 'Undo']]], own: ['own', 'Added by you', [['\u21b6', 'Undo']]],
     'changed-feature': ['feat', 'Changed', [['\u21b6', 'Use target']]], 'changed-own': ['own', 'Edited', [['\u21b6', 'Use target']]],
     removed: ['rem', 'Removed', [['\u21b6', 'Restore']]], notin: ['rem', 'Not in ' + side(), [['\u21b6', 'Restore']]],
-    dupRemoved: ['dupr', 'Duplicate removed', [['\u21b6', 'Put it back']]],
+    dupRemoved: ['dupr', 'Duplicate', [['\u21b6', 'Keep']]],
+    dupKept: ['dupr', 'Duplicate \u00b7 the copy granting more kept', [['\u21b6', 'Keep the other instead']]],
+    // the copy kept is no longer as it was - the entry's own conflict, or your edit: nothing to swap
+    dupGone: ['dupr', 'Duplicate \u00b7 the other copy taken out', []],
     // with the common ancestor: what the feature branch itself did
     byFeature: ['rem', 'Removed by the ' + side(), [['\u21b6', 'Restore']]],
     keptRemoved: ['keep', 'Kept \u00b7 removed by the ' + side(), [['\u2715', 'Remove']]],
@@ -351,10 +436,11 @@
     conf: ['conf', 'Conflict', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature']]],
     dup: ['dup', 'Duplicate', [['\u2715', 'Remove copy']]],
     // a promotion's code: a conflict git left - neither version in until one is accepted
-    conflict: ['conf', 'Conflict', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
-    resolved: ['res', 'Resolved', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
-    removedRes: ['rem', 'Removed', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
-    leftOut: ['lo', 'Left out', [['\u21b6', 'Accept target'], ['\u21c4', 'Accept feature'], ['\u2261', 'Accept both']]],
+    conflict: ['conf', 'Conflict', [['\u21b6', 'Accept target', 'target'], ['\u21c4', 'Accept feature', 'feature'], ['\u2261', 'Accept both', 'both']]],
+    resolved: ['res', 'Resolved', [['\u21b6', 'Accept target', 'target'], ['\u21c4', 'Accept feature', 'feature'], ['\u2261', 'Accept both', 'both']]],
+    positions: ['pos', 'Positions \u00b7 the feature\u2019s', [['\u21b6', 'Use target', 'target']]],
+    removedRes: ['rem', 'Removed', [['\u21b6', 'Accept target', 'target'], ['\u21c4', 'Accept feature', 'feature'], ['\u2261', 'Accept both', 'both']]],
+    leftOut: ['lo', 'Left out', [['\u21b6', 'Accept target', 'target'], ['\u21c4', 'Accept feature', 'feature'], ['\u2261', 'Accept both', 'both']]],
     // a comparison: what differs, said - nothing to move across
     plainDiff: ['mv', 'Differs', []],
     plainRight: ['mv', 'Only here', []],
@@ -362,7 +448,9 @@
     // a flow element only dragged in Flow Builder: shown, quietly - F7 passes it by
     position: ['pos', 'Moved on the canvas', [['\u21b6', 'Use target']]]
   })[k];
-  const rowNode = (cls, word) => zoneNode('head ' + cls, '<span class="dotk"></span><b>' + esc(word) + '</b>');
+  const rowNode = (cls, word) => { const n = zoneNode('head ' + cls, '<span class="dotk"></span><b>' + esc(word) + '</b>'); n.title = word; return n; };
+  // a row says what it is - Conflict, Resolved, Removed, Left out - and nothing more
+  const wordOf = tag => ROW(tag)[1];
 
   function draw(m) {
     S.marks = m;
@@ -377,7 +465,9 @@
     const rowsAt = new Map();
     const row = (key, after, leftAfter, undos, word) => {
       const [cls, w, btns] = ROW(key);
-      const buttons = btns.map((b, i) => [b[0], b[1], undos[i]]).filter(b => b[2]);
+      // actions given by name go to the button of that name - a missing one is no button, never another's
+      const named = undos && !Array.isArray(undos);
+      const buttons = btns.map((b, i) => [b[0], b[1], named ? (b[2] ? undos[b[2]] : null) : undos[i]]).filter(b => b[2]);
       // only a duplicate joins a row already there - one for lines on your side (added, edited, kept), never a removed block's
       const at = key === 'dup' && rowsAt.get(after);
       if (at) {
@@ -402,11 +492,14 @@
     // code, one pane: each row - its words, its buttons, the other version's or the old lines under it, its lines lit
     if (m.single) for (const r of m.rows) {
       const done = !r.needs;
-      const it = row(tagOf(r), r.at, r.at, r.actions.map(a => Object.assign([a.op], { review: r.id, choice: a.choice })), null);
+      const it = row(tagOf(r), r.at, r.at, byChoice(r), wordOf(tagOf(r)));
       markChoice(it, r);
-      for (const g of r.ghosts) g.cls === 'struck' ? zone('right', g.at, g.lines.length, struckNode(r, g.lines)) : zone('right', g.at, g.lines.length + 1, altNode(g.title, g.lines, g.removes));
+      for (const g of r.ghosts) g.cls === 'struck' ? zone('right', g.at, g.lines.length, struckNode(r, g.lines)) : zone('right', g.at, shownOf(g.lines) + 1, altNode(g.title, g.lines, g.removes));
       for (const [h0, h1] of r.hl) whole(rd, h0, h1, done ? 'res' : 'conf', done ? GREEN : YELLOW);
     }
+    if (m.single) for (const d of m.dupRows || []) { dupButton(row(dupKey(d), d.b0, d.b0, [keepOp(d)], null), d); zone('right', d.b0, d.ghost.length, ghostNode(d.ghost, 'dupr')); }
+    // two panels: the copy's lines on the left, greyed; the row level on both sides
+    if (!m.single && !m.three && m.git) for (const d of m.dupRows || []) { dupButton(row(dupKey(d), d.b0, d.t0, [keepOp(d)], null), d); whole(ld, d.t0, d.t1, 'dupl-l', null); }
     const conflictRows = !m.single && m.code && !m.plain && !m.three ? (m.rows || []) : [];
     // a line under a choice's row is the choice's - and a member left out is its row, not a removal as well
     const underConflict = p => conflictRows.some(r => (p.b0 < r.b1 && r.b0 < Math.max(p.b1, p.b0 + 1)) || (r.b0 === r.b1 && p.b1 === p.b0 && p.b0 === r.b0));
@@ -427,11 +520,9 @@
       const pieceOf = conflictPieces(r);
       const la0 = pieceOf ? pieceOf.a0 : leftOf(r.at), la1 = pieceOf ? pieceOf.a1 : leftOf(r.at), rb1 = pieceOf ? pieceOf.b1 : r.at;
       // the resolution's row: the feature and both - the target's button stands beside its lines, on the left
-      // each action in its own place - the row's buttons follow their order; the target's left empty here
-      const ops = ['target', 'feature', 'both'].map(c => { const a = r.actions.find(x => x.choice === c); return c === 'target' || !a ? null : Object.assign([a.op], { review: r.id, choice: c }); });
-      const it = row(tag, r.at, la0, ops, null);
+      const it = row(tag, r.at, la0, byChoice(r, 'target'), wordOf(tag));
+      markChoice(it, r);
       if (it) {
-        it.buttons = it.buttons.map((b, k) => { const c = ['feature', 'both'][k]; return r.chosen === c ? b.slice(0, 3).concat([(b[3] || '') + ' on']) : b; });
         const counterpart = items.left[items.left.length - 1], t = r.actions.find(a => a.choice === 'target');
         if (counterpart && t) counterpart.buttons = [['\u21b6', 'Accept target', Object.assign([t.op], { review: r.id, choice: 'target' }), 'arw' + (r.chosen === 'target' ? ' on' : '')]];
       }
@@ -440,7 +531,7 @@
       let rightH = 0;
       for (const g of shown) {
         if (g.cls === 'struck') { zone('right', g.at, g.lines.length, struckNode(r, g.lines)); rightH += g.lines.length; }
-        else { const node = altNode(g.title, g.lines, g.removes); zone('right', g.at, g.lines.length + 1, node); rightH += g.lines.length + 1; if (pieceOf) wordsBeside(pieceOf, g.lines, node, ld); }
+        else { const node = altNode(g.title, g.lines, g.removes); zone('right', g.at, shownOf(g.lines) + 1, node); rightH += shownOf(g.lines) + 1; if (pieceOf) wordsBeside(pieceOf, g.lines, node, ld); }
       }
       // the target's lines where they are, lit; the shorter side padded after its own
       whole(ld, la0, la1, 'tgt3');
@@ -580,6 +671,8 @@
         it.widget = node;
         ed.addOverlayWidget(w);
         S.widgets[sd].push(w);
+        // the row's words stop short of its buttons, however many and however wide they are
+        if (!it.click) it.node.style.setProperty('--btn-w', node.offsetWidth + 'px');
       });
     }
     S.deco.left = S.deco.left ? (S.deco.left.set(ld), S.deco.left) : L.createDecorationsCollection(ld);
@@ -590,6 +683,9 @@
     balance();
     // the expand icon sits where the line numbers are, in each pane
     for (const ed of [L, R]) { const li = ed.getLayoutInfo(); const st = ed.getContainerDomNode().style; st.setProperty('--fold-w', li.contentLeft + 'px'); st.setProperty('--fold-pr', Math.max(0, li.contentLeft - (li.lineNumbersLeft + li.lineNumbersWidth)) + 'px'); }
+    // a row's words fit the width you see - a row is as wide as the longest line, which may be far wider
+    // measured on the page: the editor's own layout figures can lag behind a switch between two and three panels
+    for (const ed of [L, R, F]) { const box = ed.getContainerDomNode(), li = ed.getLayoutInfo(); box.style.setProperty('--pane-w', Math.max(120, box.clientWidth - li.contentLeft - li.verticalScrollbarWidth) + 'px'); }
   }
 
   /**
@@ -626,7 +722,7 @@
         i = j;
       }
     }
-    return runs;
+    return keepRowsOut(runs, m);
   }
   // the cursor in a folded run - Ctrl+F, Ctrl+G, a click - opens it
   function openAt(side, line) {
@@ -679,7 +775,8 @@
       const count = model.getLineCount();
       for (const o of undo) {
         const now = lines.slice(o.b0, o.b1);
-        if (now.length !== o.expect.length || now.some((l, i) => l !== o.expect[i])) return note('Those lines have changed since they were marked - nothing was done.', true);
+        const changed = o.expect ? now.length !== o.expect.length || now.some((l, i) => l !== o.expect[i]) : now.length !== o.n || (o.n > 0 && (now[0] !== o.head || now[o.n - 1] !== o.tail));
+        if (changed) return note('Those lines have changed since they were marked - nothing was done.', true);
       }
       const at = b => b < count ? model.getOffsetAt({ lineNumber: b + 1, column: 1 }) : model.getValueLength();
       ops = undo.map(o => {
@@ -694,7 +791,7 @@
     R.pushUndoStop();
     R.focus();
     // only an empty version needs remembering - every other choice is in the text, so Ctrl+Z takes it back
-    if (undo && undo.review && undo.every(o => !o.insert)) { S.seq++; api.postMessage({ type: 'review', id: undo.review, choice: undo.choice, seq: S.seq, text: R.getValue() }); }
+    if (undo && undo.review && undo.every(o => !o.insert)) { S.seq++; api.postMessage({ type: 'review', regions: regionsNow(), id: undo.review, choice: undo.choice, seq: S.seq, text: R.getValue() }); }
   }
 
   // ---- next and previous change ----
@@ -847,7 +944,7 @@
     const edits = rows.map(r => r.actions.find(a => a.choice === choice)).filter(Boolean).map(a => a.op)
       .map(o => ({ range: monaco.Range.fromPositions(model.getPositionAt(lineAt(o.b0)), model.getPositionAt(lineAt(o.b1))), text: o.insert }));
     R.pushUndoStop(); model.pushEditOperations(R.getSelections(), edits, () => null); R.pushUndoStop(); R.focus();
-    for (const r of rows) { const a = r.actions.find(x => x.choice === choice); if (a && !a.op.insert) { S.seq++; api.postMessage({ type: 'review', id: r.id, choice, seq: S.seq, text: R.getValue() }); } }
+    for (const r of rows) { const a = r.actions.find(x => x.choice === choice); if (a && !a.op.insert) { S.seq++; api.postMessage({ type: 'review', regions: regionsNow(), id: r.id, choice, seq: S.seq, text: R.getValue() }); } }
   }
   function formatNow(side) { const ed = side === 'left' ? L : R; S.seq++; api.postMessage({ type: 'format', side: side || 'right', seq: S.seq, text: ed.getValue() }); }
   function dedupeNow(side) { const ed = side === 'left' ? L : R; S.seq++; api.postMessage({ type: 'dedupe', side: side || 'right', seq: S.seq, text: ed.getValue() }); }
@@ -896,7 +993,7 @@
   function save(close) {
     if (S.plain) return;
     if (S.applyOnly && !close) return note('Apply and close writes it into ' + S.file + ' \u2013 nothing is written before that.', true);
-    api.postMessage({ type: 'save', close: !!close, text: R.getValue() });
+    api.postMessage({ type: 'save', close: !!close, text: R.getValue(), regions: regionsNow() });
   }
   function note(text, warn) {
     if (!warn || !text) return;
@@ -966,7 +1063,7 @@
       S.hide = !!m.hideIdentical;
       S.saved = m.savedText != null ? m.savedText : null;
       S.applyOnly = !!m.applyOnly; S.file = m.file; S.manual = !!m.manual; S.dupRemoved = m.dupRemoved || null;
-      S.plain = !!m.plain; S.tidy = !!m.tidy; S.gitLabels = m.gitLabels || null;
+      S.plain = !!m.plain; S.tidy = !!m.tidy; S.gitLabels = m.gitLabels || null; S.unionKind = m.unionKind || null;
       if (S.plain) {
         // both sides yours: editable, formatted, de-duplicated, saved each as a file
         L.updateOptions({ readOnly: false, domReadOnly: false });
@@ -985,10 +1082,14 @@
       // JavaScript, HTML and CSS: Monaco's colours without its language services (they need a worker, and there is none here)
       const own = { javascript: 'vs/javascript-B_IYblwB', html: 'vs/html-BTio3wpy', css: 'vs/css-CaeNmE3S' }[S.language];
       const lang = own ? 'plaintext' : S.language;
+      // each conflict's two versions come once, here; every row after refers to them
+      S.versions = m.versions || null;
+      hydrate(m.marks);
       L.setModel(monaco.editor.createModel(m.marks.single ? m.text : m.marks.left, lang));
       R.setModel(monaco.editor.createModel(m.text, lang));
       if (own) colours(S.language, own);
       if (S.hide) { S.marks = m.marks; toFirstChange(); }
+      trackFrom(m.marks);
       draw(m.marks);
       dirty();
       R.focus();
@@ -998,11 +1099,15 @@
       if (m.conflicts) S.conflicts = m.conflicts;
       if (m.hold) return held(m.xmlError);
       S.held = false; S.xml = null;
-      // a comparison's other side is yours: never written over by the marks
-      if (!S.plain && L.getValue() !== m.marks.left) { const top = R.getScrollTop(); L.getModel().setValue(m.marks.left); L.setScrollTop(top); }
+      hydrate(m.marks);
+      // a comparison's other side is yours: never written over by the marks - and a side not sent is the one held
+      if (!S.plain && m.marks.left != null && L.getValue() !== m.marks.left) { const top = R.getScrollTop(); L.getModel().setValue(m.marks.left); L.setScrollTop(top); }
+      trackFrom(m.marks);
       draw(m.marks);
     } else if (m.type === 'formatted') { formatted(m);
     } else if (m.type === 'saved') {
+      // what was saved, shown: the conflicts left kept as the target's - one step Ctrl+Z undoes
+      if (m.ok && m.text != null && m.text !== R.getValue()) { const md = R.getModel(); R.pushUndoStop(); md.pushEditOperations([], [{ range: md.getFullModelRange(), text: m.text }], () => null); R.pushUndoStop(); S.track = null; S.seq++; api.postMessage({ type: 'text', seq: S.seq, text: R.getValue(), regions: null }); }
       if (m.ok) { S.saved = m.text; dirty(); }
       note(m.message, !m.ok || m.warn);
     } else if (m.type === 'pasted') pasted(m);
@@ -1021,7 +1126,7 @@
   function viewItems() {
     // code: one panel or two - remembered, it is the setting cmr.merge.codeView
     const view = S.marks && S.marks.single ? 'onePane' : S.marks && S.marks.three ? 'threePanes' : 'twoPanes';
-    const switchView = v => () => { if (v === view) return; S.seq++; api.postMessage({ type: 'codeView', view: v, seq: S.seq, text: R.getValue() }); };
+    const switchView = v => () => { if (v === view) return; S.seq++; api.postMessage({ type: 'codeView', view: v, seq: S.seq, text: R.getValue(), regions: regionsNow() }); };
     const layout = S.marks && S.marks.git ? [{ head: 'Layout' }, { label: 'One panel', radio: view === 'onePane', run: switchView('onePane') }, { label: 'Two panel', radio: view === 'twoPanes', run: switchView('twoPanes') }, { label: 'Three panel', radio: view === 'threePanes', run: switchView('threePanes') }, null] : [];
     // one start: Copado's conflict file - nothing to choose
     return layout
@@ -1035,7 +1140,9 @@
   }
   function moreItems() {
     // a promotion's code: every conflict at once - one step, Ctrl+Z undoes it
-    return (S.marks && S.marks.git && S.marks.rows.length ? [{ label: 'Accept all target', run: () => acceptAll('target') }, { label: 'Accept all feature', run: () => acceptAll('feature') }, null] : []).concat([{ label: 'Keyboard shortcuts', run: () => { $('help').hidden = false; } }])
+    // a permission set or profile that did not join: never the feature's for all - the target's access would go
+    return (S.marks && S.marks.git && S.marks.rows.length ? [{ label: 'Accept all target', run: () => acceptAll('target') }].concat(S.unionKind === 'fallback' ? [] : [{ label: 'Accept all feature', run: () => acceptAll('feature') }]).concat([null]) : [])
+      .concat([{ label: 'Save diagnostics\u2026', run: () => api.postMessage({ type: 'diagnostics', text: R.getValue() }) }]).concat([{ label: 'Keyboard shortcuts', run: () => { $('help').hidden = false; } }])
       .concat([{ label: 'Copy merge report', run: () => api.postMessage({ type: 'report' }) }, null, { label: 'Discard this merge\u2026', bad: true, run: () => api.postMessage({ type: 'discard' }) }]);
   }
   function closeMenus() { for (const id of ['viewMenu', 'moreMenu']) $(id).hidden = true; $('viewBtn').setAttribute('aria-expanded', 'false'); $('moreBtn').setAttribute('aria-expanded', 'false'); }

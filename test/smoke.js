@@ -1003,41 +1003,6 @@ function fakeCopadoOrg() {
   return api;
 }
 
-ok('Phase 0: inspecting a user story finds its commit file, conflicts, resolutions and logins - read-only', async () => {
-  const I = require('../src/copadoInspect');
-  assert.deepStrictEqual(I.parseStoryRef('US-0012345'), { kind: 'number', value: 12345, digits: '12345' });
-  assert.deepStrictEqual(I.parseStoryRef('12345').value, 12345);
-  assert.strictEqual(I.parseStoryRef('a0U000000000001AAA').kind, 'id');
-  for (const bad of ["US-1' OR Name LIKE '%", 'drop table', '', 'US-']) assert.strictEqual(I.parseStoryRef(bad), null, 'refused: ' + bad);
-
-  const api = fakeCopadoOrg();
-  const r = await I.inspect(I.parseStoryRef('US-0012345'), api, { localOrgs: [{ alias: 'qa', username: 'ME@example.com.qa' }] });
-  assert.strictEqual(r.story.name, 'US-0012345', 'US-0112345 also ends in 12345 but is a different story');
-  assert.strictEqual(r.story.environment, 'dev');
-  assert.ok(r.objects.step.missing, 'an object the org does not have is reported, not fatal');
-  assert.ok(r.notes.some(n => /copado__Main_Branch__c|Main_Branch__c/.test(n)), 'a rejected field is dropped and the query retried');
-  assert.ok(!api.queries.some(q => /(^|[\s,])copado__Base_Branch__c/.test(q)), 'a field the story object does not have is never asked for');
-  assert.ok(api.queries.some(q => /copado__Release__r\.copado__Base_Branch__c/.test(q)), 'a relationship path is tried, and dropped only if the org rejects it');
-  assert.ok(api.queries.every(q => /^SELECT /.test(q)), 'only SELECT queries - nothing is written');
-
-  const kinds = Object.fromEntries(r.files.map(f => [f.name, f.what && f.what.kind]));
-  assert.strictEqual(kinds['Copado_Commit_changes.json'], 'commit-json');
-  assert.strictEqual(kinds['force-app/main/default/layouts/Account-Main.layout-meta.xml'], 'conflict');
-  assert.strictEqual(kinds['notes.txt'], 'other');
-  assert.deepStrictEqual(r.credentials.map(c => [c.environment, c.localAlias]), [['dev', null], ['qa', 'qa']], 'logins matched by username, case-insensitively');
-  const text = r.findings.map(f => f[1]).join('\n');
-  assert.ok(/Commit file: found as an Attachment "Copado_Commit_changes\.json" on the User Story Commit/.test(text), text);
-  assert.ok(/Conflicted files: 1 with git conflict markers, on the Promotion/.test(text));
-  assert.ok(/Resolutions: 1 attachment named like "RESOLVED force-app/.test(text));
-  assert.ok(/Environment dev: no Salesforce CLI login/.test(text) && /Environment qa: logged in on this machine as qa/.test(text));
-
-  const md = I.report(r);
-  assert.ok(/^# Copado inspection: US-0012345/.test(md) && /\| P-0099 \| Merge Conflict \| dev \| qa \|/.test(md));
-  assert.ok(!md.includes('<a>2</a>') && !md.includes('Sales_PS'), 'file contents never reach the report - only what kind of file it is');
-  const { redact } = require('../src/redact');
-  assert.ok(!/me@example\.com/.test(redact(md, true)), 'usernames can be masked before sharing');
-});
-
 ok('Phase 0: queries and describes go through the Salesforce CLI intact', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra query '));
   const sf = fakeSf(dir);
@@ -1079,78 +1044,6 @@ ok('a CLI without "sf api request" is recognised once, however it words it, and 
     server.close();
     rmTree(dir);
   }
-});
-
-ok('Phase 0: keys and credentials are never opened; JSON is described by its shape; <hash>_commit is a selective file', async () => {
-  const I = require('../src/copadoInspect');
-  const sel = require('../src/selective');
-  const api = fakeCopadoOrg();
-  const downloaded = [];
-  const base = api.query;
-  const selName = ((t, n) => Buffer.from(t + ':' + n, 'utf8').toString('base64'))('RecordType', 'Account.Partner') + '_commit';
-  api.query = async q => {
-    if (/FROM Attachment WHERE ParentId IN \('a0G000000000001AAA'\)/.test(q)) return [
-      { Id: '00P0000000000K1AAA', Name: 'id_rsa', BodyLength: 2304, ParentId: 'a0G000000000001AAA' },
-      { Id: '00P0000000000K2AAA', Name: 'id_rsa.pub', BodyLength: 380, ParentId: 'a0G000000000001AAA' },
-      { Id: '00P0000000000K3AAA', Name: 'deploy.pem', BodyLength: 900, ParentId: 'a0G000000000001AAA' }];
-    if (/FROM Attachment WHERE ParentId IN \('a0P000000000001AAA'\)/.test(q)) return [{ Id: '00P0000000000J1AAA', Name: 'GitConflictsResolution.json', BodyLength: 300, ParentId: 'a0P000000000001AAA' }];
-    if (/FROM ContentDocumentLink WHERE LinkedEntityId IN \('a0U000000000001AAA'\)/.test(q)) return [{ LinkedEntityId: 'a0U000000000001AAA',
-      ContentDocument: { Title: selName, FileExtension: null, ContentSize: 60, LatestPublishedVersionId: '068000000000007AAA' } }];
-    return base(q);
-  };
-  const dl = api.download;
-  api.download = async (kind, id) => {
-    downloaded.push(id);
-    if (id === '00P0000000000J1AAA') return Buffer.from(JSON.stringify({ promotionId: 'x', files: [{ path: 'a', strategy: 'manual', secretValue: 'do-not-show' }] }));
-    if (id === '068000000000007AAA') return Buffer.from('<?xml version="1.0"?><RecordType xmlns="x"/>');
-    return dl(kind, id);
-  };
-  const r = await I.inspect(I.parseStoryRef('US-0012345'), api, {});
-  assert.ok(!downloaded.some(id => /^00P0000000000K/.test(id)), 'id_rsa, id_rsa.pub and deploy.pem were never downloaded');
-  const by = n => r.files.find(f => f.name === n);
-  assert.strictEqual(by('id_rsa').what.kind, 'sensitive');
-  assert.strictEqual(by('GitConflictsResolution.json').what.label, 'JSON - object {promotionId, files: array of 1 objects {path, strategy, secretValue}}', 'key names only');
-  assert.ok(!JSON.stringify(r.files).includes('do-not-show'), 'values never reach the report');
-  assert.strictEqual(by(selName).selective, 'RecordType Account.Partner');
-  const text = r.findings.map(x => x[1]).join('\n');
-  assert.ok(/Selective-commit files: 1 on the User Story/.test(text));
-  assert.ok(/3 attachments on the Git Repository look like keys or credentials/.test(text), text);
-});
-
-ok('Phase 1: a story brings its commit file, its selective files and where it goes next', async () => {
-  const I = require('../src/copadoInspect');
-  const sel = require('../src/selective');
-  const api = fakeCopadoOrg();
-  const base = { describe: api.describe, query: api.query, download: api.download };
-  const selName = ((t, n) => Buffer.from(t + ':' + n, 'utf8').toString('base64'))('Layout', 'Account-Main') + '_commit';
-  api.describe = async o => o === 'copado__Deployment_Flow_Step__c'
-    ? ['Id', 'copado__Branch__c', 'copado__Source_Environment__c', 'copado__Destination_Environment__c'].map(n => ({ name: n, relationshipName: n.endsWith('Environment__c') ? n.replace('__c', '__r') : null }))
-    : base.describe(o);
-  const asked = [];
-  api.query = async q => {
-    asked.push(q);
-    if (/FROM copado__Deployment_Flow_Step__c /.test(q)) return [
-      { copado__Branch__c: 'dev', copado__Source_Environment__c: 'a0E00000000DEV1AAA', copado__Source_Environment__r: { Name: 'dev' }, copado__Destination_Environment__c: 'a0E0000000000QAAAA', copado__Destination_Environment__r: { Name: 'qa' } },
-      { copado__Branch__c: 'qa', copado__Source_Environment__c: 'a0E0000000000QAAAA', copado__Destination_Environment__c: 'a0E00000000UATAAA', copado__Destination_Environment__r: { Name: 'uat' } }];
-    if (/FROM copado__Org__c /.test(q)) return [{ Name: 'qa credential', copado__Username__c: 'me@example.com.qa', copado__Environment__c: 'a0E0000000000QAAAA', copado__Environment__r: { Name: 'qa' } }];
-    if (/FROM Attachment WHERE ParentId IN \('a0U000000000001AAA'\)/.test(q)) return [];
-    if (/FROM ContentDocumentLink WHERE LinkedEntityId IN \('a0U000000000001AAA'\)/.test(q)) return [
-      { LinkedEntityId: 'a0U000000000001AAA', ContentDocument: { Title: 'Copado Commit changes', FileExtension: 'json', ContentSize: 200, LatestPublishedVersionId: '068000000000010AAA' } },
-      { LinkedEntityId: 'a0U000000000001AAA', ContentDocument: { Title: selName, FileExtension: null, ContentSize: 60, LatestPublishedVersionId: '068000000000011AAA' } }];
-    return base.query(q);
-  };
-  api.download = async (kind, id) => id === '068000000000010AAA' ? Buffer.from(JSON.stringify([{ t: 'Layout', n: 'Account-Main', a: 'SelectiveCommit' }, { t: 'Flow', n: 'Lead_Flow', a: 'Add' }]))
-    : id === '068000000000011AAA' ? Buffer.from('<?xml version="1.0"?>\n<Layout xmlns="x">committed</Layout>\n') : base.download(kind, id);
-
-  const r = await I.inspect(I.parseStoryRef('US-0012345'), api, { keepContent: true, only: ['User Story'], localOrgs: [{ alias: 'qa', username: 'me@example.com.qa' }] });
-  assert.deepStrictEqual(r.story.next, { id: 'a0E0000000000QAAAA', name: 'qa', branch: 'dev' }, 'the pipeline step that leaves the story\u2019s environment');
-  assert.ok(!asked.some(q => /FROM Attachment WHERE ParentId IN \('a0P/.test(q)), 'only the story\u2019s own files are looked at');
-  const commit = r.files.find(f => f.what && f.what.kind === 'commit-json');
-  assert.ok(commit && JSON.parse(commit.content.toString('utf8')).length === 2, 'the commit file\u2019s content is kept for preparing');
-  const sf = r.files.find(f => f.what && f.what.kind === 'selective');
-  assert.ok(sf && sf.content.toString('utf8').includes('committed') && sf.selective === 'Layout Account-Main');
-  assert.ok(sel.decodeFileName(sf.name), 'and the drop folder recognises it by the same name');
-  assert.deepStrictEqual(r.credentials.map(c => [c.environment, c.environmentId, c.localAlias]), [['qa', 'a0E0000000000QAAAA', 'qa']]);
 });
 
 ok('Phase 2a: a conflicted file splits into its two sides, the common ancestor too, and Copado\u2019s names are read', () => {
@@ -1216,23 +1109,6 @@ ok('Phase 2a: conflicts are found for a story or a promotion, newest per file, p
   assert.strictEqual(byPromotion.promotions[0].conflicts.length, 2);
   assert.ok(asked.every(q => /^SELECT /.test(q)), 'read-only');
   await assert.rejects(P.promotionConflicts(api, "x' OR Name != '"), /Give a promotion/);
-});
-
-ok('Phase 0: the resolution manifest is opened first, files name their record, conflicts show their sides', async () => {
-  const I = require('../src/copadoInspect');
-  const api = fakeCopadoOrg();
-  const q0 = api.query, d0 = api.download;
-  api.query = async q => /FROM Attachment WHERE ParentId IN \('a0P000000000001AAA'\)/.test(q)
-    ? (await q0(q)).concat([{ Id: '00P0000000000M1AAA', Name: 'GitConflictsResolution.json', BodyLength: 80, ParentId: 'a0P000000000001AAA' }]) : q0(q);
-  api.download = async (k, id) => id === '00P0000000000M1AAA' ? Buffer.from('[{"path":"a","resolution":"manual"}]') : d0(k, id);
-  const one = await I.inspect(I.parseStoryRef('US-0012345'), api, { peekLimit: 1 });
-  const manifest = one.files.find(f => f.name === 'GitConflictsResolution.json');
-  assert.strictEqual(manifest.what.label, 'JSON - array of 1 objects {path, resolution}', 'opened even with room for one file');
-  assert.strictEqual(manifest.record, 'P-0099', 'the promotion it belongs to');
-  const all = await I.inspect(I.parseStoryRef('US-0012345'), api, {});
-  const c = all.files.find(f => f.what && f.what.kind === 'conflict');
-  assert.ok(/sides "HEAD" and "feature\/US-0012345"/.test(c.what.label), c.what.label);
-  assert.ok(/\| Promotion \| P-0099 \| Attachment \| GitConflictsResolution\.json \|/.test(I.report(all)));
 });
 
 /** A Copado org that keeps state: attachments with name, body and time, and a promotion's status. */
@@ -1363,6 +1239,26 @@ function promoOrg() {
   api.att.A2.Body = Buffer.from('class A {\n<<<<<<< HEAD\n  same();\n=======\n  same();\n>>>>>>> f\n<<<<<<< HEAD\n  qa();\n=======\n  feature();\n>>>>>>> f\n}\n');
   return api;
 }
+
+ok('D7 - refresh works out again what you have not touched when the rules have changed; what you resolved stays as it is', async () => {
+  const W = require('../src/promotionWork');
+  const api = promoOrg();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra d7 '));
+  try {
+    const s = W.store(dir);
+    const promotion = { id: 'P1', name: 'P10001', from: 'dev', to: 'qa' };
+    await W.sync(api, s, promotion, { copadoOrg: 'copado' });
+    const st = s.load(), ps = 'force-app/main/default/permissionsets/Sales.permissionset-meta.xml', cls = 'force-app/main/default/classes/A.cls';
+    assert.strictEqual(st.files[ps].rules, W.RULES, 'each result says which rules worked it out');
+    // the permission set: by older rules, untouched; the class: by older rules, but resolved by you
+    st.files[ps].rules = W.RULES - 1;
+    st.files[cls].rules = W.RULES - 1; st.files[cls].state = 'resolved';
+    s.save(st);
+    const again = await W.sync(api, s, promotion, {});
+    assert.strictEqual(again.fetched, 1, 'only the untouched one worked out again');
+    assert.deepStrictEqual([again.state.files[ps].rules, again.state.files[cls].state, again.state.files[cls].rules], [W.RULES, 'resolved', W.RULES - 1]);
+  } finally { rmTree(dir); }
+});
 
 ok('promotion workspace: everything fetched at once, sorted into resolved automatically, to review, and code', async () => {
   const W = require('../src/promotionWork');
@@ -1709,6 +1605,16 @@ ok('the Promotions tab, end to end: open, sorted groups, accept, save a code fil
   assert.deepStrictEqual([snap0.current.promotion.name, snap0.current.promotion.status], ['P10001', 'Merge Conflict']);
   // both permission sets: the target with the feature added - ready; the code file is yours
   assert.deepStrictEqual(await groups(), ['Code to resolve (1)', 'Ready to upload (2)']);
+  // D6: whatever was stored, Reset works it out again from Copado's file by the current rules
+  {
+    const W = require('../src/promotionWork'), rel = 'force-app/main/default/permissionsets/Sales.permissionset-meta.xml';
+    const store = W.store(ui.openDirs()[0]);
+    store.write('merged', rel, 'stored by older rules');
+    const want = await W.autoResolve(rel, store.read('conflicted', rel), true);   // this test has resolving automatically on
+    await ui.act('reset', { rel });
+    const after = (await ui.snapshot()).current.state.files[rel];
+    assert.deepStrictEqual([after.state, after.rules, store.read('resolved', rel) === want.merged], [want.state, W.RULES, true], 'Reset: today\u2019s rules, not what was stored');
+  }
   assert.ok(info.some(m => /2 resolved automatically, 1 code file to resolve/.test(m)), info.join(' | '));
   assert.ok(logs.some(l => /3 files fetched in/.test(l)));
 
@@ -1744,13 +1650,6 @@ ok('the Promotions tab, end to end: open, sorted groups, accept, save a code fil
   assert.ok(!fs.existsSync(path.join(root, 'force-app')), 'the project is never touched');
   assert.ok(ui.promotionRef('https://x.lightning.force.com/lightning/r/copado__Promotion__c/a0P5e000001AbCdEAF/view') === 'a0P5e000001AbCdEAF');
   rmTree(root);
-});
-
-ok('Phase 0: a missing story or a non-Copado org is explained, not crashed on', async () => {
-  const I = require('../src/copadoInspect');
-  const api = fakeCopadoOrg();
-  await assert.rejects(I.inspect(I.parseStoryRef('US-0099999'), Object.assign({}, api, { query: async q => /copado__User_Story__c /.test(q) ? [] : api.query(q) })), /No user story number 99999/);
-  await assert.rejects(I.inspect(I.parseStoryRef('US-1'), { describe: async () => null, query: async () => [], download: async () => Buffer.alloc(0) }), /has no Copado user stories/);
 });
 
 ok('a component\'s file is located in a source-format project', () => {
