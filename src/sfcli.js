@@ -508,14 +508,7 @@ async function restGet(sfPath, org, restPath, cwd) {
     apiCommand = false;
   }
   for (let attempt = 0; attempt < 2; attempt++) {
-    let login = logins.get(org);
-    if (!login) {
-      const shown = await run(sfPath, ['org', 'display', '--target-org', org], { cwd });
-      const r = shown.json && shown.json.result;
-      if (!r || !r.accessToken || !r.instanceUrl) throw new Error((shown.json && shown.json.message) || 'Could not read the login for ' + org + ' from the Salesforce CLI.');
-      login = { token: r.accessToken, url: r.instanceUrl.replace(/\/+$/, '') };
-      logins.set(org, login);
-    }
+    const login = await loginFor(sfPath, org, cwd, attempt > 0);
     try { return await httpGet(login.url + restPath, login.token); } catch (e) {
       // an expired session: ask the CLI again (it refreshes the login), once
       if (/^HTTP 401/.test(e.message) && attempt === 0) { logins.delete(org); continue; }
@@ -533,17 +526,31 @@ async function openPath(sfPath, org, p, cwd) {
 /** Forget what was learned about the CLI and logins (tests, or after changing orgs). */
 function resetRest() { apiCommand = null; logins.clear(); }
 
-/** The CLI's session for an org, cached; fresh = ask the CLI again (it refreshes the login). */
+// what the CLI shows in place of a secret since May 2026 - never a token to send
+const REDACTED = /^\s*\[REDACTED\]/i;
+const usable = v => typeof v === 'string' && v.trim() && !REDACTED.test(v) && !/\s/.test(v.trim()) ? v.trim() : null;
+
+/**
+ * The CLI's session for an org, cached; fresh = ask the CLI again (it refreshes the login). The org's address from
+ * sf org display; its token from there on a CLI that still shows it - otherwise, since the CLI hides it there (May
+ * 2026), from sf org auth show-access-token. A redacted placeholder is never sent as a token.
+ */
 async function loginFor(sfPath, org, cwd, fresh) {
   if (fresh) logins.delete(org);
   let login = logins.get(org);
-  if (!login) {
-    const shown = await run(sfPath, ['org', 'display', '--target-org', org], { cwd });
-    const r = shown.json && shown.json.result;
-    if (!r || !r.accessToken || !r.instanceUrl) throw new Error((shown.json && shown.json.message) || 'Could not read the login for ' + org + ' from the Salesforce CLI.');
-    login = { token: r.accessToken, url: r.instanceUrl.replace(/\/+$/, '') };
-    logins.set(org, login);
+  if (login) return login;
+  const shown = await run(sfPath, ['org', 'display', '--target-org', org], { cwd });
+  const r = shown.json && shown.json.result;
+  if (!r || !r.instanceUrl) throw new Error((shown.json && shown.json.message) || 'Could not read the login for ' + org + ' from the Salesforce CLI.');
+  let token = usable(r.accessToken);
+  if (!token) {
+    const t = await run(sfPath, ['org', 'auth', 'show-access-token', '--target-org', org], { cwd });
+    token = usable(t.json && t.json.result && t.json.result.accessToken);
+    if (!token && t.json && t.json.message && !isMissingCommand(String(t.json.message))) throw new Error('The Salesforce CLI did not give a session for ' + org + ': ' + t.json.message);
   }
+  if (!token) throw new Error('The Salesforce CLI did not give a session for ' + org + ' \u2013 log in again (sf org login web --alias ' + org + '), or update the CLI.');
+  login = { token, url: r.instanceUrl.replace(/\/+$/, '') };
+  logins.set(org, login);
   return login;
 }
 

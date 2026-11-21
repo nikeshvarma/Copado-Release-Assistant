@@ -1,5 +1,104 @@
 # Changelog
 
+## 5.1.2
+
+- **A row shows its label only**: *Conflict*, *Resolved*, *Removed*, *Left out*. There is no location, explanation or member name after it, including on hover. In three panels, each branch's row shows only its arrow button, and in one and two panels each version's heading is only *Target* or *Feature*. A version with no lines still says *removes these lines*, because otherwise the heading would sit over nothing. The Release Assistant page still lists what each conflict is about.
+
+## 5.1.1
+
+Conflicts read the way the file is built, and the buttons never cover what a row says.
+
+- **C11: a field added before another is shown as new fields, whole.** Git lines up text, and every layout item starts with the same two lines, so Copado's file often has a block that opens inside the existing item: the new field's lines, its close, then the next item's open. It made a valid file but looked as if fields were being put inside `mkto_si__Mkto_Lead_Score__c`. Such a block is now slid to whole elements: the two new `<layoutItems>` before the existing one, which is left untouched. The same happens for flows, picklists and pages, and for code, where a method added after another no longer starts at the brace before it. Each side of the file stays exactly as it was; only blocks that one side added to or removed from are moved, and only to a place where they are whole.
+- **Rows say where, the buttons stay clear.** A metadata row now names only the place and what the block holds, for example *Section Marketo › fields NWL_Person_Source__c, NWL_Person_Status__c*. Hover over it for the full explanation; the version under it and each side's row still say what that version does. The words always stop before the row's buttons, whatever their number or width, in one, two and three panels. Before, the editor's own zone styling undid the row's layout and long words ran under *Accept feature*.
+
+## 5.1.0
+
+Each conflict now says where it is, what each story did and which choice keeps what. This was tested against real layouts, flows, Lightning pages, picklists, labels, permission sets and code from a Salesforce org.
+
+- **C9: the row names the element the conflict is in.** Git's block usually holds only the line that differs, so the element it belongs to is now read from the lines around it. *behavior Required → Readonly* becomes *Section Case Information › field Dispute_Amount__c: Behavior Required → Readonly*. A Lightning page property reads *Component force_highlightsPanel › property hideChatterActions: true → false*. A flow rule reads *Decision Check_Stage › rule Closed_Won: …*. Values use Setup's words (*Formula*, *Error message*, *Data type*). Entities such as `&amp;` and `&quot;` are decoded. A long value, such as a description, is cut to where the two versions start to differ, so it no longer appears twice in full.
+- **Each side says what its version sets.** In three panels, the promotion branch's row and the feature branch's row each show their own value next to the arrow, for example *Behavior Required* and *Behavior Readonly*. In one and two panels, the same words follow *Target* and *Feature* above each version. The full explanation no longer has to fit in the narrow middle row.
+- **B3.6: two stories adding different entries at the same place.** Two new picklist values, flow formulas or global value set values used to look like one value renamed (*On Hold: label On Hold → Escalated*). The row now says *Both stories add here – the target adds value On Hold, the feature adds value Escalated. Accept both keeps the two*. **Accept both** is offered for that conflict only, and it puts both entries in whole and valid. Every other metadata conflict is still target or feature (B3.1).
+- **B2.10: a label or translation that both branches changed differently is now a choice.** It used to take the feature's value without asking, and the target's change was lost. It is now a conflict to choose, and the file's note says *1 label or translation with a different value in the target and the feature – choose one*. When Copado's file includes the common ancestor, a value that only one story changed is joined as before.
+- **C10: a code conflict's row names what it is about**: *Conflict · method total(Decimal)*, *methods isReady(), count()*, *constant OPTIONS* in a Lightning web component module, *&lt;lightning-input&gt; label* in markup. A `return` line or an assignment is no longer taken for a property, and a module's constants are no longer called "the class header".
+- A long explanation in the middle panel takes two lines and stays within the width you can see, clear of its **Accept both** button. It used to run off the panel's right edge when the file had long lines. Hover over a row to see all of its words.
+- Results worked out by 5.0's rules are worked out again on **Refresh** if you have not touched them (D7). Files you resolved are never changed.
+
+## 5.0.0
+
+Upload knowing what goes up, and fix what is missing in one go.
+
+- **Before you upload (D11)**: the upload dialog now opens with a checklist: files still to resolve, files changed since the last pre-check, a pre-check that failed or never ran, access the target had that a resolution takes away, duplicates, and components the pre-check borrowed that no story has committed. Each item says what to do about it. A section called *What goes up* lists every file that will be uploaded.
+- **To commit to a story (D12)**: everything the pre-check had to borrow, plus what it found missing and could not borrow, is listed in one place. **Open as package.xml** writes `recommit/package.xml` in the promotion's folder, and **Copy the list** copies it, so the missing items can be committed to a story at once.
+- **Save review to share (D13)**: `⋯ › Save review to share…` writes a Markdown report to `.copado/reports`. It covers each file with its choices and status, the pre-check's errors grouped by cause, and the list of items to commit.
+- **C9: a conflict row says what the choice means.** In metadata, a conflict row reads like *Conflict · Account.Revenue__c: Edit access true → false – the feature removes access*, with the full text on hover. The file's panel shows the same explanations under *What you are choosing between*.
+- **A file in conflict for more than one story (D14)**: the file's panel shows *Also in conflict for …*. Only the newest conflict file is resolved, so check the other stories' changes are in it.
+- **Pre-check**: every story in the promotion is read, not only those with conflicts. Errors are grouped by cause: missing component, outdated component, or an error in the code itself. More missing items are recognised: picklist values, record types, `$Label` and LWC or Apex labels, custom permissions, custom metadata types and records, Aura components, Apex actions, and fields. A class that a story has in an older version than the code that calls it is flagged *older in …*. The page now says that a component on several story branches is taken from the first branch that has it. Borrowing uses the project's API version. The round count stops at 5 and offers the package.xml when the limit is reached.
+- **Fixed: an upload stopped partway lost track of what had gone up.** Each file is saved as uploaded as soon as it is uploaded (D15). A promotion status that cannot be changed is reported as a warning after the files are up.
+- **Fixed: Undo stopped at the first file it could not restore.** Every file is now tried. The page names the files still to undo, and Undo can run again for them.
+- **Fixed: promotions with more than 500 files** missed files and stories past the 500th.
+- **Fixed on Windows**: saving the promotion's state could fail with `EPERM` when another program held the file. The save now retries and then falls back to copying the file.
+
+## 4.0.2
+
+- **Fixed: a large permission set could freeze VS Code** - with *Hide identical lines* on, two panels built a fold for nearly every line of a 62,000-line file and never finished opening. The large-file comparison now gives one piece per unchanged stretch, not one per line.
+- **Faster on large files**: the target's side against your resolution is compared once per change, not twice; the sides, which never change during a merge, are prepared once; a copy taken out is found kept or not by what is at its place, not by counting through the file; a very large file waits a little longer after your last keystroke. On a 62,000-line permission set: two panels about 0.1 s per change instead of 0.35, three panels about 0.17 instead of 0.39.
+- **Fixed: a conflict could be folded away** with *Hide identical lines* - only showing once F7 opened its fold. **C6**: in every layout, the lines around every row - a conflict, a copy taken out, a position - are never folded.
+- **B2.12 changed: an entry the target has twice, different, is no longer a choice.** The copy granting more is kept - each access setting granted counts, a tie keeps the first - shown *Duplicate · the copy granting more kept*, with *Keep … instead* naming what the other sets (*Keep editable: false instead*). Where the copy kept is part of a conflict, the row says *the other copy taken out*, and the conflict holds the choice. No more *Keep first* / *Keep second*; a file whose only choices were these now has nothing to choose (B2.15).
+
+## 4.0.1
+
+- **Fixed: uploads failed with `HTTP 401 INVALID_AUTH_HEADER`** with the Salesforce CLI of May 2026 or later. That CLI hides the session token in `sf org display`, showing `[REDACTED] …` in its place - which was sent as the token. The token now comes from `sf org auth show-access-token`; a CLI from before the change still gives it the old way; a redacted placeholder is never sent - the extension says to log in again or update the CLI instead.
+- **B3.4 changed: duplicate entries no longer hold a file back.** It is uploaded as it is, with a warning first - in the upload dialog, which lists each such file and its duplicates, and on its row, *Duplicates*; Copado's deployment may reject some. Invalid XML, the wrong root type, deploy-breaking rule errors and a conflict unresolved still hold a file back.
+
+## 4.0.0
+
+Built to the rule book, `docs/RULES.md` - every rule numbered; each new or changed one has a test named after it.
+
+**Safety**
+- **A6 - a save never leaves a gap.** With conflicts left, Save offers *Keep the target's for N, and save* or *Go back*, nothing else - for every file with conflicts, metadata too, and for Ctrl+S as for Save & Close (before, metadata and Ctrl+S saved a gap without a word).
+- **A7 - a file with a conflict unresolved is never uploaded.** A conflict with nothing in its place though both its versions have lines blocks the upload; an empty version you chose does not.
+- **C5 - each conflict's lines tracked by the editor itself** as you type - a choice, an undo, lines added or edited around it: exact, never searched for by its neighbouring lines.
+
+**Permission sets, profiles, labels, translations (B2)**
+- **Global and standard value set translations** joined as the other translations are.
+- **B2.8 - a profile's security settings** - IP ranges, login hours, login flows, password and session settings - any change is yours to choose: all of a kind against all of it, target or feature.
+- **B2.11 - an entry the target has twice, the same:** the second taken out, shown *Duplicate*, with *Keep*. **B2.12 - twice and different:** which to keep is yours - *Keep first*, *Keep second*.
+- **B2.15 - a file with anything to choose is never resolved automatically.**
+
+**Every other metadata (B3)**
+- **B3.1 - target or feature, no Accept both** - two versions of one element are rarely valid.
+- **B3.2 - a flow's conflict that only moves the canvas** (`locationX`/`locationY`) is the feature's, shown *Positions · the feature's*, with *Use target*.
+
+**Files neither code nor XML (B4.1)** - static resources, images, JSON, text: listed under *Resolve in Copado*, never opened here, never uploaded from here.
+
+**The page (D)**
+- **D1 - the Stories tab is removed,** with *Inspect User Story*, *Prepare User Story* and *Validate User Story from Its Feature Branch*, and the code only they used. **D2** - the box takes a promotion's number or its Copado link; a story's number is said to be one.
+- **D3** - a breadcrumb, *Promotions › P0042*, under the tabs - no arrow among them; the page's **⋯**: Settings, Save diagnostics, Clean working files. **D4** - files grouped *To resolve*, *Ready to upload*, *Uploaded*, *Resolve in Copado*, each with a status pill. **D5** - one primary action, *Resolve in editor*, with what it will do beside it; the rest under its **⋯**.
+- **D6 - Reset works the file out again from Copado's file by the current rules. D7 - Refresh does too** for files you have not touched, when the rules have changed; what you resolved, uploaded or are revising is never worked out again.
+
+**Docs** - the rule book as `docs/RULES.md`; *How resolution works*, the README and every picture drawn again for 4.0.
+
+## 3.22.0
+
+- **Fixed: a permission set or profile git cut through an entry could lose the target's access.** Its blocks became plain conflicts, whose target side could be most of the file - and *Accept feature* would have removed every permission in it. Now the two sides are rebuilt from Copado's file and **joined entry by entry, whatever git's blocks**: the target's entries kept, the feature's added after their kind or applied, an entry both have once. Checked on a 62,000-line permission set: no target entry lost, no feature entry missing, no duplicate made.
+- **A change that grants less is yours to choose**: where the feature turns access off - `editable`, `readable`, `enabled`, `visible`, the `allow…` settings, `viewAllRecords`, `modifyAllRecords`, a tab's visibility; in a muting permission set, one turned on - that entry is a conflict, target or feature (never both - it would be there twice), and the promotion page never resolves it for you, whatever `cmr.promotion.autoResolve` says.
+- **Should a file's sides not join**, its conflicts never offer *Accept feature* or *Accept all feature* - the target's access is never one click from gone.
+- **Large files in little memory**: comparing two sides of tens of thousands of lines could run out of memory - the line comparison grew with the square of the larger side. It is anchored first now on the lines each side has once, as git's patience diff is, and compares only the stretches between; Manual and Compare too.
+
+## 3.21.1
+
+- Fixed: a large promotion file could stop loading - a permission set of 60,000 lines whose two conflicts set 13,000 and 18,000 of the target's lines against a few of the feature's. Every message to the editor carried each conflict's versions three times over - what each button inserts, what is shown under it, what it checks before acting - and both branches' sides again: 7 MB for every change, copied between VS Code's processes. Now the sides go in the first message only, each conflict's versions once in a table, and every update names its conflict and version: a few kilobytes per change, however large the file. What a choice checks before acting is its lines' count, first and last.
+- One panel shows a version of thousands of lines as its first 300 and how many more - two or three panels show it all; accepting it still takes it whole.
+
+## 3.21.0
+
+- **Speed**: a promotion's file is lined up from its conflicts instead of by comparing every line - outside them the three sides are git's merge, line for line, so only a stretch you edited is compared. On a 33,000-line permission set: two panels 51 ms instead of 431, three 39 ms instead of 185, on every change. It is also exactly the blocks as Copado made them - comparing every line could pair a repeated line (`<readable>true</readable>`) one place off.
+- **Conflict buttons take their action by name**, not by their place in a list: a missing action is no button, never another's.
+- **⋯ › Save diagnostics…**: what a merge is, with Copado's conflict file and your resolution anonymised alike - every name replaced, the shape kept - saved for you to review before sharing.
+- **A corpus of real-shaped cases**: `npm run corpus -- add <file>` anonymises a conflict file into `test/corpus/`; every release checks the engine against each one.
+- **CI fails on leftover files** - what earlier versions removed - naming them, with `npm run tidy` to remove them; the release does too.
+- **How resolution works** - one page on what is read, what is written, and the rules for each kind of file, with diagrams: `docs/RESOLUTION.md`, linked from the README. The packaged README's links to it go to GitHub, as its pictures do.
+
 ## 3.20.0
 
 - **Two panels show each version once**: the target's lines stay on the left, where they are, lit, with **Accept target** beside them; under the conflict only the feature's version, the words that differ lit on both sides - not the target's again in grey. Two rows shorter per conflict, the panes level.

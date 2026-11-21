@@ -15,29 +15,32 @@
   });
   const app = document.getElementById('app');
   const saved = vscode.getState() || {};
-  const NAVS = ['Promotions', 'Stories', 'Manual', 'Compare'];
+  const NAVS = ['Promotions', 'Manual', 'Compare'];
   const navs = () => NAVS;
   const ui = { nav: NAVS.includes(saved.nav) ? saved.nav : 'Promotions', href: '', sel: saved.sel || null, tab: saved.tab || 'Files', filter: '', modal: false, setStatus: true, busy: false,
-    ref: '', sref: saved.sref || '', asked: {}, earlier: false, setRecreate: true };
+    ref: '', asked: {}, earlier: false, setRecreate: true };
   let data = null;
 
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const base = p => String(p).split('/').pop();
   const act = (name, payload) => vscode.postMessage({ type: 'act', name, payload: payload || {} });
-  const lact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'life', name, payload: payload || {} });
   const mact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'manual', name, payload: payload || {} });
   const cact = (name, payload) => vscode.postMessage({ type: 'act', scope: 'compare', name, payload: payload || {} });
-  const keep = () => vscode.setState({ nav: ui.nav, sel: ui.sel, tab: ui.tab, sref: ui.sref });
+  const keep = () => vscode.setState({ nav: ui.nav, sel: ui.sel, tab: ui.tab });
   const ago = iso => { if (!iso) return ''; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
   const time = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   const day = iso => iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
   const kindOf = s => /conflict/i.test(s) && !/resolved/i.test(s) ? 'conflict' : /fail|error|cancel/i.test(s) ? 'bad' : /resolved/i.test(s) ? 'resolved' : /complet|success|done|deployed/i.test(s) ? 'done' : /progress|running|pending|queued|validat|scheduled/i.test(s) ? 'info' : 'neutral';
   const chip = (status, k) => { const s = String(status || ''); return s ? '<span class="chip ' + (k || kindOf(s)) + '">' + esc(s) + '</span>' : ''; };
   const plural = (n, w, ws) => n + ' ' + (n === 1 ? w : (ws || w + 's'));
-  // a story reference - nothing else is sent
-  const okRef = v => /^[\w .:\/-]{1,80}$/.test(v);
 
-  const GROUPS = [['review', 'To review', 'warn', ['review']], ['code', 'Code to resolve', 'code', ['code', 'error']], ['ready', 'Ready to upload', 'check', ['auto', 'resolved']], ['done', 'Done', 'done', ['uploaded', 'copado']]];
+  // D4: what is yours to resolve, what is ready, what is in Copado, and what is resolved there only
+  const GROUPS = [['review', 'To resolve', 'warn', ['review', 'code', 'error']], ['ready', 'Ready to upload', 'check', ['auto', 'resolved']], ['done', 'Uploaded', 'done', ['uploaded', 'copado']], ['copadoOnly', 'Resolve in Copado', 'ext', ['copadoOnly']]];
+  // each file's state in a word or two, on its row
+  const pillOf = e => e.state === 'copadoOnly' ? ['mute', 'Copado only'] : e.state === 'uploaded' ? ['ok', 'Uploaded'] : e.state === 'copado' ? ['ok', 'In Copado']
+    : e.state === 'auto' || e.state === 'resolved' ? ['ok', /the target kept/.test(e.note || '') ? 'Joined' : 'Resolved']
+    : /to choose/.test(e.note || '') && e.conflicts ? ['warn', e.conflicts + ' to choose'] : (e.conflicts || (e.state === 'code' && e.blocks)) ? ['warn', plural(e.conflicts || e.blocks, 'conflict')]
+    : e.suggestion ? ['info', 'Suggested'] : e.state === 'error' ? ['bad', 'Error'] : ['warn', 'To resolve'];
   const groupOf = state => (GROUPS.find(g => g[3].includes(state)) || GROUPS[0])[0];
 
   /* ------------------------------------------------------------ the bar on top */
@@ -47,10 +50,13 @@
     const nav = navs().map(n => '<button class="nav ' + (ui.nav === n ? 'on' : '') + '" data-nav="' + n + '"' + (n === 'Promotions' && ui.nav === n && p ? ' title="All promotions - open another"' : '') + '>' + esc(n) + '</button>').join('');
     // the tab's own title names the page: the bar starts with its tabs
     return '<div class="globalbar"><span class="navs">' + nav + '</span>' +
-      (ui.nav === 'Promotions' && p ? '<span class="crumb"><button class="crumbback" data-a="home" title="Back to all promotions - open another" aria-label="Back to all promotions">' + I.back + '</button><b>' + esc(p.name) + '</b></span>' : '') + '<span class="spacer"></span>' +
+      '<span class="spacer"></span>' +
       (ui.nav === 'Promotions' && cur ? '<span class="muted updated">' + I.clock + ' Updated ' + esc(ago(cur.state.syncedAt)) + '</span>' : '') +
       '<span class="org" title="The Copado org"><span class="dot' + (data.copadoOrg ? '' : ' off') + '"></span><span class="orglbl">Copado org: </span><b>' + esc(data.copadoOrg || 'not set') + '</b></span>' +
-      (ui.nav === 'Promotions' && cur ? '<button class="btn ghost small" data-a="refresh" title="Refresh from Copado">' + I.refresh + '<span class="lbl">Refresh</span></button><button class="btn ghost small" data-a="openInCopado" title="Open in Copado">' + I.ext + '<span class="lbl">Open in Copado</span></button>' : '') + '</div>';
+      (ui.nav === 'Promotions' && cur ? '<button class="btn ghost small" data-a="refresh" title="Refresh from Copado">' + I.refresh + '<span class="lbl">Refresh</span></button><button class="btn ghost small" data-a="openInCopado" title="Open in Copado">' + I.ext + '<span class="lbl">Open in Copado</span></button>' : '') +
+      '<span class="pmw"><button class="btn ghost small icon" data-a="pageMenu" title="More" aria-label="More" aria-haspopup="menu">\u22ef</button>' + (ui.pmenu ? '<div class="pmenu" role="menu">' +
+        '<button class="mi" data-a="openSettings" role="menuitem">Settings</button>' + (cur ? '<button class="mi" data-a="reviewReport" role="menuitem">Save review to share\u2026</button><button class="mi" data-a="pageDiagnostics" role="menuitem">Save diagnostics\u2026</button>' : '') +
+        '<div class="sep"></div><button class="mi" data-a="cleanStorage" role="menuitem">Clean working files\u2026</button></div>' : '') + '</span></div>';
   }
 
   function validationNote() {
@@ -83,15 +89,23 @@
       out += '<div class="card bwcard"><h3>' + I.copy + 'Borrowed from ' + esc(from) + ' \u2013 ' + plural(bw.items.length, 'component') + ', for this pre-check only</h3>' +
         '<div class="bwchips">' + bw.items.map(b => '<span class="chip info ichip">' + esc(b.name) + '<button class="bwx" data-a="unborrow" data-key="' + esc(bkey(b)) + '" title="Remove" aria-label="Remove ' + esc(b.name) + '">' + I.x + '</button></span>').join('') +
         '<span class="spacer"></span><button class="link" data-a="borrowPick">Add components\u2026</button><button class="link" data-a="unborrowAll">Clear all</button></div>' +
-        '<div class="muted small">Never deployed, never added to the story or the promotion. <b class="bwwarn">The promotion still needs them in ' + esc(to) + '</b> \u2013 commit them to the story, or promote the story that has them.' + (pc && pc.round > 1 ? ' Round ' + pc.round + ' of 5.' : '') + '</div>' +
+        '<div class="muted small">Never deployed, never added to the story or the promotion. <b class="bwwarn">The promotion still needs them in ' + esc(to) + '</b> \u2013 commit them to the story, or promote the story that has them.' + (pc && pc.round > 1 ? ' Round ' + Math.min(pc.round, 5) + ' of 5' + (pc.round >= 5 ? ' \u2013 the last one.' : '.') : '') + '</div>' +
         (pc && pc.gone && pc.state !== 'running' ? '<div class="bwgone">' + I.check + plural(pc.gone, 'error') + ' gone since the last round</div>' : '') + '</div>';
     }
     const miss = pc && pc.state !== 'running' && pc.result && !pc.result.success ? (pc.missing || []) : [];
+    // what to commit to a story: everything borrowed and everything still missing - in one go
+    const recommit = (cur.plan && cur.plan.checks && cur.plan.checks.recommit) || [];
+    if (recommit.length) {
+      out += '<div class="card bwrecommit"><h3>' + I.box + 'To commit to a story \u2013 ' + plural(recommit.length, 'component') + '</h3>' +
+        '<div class="muted small">The promotion deploys only what its stories committed. Commit these all at once, then refresh \u2013 so the next Copado validation does not stop on them one by one.</div>' +
+        '<div class="row"><button class="btn secondary" data-a="exportMissing">' + I.file + 'Open as package.xml</button><button class="btn ghost" data-a="copyMissing">' + I.copy + 'Copy the list</button></div></div>';
+    }
     if (miss.length) {
       const on = m => (ui.bsel || {})[bkey(m)] !== false, n = miss.filter(on).length;
       out += '<div class="card bwmiss"><h3>' + I.warn + 'Missing in ' + esc(to) + ' \u2013 ' + plural(miss.length, 'component') + '</h3>' +
         '<div class="muted small">Found in the errors. Add them from <b>' + esc(from) + '</b> to run the pre-check again and see what else fails \u2013 check-only, nothing deployed.</div>' +
         miss.map(m => '<label class="missrow"><input type="checkbox" data-bsel="' + esc(bkey(m)) + '"' + (on(m) ? ' checked' : '') + '><span class="chip">' + esc(TYPE_WORDS[m.type] || m.type) + '</span><span class="mono">' + esc(m.name) + '</span>' +
+          (m.outdated ? '<span class="chip warn" title="The target has it, but an older version">older in ' + esc(to) + '</span>' : '') +
           (m.needs && m.needs.length ? '<span class="muted small">\u00b7 used by ' + esc(m.needs.slice(0, 3).join(', ')) + (m.needs.length > 3 ? '\u2026' : '') + '</span>' : '') + '</label>').join('') +
         '<div class="row"><button class="btn primary" data-a="borrow"' + (n ? '' : ' disabled') + '>Add ' + n + ' to pre-check</button><button class="btn secondary" data-a="borrowPick">Add components\u2026</button><span class="spacer"></span><span class="muted small">from the source org, read-only</span></div></div>';
     } else if (pc && pc.result && !pc.result.success && !(bw && bw.items && bw.items.length)) {
@@ -137,14 +151,12 @@
       '<div class="pcgrid"><div><ol class="vtrack">' + steps.map(stepRow).join('') + '</ol>' +
         '<div class="sect">Files</div><div class="usedlist">' + pc.used.map(u => '<button class="usedrow" data-sel="' + esc(u.rel) + '" data-go="Files"><span class="okc">' + I.check + '</span><span class="grow"><b>' + esc(base(u.rel)) + '</b><small>' + esc(u.from) + '</small></span></button>').join('') +
         pc.leftOut.map(u => '<button class="usedrow off" data-sel="' + esc(u.rel) + '" data-go="Files"><span class="muted">' + I.dot + '</span><span class="grow"><b>' + esc(base(u.rel)) + '</b><small>left out \u2013 ' + esc(u.reason) + '</small></span></button>').join('') + '</div>' +
-        '<div class="muted small" style="margin-top:6px">Everything else in the promotion comes from ' + esc((pc.branches || []).join(', ') || 'the stories\u2019 branches') + '.</div></div>' +
+        '<div class="muted small" style="margin-top:6px">Everything else in the promotion comes from ' + esc((pc.branches || []).join(', ') || 'the stories\u2019 branches') + '.' +
+          ((pc.branches || []).length > 1 ? ' A component on more than one of them is taken from the first that has it \u2013 when two stories change the same component, validate the promotion branch once its conflicts are uploaded.' : '') + '</div></div>' +
       '<div>' + borrowCards(cur, pc) + (r ? (r.success ? '<div class="pcok">' + I.check + '<span>No errors' + (pc.target && pc.target.tests ? ', all tests passed' : '') + '.</span></div>'
         : '<div class="sect">' + (r.cliError ? 'Salesforce could not validate' : plural(problems, 'error')) + '</div>' +
           (r.cliError ? '<div class="card bad"><div>' + esc(r.cliError) + '</div></div>' : '') +
-          '<div class="errs">' + r.failures.map(f => '<div class="err"><div class="errh"><b>' + esc(f.type + ' ' + f.fullName) + '</b>' + (f.line ? ' <span class="muted">line ' + f.line + '</span>' : '') + '<span class="spacer"></span>' +
-            (f.resolution ? '<button class="btn small primary" data-sel="' + esc(f.resolution) + '" data-go="Files">' + I.code + 'Open file</button>' : '') + '</div><div>' + esc(f.problem) + '</div>' +
-            (f.resolution ? '<div class="muted small">Your resolution: ' + esc(base(f.resolution)) + '</div>' : f.file ? '<div class="muted mono">' + esc(f.file) + ' \u2013 from the branch</div>' : '') +
-            (f.fixes && f.fixes.length ? '<div class="fixes">' + f.fixes.map(x => '<span class="chip resolved">' + I.sparkles + esc(x) + '</span>').join('') + '</div>' : '') + '</div>').join('') +
+          '<div class="errs">' + causesView(cur, r.failures) + r.failures.filter(f => !f.cause).map(errRow).join('') +
           r.tests.map(t => '<div class="err"><div class="errh"><b>' + esc(t.name + (t.method ? '.' + t.method : '')) + '</b><span class="muted">test failed</span></div><div>' + esc(t.message) + '</div></div>').join('') +
           (r.coverage || []).map(x => '<div class="err"><div class="errh"><b>' + esc(x.name) + '</b><span class="muted">coverage ' + x.percent + '%' + (r.coverageRule != null ? ', the stage asks for ' + r.coverageRule + '%' : '') + '</span></div></div>').join('') + '</div>')
         : pc.state === 'running' ? '<div class="pcwait">' + I.clock + '<span>' + esc(pc.phase || 'Getting started') + '\u2026</span></div>' : '') +
@@ -153,7 +165,27 @@
 
   /* ------------------------------------------------------------ promotions: start */
 
+  // one pre-check error: what failed, where, and the file to open
+  const errRow = f => '<div class="err"><div class="errh"><b>' + esc(f.type + ' ' + f.fullName) + '</b>' + (f.line ? ' <span class="muted">line ' + f.line + '</span>' : '') + '<span class="spacer"></span>' +
+    (f.resolution ? '<button class="btn small primary" data-sel="' + esc(f.resolution) + '" data-go="Files">' + I.code + 'Open file</button>' : '') + '</div><div>' + esc(f.problem) + '</div>' +
+    (f.resolution ? '<div class="muted small">Your resolution: ' + esc(base(f.resolution)) + '</div>' : f.file ? '<div class="muted mono">' + esc(f.file) + ' \u2013 from the branch</div>' : '') +
+    (f.fixes && f.fixes.length ? '<div class="fixes">' + f.fixes.map(x => '<span class="chip resolved">' + I.sparkles + esc(x) + '</span>').join('') + '</div>' : '') + '</div>';
 
+  /** The errors one missing component causes, together: the cause once, what it breaks, and what to do about it. */
+  function causesView(cur, failures) {
+    const groups = [];
+    for (const f of failures) {
+      if (!f.cause) continue;
+      const k = f.cause.type + ':' + f.cause.name.toLowerCase();
+      const g = groups.find(x => x.k === k);
+      if (g) g.list.push(f); else groups.push({ k, cause: f.cause, list: [f] });
+    }
+    const to = cur.promotion.to || 'the target';
+    return groups.sort((a, b) => b.list.length - a.list.length).map(g => '<div class="err cause"><div class="errh">' + I.warn + '<b>' + esc((TYPE_WORDS[g.cause.type] || g.cause.type) + ' ' + g.cause.name) + '</b><span class="muted">' +
+      (g.cause.outdated ? ' is older in ' : ' is missing in ') + esc(to) + ' \u2013 ' + plural(g.list.length, 'error') + '</span></div>' +
+      '<div class="muted small">' + (g.cause.outdated ? 'The target has an older version. Commit the newer one to a story in this promotion, or promote the story that changed it.' : 'Commit it to a story in this promotion, or promote the story that has it. To see what else fails first, add it to the pre-check below.') + '</div>' +
+      '<details><summary>' + esc(g.list.map(f => f.fullName).filter((x, i, a) => a.indexOf(x) === i).slice(0, 4).join(', ')) + (g.list.length > 4 ? '\u2026' : '') + '</summary>' + g.list.map(errRow).join('') + '</details></div>').join('');
+  }
 
   /* ------------------------------------------------------------ promotions: the open one */
 
@@ -189,7 +221,7 @@
         ['Deploy in Copado', j ? (j.running ? 'running' : j.failed ? 'failed' : j.finished ? 'finished' : 'not started') : 'follow it here', s3], ['Completed', completed ? status : 'when Copado finishes', completed ? 'done' : '']];
       stagesHtml = stages.map(([t, s, k], i) => step(t, s, k, i)).join('');
     }
-    return '<div class="head"><div class="head-row"><h1>' + esc(st.name) + '</h1>' + chip(cur.promotion.status || st.status) + (info.back ? '<span class="chip info" title="Copado back-promotion: changes from ' + esc(st.from || '') + ' go back down the pipeline">' + I.back + 'Back-promotion</span>' : '') +
+    return '<div class="head"><div class="crumbs"><button class="link" data-a="home">Promotions</button><span class="sepc">\u203a</span><b>' + esc(st.name) + '</b></div><div class="head-row"><h1>' + esc(st.name) + '</h1>' + chip(cur.promotion.status || st.status) + (info.back ? '<span class="chip info" title="Copado back-promotion: changes from ' + esc(st.from || '') + ' go back down the pipeline">' + I.back + 'Back-promotion</span>' : '') +
       (info.production ? '<span class="chip neutral">' + I.rocket + 'to production</span>' : '') +
       '<span class="spacer"></span><span class="seg" role="tablist">' + tabs.map(t => '<button class="tab ' + (ui.tab === t ? 'on' : '') + '" data-tab="' + t + '">' + t + '</button>').join('') + '</span></div>' +
       '<div class="meta"><span>' + I.branch + ' ' + esc(st.from || '?') + ' ' + I.arrow + ' ' + esc(st.to || '?') + '</span><span>' + I.user + ' ' + esc([...new Set(files.map(e => e.story).filter(Boolean))].join(', ') || (n ? '\u2014' : 'stories in Copado')) + '</span>' +
@@ -206,7 +238,8 @@
     const entries = Object.entries(cur.state.files).filter(([rel]) => !f || rel.toLowerCase().includes(f)).sort((a, b) => a[0].localeCompare(b[0]));
     const again = entries.filter(([rel, e]) => needsLook(cur, rel, e));
     const rowOf = (k, ic) => ([rel, e]) => '<button class="row ' + (rel === ui.sel ? 'sel' : '') + '" data-sel="' + esc(rel) + '"><span class="ic-' + k + '">' + (e.kind === 'code' ? I.code : I.file) + '</span><span class="grow"><span class="name">' + esc(base(rel)) +
-      '</span><span class="sub">' + esc((e.story ? e.story + ' \u00b7 ' : '') + (k === 'again' ? problems(cur, rel)[0] : e.revising ? 'editing again' : (e.note || e.state))) + '</span></span></button>';
+      '</span><span class="sub">' + esc((e.story ? e.story + ' \u00b7 ' : '') + (k === 'again' ? problems(cur, rel)[0] : e.revising ? 'editing again' : (e.note || e.state))) + '</span></span>' +
+      (k === 'again' ? '' : (() => { const w = ((cur.plan || {}).ready || []).find(x => x.rel === rel && x.warn); const [c, t] = w ? ['warn', 'Duplicates'] : pillOf(e); return '<span class="pill ' + c + '"' + (w ? ' title="' + esc(w.warn) + ' \u2013 uploaded as they are"' : '') + '>' + esc(t) + '</span>'; })()) + '</button>';
     return '<div class="list"><div class="filter">' + I.filter + '<input id="filter" placeholder="Filter files" value="' + esc(ui.filter) + '"></div>' +
       (overview ? '<button class="row overview ' + (ui.sel === OVERVIEW ? 'sel' : '') + '" data-sel="' + OVERVIEW + '"><span class="ic-done">' + I.done + '</span><span class="grow"><span class="name">Overview</span><span class="sub">validate, re-create the branch, follow Copado</span></span></button>' : '') +
       (again.length ? '<div class="group"><span class="ic-again">' + I.warn + '</span>Needs another look<span class="count">' + again.length + '</span></div>' + again.map(rowOf('again')).join('') : '') +
@@ -234,7 +267,7 @@
     const g = groupOf(e.state);
     const why = problems(cur, rel);
     const inCopado = ['uploaded', 'copado'].includes(e.state);
-    const chipText = why.length && inCopado ? 'Needs another look' : e.revising ? 'Editing again' : e.suggestion && e.state === 'review' ? 'To review \u00b7 a suggested merge' : { review: 'To review', code: 'Code to resolve', ready: 'Ready', done: 'Done' }[g] + (e.note ? ' \u00b7 ' + e.note : '');
+    const chipText = why.length && inCopado ? 'Needs another look' : e.revising ? 'Editing again' : pillOf(e)[1];
     const chipKind = why.length && inCopado ? 'bad' : e.revising ? 'info' : { review: 'conflict', code: 'info', ready: 'resolved', done: 'done' }[g];
     const held = (cur.plan.held || []).find(x => x.rel === rel);
     const L = e.labels || {}, S = sides(cur);
@@ -242,27 +275,44 @@
     if (why.length) body += '<div class="card bad"><h3>' + I.warn + (inCopado ? 'Copado will trip on this resolution' : 'Found in Copado\u2019s latest run') + '</h3>' + why.slice(0, 6).map(w => '<div class="mono why">' + esc(w) + '</div>').join('') +
       (inCopado ? '<div class="muted" style="margin-top:8px">Edit again fetches the resolution as it is in Copado; uploading replaces it there. Then tick Re-create promotion branch so Copado uses it.</div>' : '') + '</div>';
     body += '<div class="card"><h3>' + I.sparkles + 'What happened</h3>' + esc(explain(e)) + '</div>';
+    // the choices left, each in plain words - what the two versions set, and whether the feature takes access away
+    if (e.changes && e.changes.length && ['review', 'code', 'error'].includes(e.state)) body += '<div class="card"><h3>' + I.info + 'What you are choosing between</h3>' +
+      e.changes.map(c => '<div class="check ' + (/removes access|removes other/.test(c) ? 'warnl' : 'ok') + '">' + (/removes access|removes other/.test(c) ? I.warn : I.dot) + '<span>' + esc(c) + '</span></div>').join('') +
+      '<div class="muted small" style="margin-top:6px">' + esc(S.ours) + ' is what the target has now; ' + esc(S.theirs) + ' is the story\u2019s change. Where the feature removes access, Accept target keeps it as it is \u2013 choose the feature only if removing it is the story\u2019s intent.</div></div>';
+    if (e.otherStories && e.otherStories.length) body += '<div class="card warn"><h3>' + I.warn + 'Also in conflict for ' + esc(e.otherStories.join(', ')) + '</h3>' +
+      '<div>Copado made a conflict file for each story. This one is ' + esc(e.story || 'the newest') + '\u2019s \u2013 check the other' + (e.otherStories.length === 1 ? '' : 's') + ' in Copado before continuing, so no story\u2019s change is lost.</div></div>';
     body += '<div class="card"><h3>' + I.info + 'Details</h3><div class="kv"><span class="k">' + esc(S.ours) + '</span><span title="What the target environment has - Copado made the promotion branch from it">' + esc(L.ours || '\u2014') + '</span><span class="k">' + esc(S.theirs) + '</span><span>' + esc(L.theirs || '\u2014') +
       '</span><span class="k">Your resolution</span><span>becomes the promotion branch\u2019s file when you upload it' +
       '</span><span class="k">From</span><span>' + 'Copado\u2019s conflict file' + '</span><span class="k">Checks</span><span>' +
       (held ? '<span style="color:var(--vscode-charts-red)">' + I.x + ' ' + esc(held.reason) + '</span>' : g === 'ready' || g === 'done' ? '<span style="color:var(--vscode-charts-green)">' + I.check + ' ready to upload</span>' : '\u2014') + '</span></div></div>';
-    const btns = inCopado ? '<button class="btn ' + (why.length ? 'primary' : 'secondary') + '" data-a="revise" title="Fetch the resolution as it is in Copado and change it - uploading replaces it there">' + I.code + 'Edit again</button>'
-      : e.revising ? '<button class="btn primary" data-a="review">' + I.code + 'Open the file</button>'
-      : e.state === 'review' && e.suggestion ? '<button class="btn primary" data-a="accept" title="Use the suggested merge as your resolution">' + I.check + 'Accept the suggestion</button><button class="btn secondary" data-a="review">' + I.merge + 'Review in merge</button>'
-      : e.state === 'code' || e.state === 'error' ? '<button class="btn primary" data-a="review">' + I.code + 'Resolve in editor</button>'
-      : '<button class="btn secondary" data-a="review">' + I.merge + 'Review in merge</button>' + (e.state === 'auto' ? '<button class="btn ghost" data-a="accept">' + I.check + 'Accept</button>' : '');
+    // D5: one primary action, with what it will do; the others under its menu
+    const primary = inCopado ? ['revise', 'Edit again'] : e.revising ? ['review', 'Open the file'] : e.state === 'copadoOnly' ? ['openInCopado', 'Open in Copado']
+      : e.state === 'auto' || e.state === 'resolved' ? ['review', 'Review in editor'] : ['review', 'Resolve in editor'];
+    const what = e.state === 'copadoOnly' ? 'Resolved in Copado \u2013 not merged here, never uploaded from here.' : inCopado ? 'Copado holds this resolution \u2013 edit it again to change it.'
+      : e.note ? e.note.charAt(0).toUpperCase() + e.note.slice(1) + '.' : e.conflicts ? plural(e.conflicts, 'conflict') + ' \u2013 yours to choose.' : 'Open it, check it, save it.';
+    const more = [['compare', I.diff + 'Compare sides'], ['copy', I.copy + 'Copy resolution']]
+      .concat(e.state === 'review' && e.suggestion || e.state === 'auto' ? [['accept', I.check + 'Accept without opening']] : [])
+      .concat(['review', 'code', 'resolved', 'error'].includes(e.state) ? [['reset', I.reset + (e.revising ? 'Discard changes' : 'Reset to Copado\u2019s file')]] : []);
     return '<div class="detail"><div class="grow-area"><h2>' + (e.kind === 'code' ? I.code : I.file) + esc(base(rel)) + ' <span class="chip ' + chipKind + '">' + esc(chipText) + '</span></h2>' +
-      '<div class="path mono">' + esc(rel) + '</div><div class="actions">' + btns + '<button class="btn ghost" data-a="compare">' + I.diff + 'Compare sides</button><button class="btn ghost" data-a="copy">' + I.copy + 'Copy</button>' +
-      (['review', 'code', 'resolved', 'error'].includes(e.state) ? '<button class="btn ghost" data-a="reset">' + I.reset + (e.revising ? 'Discard changes' : 'Reset') + '</button>' : '') + '</div>' + body + '</div>' + footer(cur) + '</div>';
+      '<div class="path mono">' + esc(rel) + '</div>' +
+      '<div class="cta"><div class="cta-t">' + esc(what) + '</div><button class="btn primary big" data-a="' + primary[0] + '">' + esc(primary[1]) + '</button>' +
+      (e.state === 'copadoOnly' ? '' : '<span class="fmw"><button class="btn ghost icon" data-a="fileMenu" title="More" aria-label="More" aria-haspopup="menu">\u22ef</button>' +
+        (ui.fmenu ? '<div class="pmenu right" role="menu">' + more.map(([a, l]) => '<button class="mi" data-a="' + a + '" role="menuitem">' + l + '</button>').join('') + '</div>' : '') + '</span>') +
+      '</div>' + body + '</div>' + footer(cur) + '</div>';
   }
 
   function explain(e) {
-    if (e.state === 'review' && e.suggestion) return 'A suggested merge of both branches. Accept it, or open Review in merge, change what you need and save.';
+    if (e.state === 'review' && e.suggestion) return (e.note ? e.note.charAt(0).toUpperCase() + e.note.slice(1) + '. ' : '') + 'Resolve in editor to check it and save \u2013 or, under \u22ef, accept it without opening.';
+    // 4.0: a joined file, one with choices left in it, and every other metadata's conflicts
+    if (e.state === 'auto' && e.kind === 'xml' && /the target kept/.test(e.note || '')) return 'Joined entry by entry: the target\u2019s entries kept as they are, the feature\u2019s added beside their kind or applied \u2013 nothing of the target removed, nothing left to choose.';
+    if (e.state === 'review' && e.kind === 'xml' && /to choose/.test(e.note || '')) return 'Joined entry by entry \u2013 the target\u2019s kept, the feature\u2019s added or applied. ' + plural(e.conflicts || 0, 'change') + ' left for you to choose: where the feature grants less, a profile\u2019s security setting, or an entry the target has twice.';
+    if (e.state === 'review' && e.kind === 'xml') return 'Copado\u2019s merge stopped on ' + plural(e.conflicts || e.blocks || 0, 'conflict') + '. Each is yours to choose \u2013 the target\u2019s or the feature\u2019s \u2013 in the editor; a save never leaves one unresolved.';
     if (e.state === 'auto' && e.kind === 'xml') return 'Git stopped on ' + plural(e.blocks || 0, 'conflict block') + '. Both branches only added or agreed on entries, so everything is kept \u2013 nothing needed deciding.';
     if (e.state === 'auto') return 'Every conflict block was settled: the sides agreed, or only one side changed.';
-    if (e.state === 'code' || e.state === 'error') return (e.note || '') + '. Resolve the remaining blocks with VS Code\u2019s Accept Current / Incoming / Both, then save \u2013 the file moves to Ready.';
+    if (e.state === 'copadoOnly') return 'Neither code nor metadata the editor reads \u2013 a text or binary file. It is resolved in Copado: never merged here, never uploaded from here. Open in Copado to resolve it there.';
+    if (e.state === 'code' || e.state === 'error') return (e.note ? e.note + '. ' : '') + 'Resolve in editor: choose a version for each conflict, then save \u2013 the file moves to Ready.';
     if (e.revising) return 'Being edited again, from the resolution Copado holds now. Uploading replaces it in Copado \u2013 only if Copado still holds that one. Discard changes leaves Copado as it is.';
-    if (e.state === 'resolved') return 'Resolved here' + (e.note ? ': ' + e.note : '') + '. It goes up with the next upload. To change it, Review in merge starts from what you saved.';
+    if (e.state === 'resolved') return 'Resolved here' + (e.note ? ': ' + e.note : '') + '. It goes up with the next upload. To change it, Review in editor starts from what you saved.';
     if (e.state === 'uploaded') return (e.revisions ? 'Changed and uploaded again (' + plural(e.revisions, 'time') + ') to Copado as \u201c' : 'Uploaded to Copado as \u201c') + (e.uploadedName || 'RESOLVED \u2026') + '\u201d and read back. If a validation finds a problem in it, Edit again.';
     if (e.state === 'copado') return 'Resolved in Copado meanwhile \u2013 left as it is.';
     return e.note || '';
@@ -412,10 +462,25 @@
     const p = cur.plan;
     const all = p.revised && p.revised === p.ready.length;
     const first = p.ready.length - (p.revised || 0);
+    const k = p.checks || { unresolved: [], accessLost: [], copadoOnly: [], otherStories: [], recommit: [], precheck: { state: 'none' } };
+    const line = (cls, ic, html) => '<div class="check ' + cls + '">' + ic + '<span>' + html + '</span></div>';
+    const pcLine = k.precheck.state === 'none' ? line('warnl', I.info, 'No pre-check yet \u2013 nothing has validated these resolutions. <button class="link" data-a="precheck">Run it first</button>')
+      : k.precheck.state === 'running' ? line('warnl', I.clock, 'The pre-check is still running')
+      : k.precheck.stale ? line('warnl', I.warn, 'The pre-check ran before your latest changes \u2013 its result may no longer hold. <button class="link" data-a="precheck">Run it again</button>')
+      : k.precheck.state === 'passed' ? line('ok', I.check, 'The pre-check passed with these resolutions')
+      : line('warnl', I.warn, 'The last pre-check ' + esc(k.precheck.state) + ' \u2013 <button class="link" data-tab="Pre-check">see why</button>');
+    const checklist = '<div class="sect">Before you upload</div>' + pcLine +
+      (k.unresolved.length ? line('no', I.x, plural(k.unresolved.length, 'file') + ' not resolved yet \u2013 left as conflicts in Copado: ' + esc(k.unresolved.map(x => base(x.rel) + ' (' + x.why + ')').join(', '))) : line('ok', I.check, 'Every file resolved here is in this upload')) +
+      k.accessLost.map(a => line('warnl', I.warn, '<b>' + esc(base(a.rel)) + '</b> grants less than ' + esc(cur.state.to || 'the target') + ' has now:<br>' + a.lines.map(esc).join('<br>') + (a.more ? '<br>+' + a.more + ' more' : ''))).join('') +
+      (k.copadoOnly.length ? line('warnl', I.ext, plural(k.copadoOnly.length, 'file') + ' to resolve in Copado itself: ' + esc(k.copadoOnly.map(base).join(', '))) : '') +
+      k.otherStories.map(o => line('warnl', I.warn, esc(base(o.rel)) + ' is in conflict for ' + esc([o.story].concat(o.others).join(' and ')) + ' \u2013 check the others in Copado')).join('') +
+      (k.recommit.length ? line('warnl', I.box, plural(k.recommit.length, 'component') + ' still needed in ' + esc(cur.state.to || 'the target') + ' \u2013 commit them to a story: ' + esc(k.recommit.map(x => x.name).join(', ')) + ' <button class="link" data-a="exportMissing">Open as package.xml</button>') : '');
     return '<div class="scrim"><div class="modal" role="dialog" aria-modal="true"><header>' + (all ? 'Replace ' + plural(p.ready.length, 'resolution') + ' in ' : 'Upload ' + plural(p.ready.length, 'resolution') + ' to ') + esc(cur.state.name) + '?</header><div class="mbody">' +
       '<div class="muted" style="margin-bottom:8px">' + (first ? 'Each conflict attachment is renamed <span class="mono">RESOLVED \u2026</span> with the resolved content \u2013 what Copado\u2019s editor does. ' : '') +
       (p.revised ? (first ? 'A replacement' : 'Each') + ' keeps its name in Copado and gets your changed content \u2013 only if Copado still holds the version you started from. ' : '') + 'Everything is read back byte for byte.</div>' +
-      p.ready.map(x => '<div class="check ok">' + (x.revising ? I.refresh : I.check) + '<span>' + esc(base(x.rel)) + ' \u00b7 ' + x.how + '</span></div>').join('') +
+      checklist + '<div class="sect">What goes up</div>' +
+      (p.ready.some(x => x.warn) ? '<div class="check warnl">' + I.warn + '<span>Duplicate entries are uploaded as they are \u2013 Copado\u2019s deployment may reject some.</span></div>' : '') +
+      p.ready.map(x => '<div class="check ' + (x.warn ? 'warnl' : 'ok') + '">' + (x.warn ? I.warn : x.revising ? I.refresh : I.check) + '<span>' + esc(base(x.rel)) + ' \u00b7 ' + x.how + (x.warn ? ' \u00b7 ' + esc(x.warn) : '') + '</span></div>').join('') +
       p.held.map(x => '<div class="check no">' + I.x + '<span>' + esc(base(x.rel)) + ' \u2013 held back: ' + esc(x.reason) + '</span></div>').join('') +
       (offerRecreate(cur) ? '<div class="opt" data-a="toggleRecreate"><span class="box ' + (ui.setRecreate ? '' : 'off') + '">' + (ui.setRecreate ? '\u2713' : '') + '</span><span><b>Tick Re-create promotion branch in Copado</b><br><span class="muted">Copado uses changed resolutions only when it rebuilds the promotion branch. Unticked by itself once Copado validates it successfully.</span></span></div>' : '') +
       (p.last ? '<div class="opt" data-a="toggleStatus"><span class="box ' + (ui.setStatus ? '' : 'off') + '">' + (ui.setStatus ? '\u2713' : '') + '</span><span><b>Set the status to Conflicts Resolved</b><br><span class="muted">These are the last conflicts \u2013 Copado\u2019s editor would set it now.</span></span></div>' : '') +
@@ -440,36 +505,12 @@
 
   /* ------------------------------------------------------------ stories */
 
-  function storiesView() {
-    const S = (data.life || {}).story || {};
-    const j = S.journey;
-    const form = '<div class="toolbar">' + I.user + '<span class="field small"><input id="sref" placeholder="A user story, such as US-0012345" value="' + esc(ui.sref) + '"></span><button class="btn primary small" data-l="story.open"' + (data.copadoOrg ? '' : ' disabled') + '>Show journey</button>' +
-      '<span class="muted">Where a story has been, where it is, and where it goes next.</span></div>';
-    if (S.error) return '<div class="scroll">' + form + '<div class="card bad">' + esc(S.error) + '</div></div>';
-    if (!j) return '<div class="scroll">' + form + '<div class="empty">Enter a story to see its promotions per stage.</div></div>';
-    const s = j.story;
-    const stage = (x, i) => '<li class="step ' + ({ done: 'done', current: 'now', next: 'next' }[x.state] || '') + '"><span class="node">' + (x.state === 'done' ? I.check : i + 1) + '</span>' +
-      '<span class="lbl"><b>' + esc(x.env) + '</b><small>' + esc({ done: 'passed', current: 'here now', next: 'next', ahead: 'later' }[x.state]) + '</small></span><div class="stagecard">' +
-      (x.branch ? '<div class="mono muted small">' + esc(x.branch) + '</div>' : '') +
-      (x.promotion ? '<button class="pr" data-l="promotion.open" data-id="' + esc(x.promotion.id) + '"><span>' + esc(x.promotion.name) + '</span>' + chip(x.promotion.status) + '</button><div class="muted small">' + esc(day(x.promotion.created)) + '</div>' : '<div class="muted small">' + (x.state === 'done' || x.state === 'current' ? 'started here' : 'not promoted yet') + '</div>') + '</div></li>';
-    return '<div class="scroll">' + form + '<div class="jhead"><h2>' + esc(s.name) + '</h2>' + chip(s.status) + (j.hotfix ? '<span class="chip conflict">' + I.flash + 'hotfix</span>' : '') + '<span class="muted">' + esc(s.title) + '</span></div>' +
-      '<div class="meta">' + (j.pipeline ? '<span>' + I.route + esc(j.pipeline) + '</span>' : '') + '<span>' + I.dot + 'in ' + esc(s.env || '?') + '</span>' + (s.baseBranch ? '<span>' + I.branch + 'based on ' + esc(s.baseBranch) + '</span>' : '') + (s.release ? '<span>' + I.file + 'release ' + esc(s.release) + '</span>' : '') + '</div>' +
-      '<ol class="track journey">' + j.stages.map(stage).join('') + '</ol>' +
-      (j.next ? '<div class="card"><h3>' + I.arrow + 'Next: ' + esc(j.next.env) + '</h3><div class="muted">Validate ' + esc(s.name) + '\u2019s ' + (j.hotfix ? 'hotfix' : 'feature') + ' branch against ' + esc(j.next.env) + '. Nothing is deployed.</div>' +
-        '<div class="actions"><button class="btn primary" data-l="story.validate" title="Check-only, from the story\u2019s feature branch">' + I.beaker + 'Validate from the branch</button>' +
-        '<button class="btn secondary" data-l="story.package" title="The story\u2019s package.xml, from its commit">' + I.box + 'package.xml</button>' +
-        '<button class="btn secondary" data-l="story.report" title="What Copado holds about this story \u2013 read-only">' + I.report + 'Story report</button></div></div>'
-        : '<div class="card"><h3>' + I.check + 'At the end of the pipeline</h3><div class="muted">' + (j.backTo && j.backTo.length ? 'A hotfix in production is back-promoted to ' + esc(j.backTo.join(', ')) + '.' : 'Nothing further to promote.') + '</div></div>') +
-      (j.promotions.length ? '<div class="sect">Promotions</div><table class="grid"><thead><tr><th>Promotion</th><th>From \u2192 to</th><th>Status</th><th>Date</th></tr></thead><tbody>' + j.promotions.map(p => '<tr><td><button class="link" data-l="promotion.open" data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>' + (p.back ? ' <span class="chip info">back</span>' : '') +
-        '</td><td>' + esc((p.from || '?') + ' \u2192 ' + (p.to || '?')) + '</td><td>' + chip(p.status) + '</td><td class="muted">' + esc(day(p.created)) + '</td></tr>').join('') + '</tbody></table>' : '') + '</div>';
-  }
-
   /* ------------------------------------------------------------ drawing */
 
   // ---- Promotions, with nothing open: one box to open a promotion or a story, recent work, tools ----
   function start() {
-    const search = '<div class="hsearch">' + I.search + '<input id="href" placeholder="Open a promotion or a story \u2013 P12345, US-0012345, or a Copado link" value="' + esc(ui.href) + '"' + (data.copadoOrg ? '' : ' disabled') + '>' +
-      '<button class="btn primary" data-a="homeOpen"' + (data.copadoOrg ? '' : ' disabled') + '>Open</button></div>';
+    const search = '<div class="hsearch">' + I.search + '<input id="href" placeholder="Open a promotion \u2013 P12345, or its Copado link" value="' + esc(ui.href) + '"' + (data.copadoOrg ? '' : ' disabled') + '>' +
+      '<button class="btn primary" data-a="homeOpen"' + (data.copadoOrg ? '' : ' disabled') + '>Open</button></div>' + (ui.boxNote ? '<div class="boxnote">' + I.info + esc(ui.boxNote) + '</div>' : '');
     const hero = '<div class="hero"><h1>Open a promotion</h1><div class="lead">' + (data.copadoOrg
       ? 'Its conflicts are merged for you to review \u2013 nothing in Copado changes until you upload. A user story opens its journey.'
       : 'Set the Copado org to open promotions and stories: <a href="#" data-tool="workbench.action.openSettings">Settings</a> \u203a Copado org \u2013 or merge by hand on the Manual tab.') + '</div>' + search + '</div>';
@@ -631,11 +672,11 @@
     if (!data) { app.innerHTML = '<div class="empty">Loading\u2026</div>'; return; }
     // keep the caret where it was: a redraw replaces every element
     const a = document.activeElement, focus = a && a.id ? { id: a.id, pos: a.selectionStart } : null;
-    const body = ui.nav === 'Stories' ? storiesView() : ui.nav === 'Manual' ? manualView() : ui.nav === 'Compare' ? compareView() : promotions();
+    const body = ui.nav === 'Manual' ? manualView() : ui.nav === 'Compare' ? compareView() : promotions();
     app.className = ui.busy ? 'is-busy' : '';
     app.innerHTML = topbar(ui.nav === 'Promotions' ? data.current : null) + body;
     const bind = (id, key, submit) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('input', () => { ui[key] = el.value; keep(); }); el.addEventListener('keydown', ev => { if (ev.key === 'Enter') submit(); }); };
-    bind('ref', 'ref', openRef); bind('sref', 'sref', openStory); bind('href', 'href', openAny);
+    bind('ref', 'ref', openRef); bind('href', 'href', openAny);
     const cn = document.getElementById('cname'); if (cn) cn.addEventListener('input', () => { ui.compName = cn.value; render(); });
     if (ui.nav === 'Manual') manualEvents();
     if (ui.nav === 'Compare') compareEvents();
@@ -646,11 +687,11 @@
     else if (ui.nav === 'Promotions' && !data.current) { const r = document.getElementById('ref'); if (r) r.focus(); }
   }
   const openRef = () => { if (ui.ref.trim()) act('open', { ref: ui.ref.trim() }); };
-  const openStory = () => { const v = ui.sref.trim(); if (v && okRef(v)) lact('story.open', { ref: v }); };
-  // Home's one box: a story opens its journey, anything else the promotion
+  // Home's one box: a promotion's number or its Copado link (D2) - a story's number is not a promotion
   const openAny = () => {
     const v = ui.href.trim(); if (!v) return;
-    if (/^US-\d+$/i.test(v)) { ui.nav = 'Stories'; ui.sref = v; keep(); render(); return lact('story.open', { ref: v }); }
+    if (/^US-\d+$/i.test(v)) { ui.boxNote = 'Enter the promotion\u2019s number or its Copado link \u2013 ' + v + ' is a user story.'; render(); return; }
+    ui.boxNote = '';
     ui.nav = 'Promotions'; ui.ref = v; keep(); render(); act('open', { ref: v });
   };
 
@@ -672,15 +713,11 @@
     if (t.dataset.ctype) { const set = new Set(ui.ctypes || []); if (set.has(t.dataset.ctype)) set.delete(t.dataset.ctype); else set.add(t.dataset.ctype); ui.ctypes = [...set]; ui.climit = 50; render(); return; }
     if (t.dataset.ctclear) { ui.ctypes = []; ui.climit = 50; render(); return; }
     if (t.dataset.c) { if (!t.disabled) { if (t.dataset.c === 'compare.run' || t.dataset.c === 'compare.reset') { ui.climit = 50; ui.casked = new Set(); ui.ctypes = []; ui.cfilter = ''; ui.cq = {}; ui.copen = null; ui.ctopen = false; } cact(t.dataset.c, { path: t.dataset.path }); } return; }
-    if (t.dataset.l) {
-      const n = t.dataset.l;
-      if (n === 'story.open') return t.dataset.ref ? lact(n, { ref: t.dataset.ref }) : openStory();
-      return lact(n, { id: t.dataset.id });
-    }
     if (t.dataset.sel) { ui.sel = t.dataset.sel; if (t.dataset.go) ui.tab = t.dataset.go; keep(); return render(); }
-    if (t.dataset.tab) { ui.tab = t.dataset.tab; keep(); return render(); }
+    if (t.dataset.tab) { ui.tab = t.dataset.tab; ui.modal = false; keep(); return render(); }
     const a = t.dataset.a, rel = ui.sel;
-    if (a === 'precheck') { ui.tab = 'Pre-check'; keep(); render(); }
+    if (a === 'precheck') { ui.tab = 'Pre-check'; ui.modal = false; keep(); render(); }
+    if (a === 'exportMissing') { ui.modal = false; render(); }
     if (a === 'open') return openRef();
     if (a === 'homeOpen') return openAny();
     if (a === 'openRecent') return act('open', { ref: t.dataset.ref });
@@ -701,6 +738,9 @@
     if (a === 'recreate') return act('recreate', { value: t.dataset.value === '1' });
     if (a === 'revise') { if (t.dataset.rel) { ui.sel = t.dataset.rel; ui.tab = 'Files'; keep(); render(); } return act('revise', { rel: t.dataset.rel || rel }); }
 
+    if (a === 'pageMenu') { ui.pmenu = !ui.pmenu; ui.fmenu = false; return render(); }
+    if (a === 'fileMenu') { ui.fmenu = !ui.fmenu; ui.pmenu = false; return render(); }
+    if (ui.pmenu || ui.fmenu) { ui.pmenu = false; ui.fmenu = false; render(); }
     if (a === 'home') { ui.sel = null; ui.modal = false; ui.tab = 'Files'; keep(); render(); return act('home'); }
     act(a, { rel });
   });

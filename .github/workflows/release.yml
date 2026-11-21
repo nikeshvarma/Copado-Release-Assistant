@@ -49,6 +49,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # never a release with files earlier versions removed: they would ship again
+      - run: npm run tidy -- --check
       - run: npm run package
       - run: npm run package:check
       - run: node scripts/release.js notes > release-notes.md

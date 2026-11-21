@@ -221,6 +221,11 @@ body.three .heads > div { text-align: center; }
 .monaco-editor .w3t { background: color-mix(in srgb, var(--vscode-disabledForeground, #888) 38%, transparent); border-radius: 2px; }
 .monaco-editor .w3f { background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #81b88b) 40%, transparent); border-radius: 2px; }
 .zone.head.side3 { background: transparent; box-shadow: none; }
+/* a row's word within the width you see, clear of its buttons (--btn-w, measured as they are placed) */
+/* the editor sets a shown zone display: block, which undid the row's flex - and with it the width below */
+.zone.head[monaco-visible-view-zone="true"] { display: flex !important; }
+.zone.head b { min-width: 0; flex: 0 1 auto; }
+.zone.head b { max-width: calc(var(--pane-w, 100vw) - var(--btn-w, 0px) - 44px); }
 .ib.arw { color: var(--vscode-disabledForeground, #999); border-color: currentColor; }
 .ib.arw.fea { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
 .ib.arw.on { background: currentColor; } .ib.arw.on > * { color: var(--vscode-editor-background); }
@@ -229,3 +234,6 @@ body.three .heads > div { text-align: center; }
 .zone.head.lo { color: var(--vscode-disabledForeground, #a0a0a0); background: color-mix(in srgb, var(--vscode-disabledForeground, #888) 12%, transparent); box-shadow: inset 3px 0 0 var(--vscode-disabledForeground, #888); }
 .zone.ghost.leftout .gl { text-decoration-color: color-mix(in srgb, var(--vscode-disabledForeground, #888) 80%, transparent); color: var(--vscode-disabledForeground, #9a9a9a); }
 .ib.arw.on { background: currentColor; }
+
+/* a version of thousands of lines: its first lines, and how many more */
+.zone.alt .alt-more { font-style: italic; opacity: .75; }

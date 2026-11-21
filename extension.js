@@ -380,15 +380,22 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
   const saved = so.startFrom != null && !hasMarkers(so.startFrom) ? so.startFrom : null;
   const rootOf = t => (/<([A-Za-z][\w]*)[\s>]/.exec(String(t || '').replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, '')) || [])[1] || null;
   const xmlType = language ? null : rootOf(saved || targetDoc.getText() || copadoText);
-  let union = null;
+  // permission sets, profiles, labels, translations: the target as it is, the feature's entries added or applied -
+  // whatever git's blocks; a change that grants less is yours to choose; and should it not join, the target's access
+  // is never one click from gone: Accept feature is not offered
+  let union = null, unionKind = null, unionConflicts = null, unionRemoved = null, unionRemovedAt = null, unionRemovedInfo = null;
   if (copadoText && !language && require('./src/mergeStart').ADDITIVE.has(xmlType)) {
-    union = require('./src/unionMerge').resolve(copadoText, xmlType);
-    if (!union.ok) {
-      vscode.window.showInformationMessage(path.basename(targetUri.fsPath) + ': ' + union.reason + ' \u2013 each of its conflicts is yours to choose.');
-      union = null;
-    }
+    const u = require('./src/unionMerge').resolve(copadoText, xmlType);
+    if (!u.ok) {
+      unionKind = 'fallback';
+      vscode.window.showWarningMessage(path.basename(targetUri.fsPath) + ': ' + u.reason + ' \u2013 each conflict is yours to choose. Accept feature is not offered, so the target\u2019s access cannot be removed in one click.');
+    // something to choose - or a duplicate whose other copy can be swapped in (B2.12): shown the way promotions are
+    } else if (u.narrowed || (u.removedInfo || []).some(Boolean)) { unionKind = 'narrowed'; unionConflicts = u.text; unionRemoved = u.removedDups; unionRemovedAt = u.removedAt; unionRemovedInfo = u.removedInfo; }
+    else union = u;
   }
-  const gitMerge = copadoText && !union ? require('./src/codeMerge').fromConflictFile(copadoText) : null;
+  let gitMerge = unionConflicts ? require('./src/codeMerge').fromConflictFile(unionConflicts) : copadoText && !union ? require('./src/codeMerge').fromConflictFile(copadoText) : null;
+  // B3.2: a flow's conflict that only moves the canvas - the feature's, marked, undoable
+  if (gitMerge && xmlType === 'Flow') gitMerge = require('./src/flowPositions').apply(gitMerge);
   const textOnly = !!(language || plain || so.copado || copadoText);
   const result = textOnly ? { ok: true, typeName: xmlType, threeWay: false, marks: [], checks: [],
     report: { added: [], updated: [], auto: [], conflicts: [], deletions: [], duplicates: [], skipped: [] },
@@ -425,6 +432,8 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
   // identical duplicates out of each start, once, here - what merging always does to its result, now also for a
   // start from a branch's file; the merge editor marks what was removed and never removes anything twice
   const dupRemoved = { merged: (result.report && result.report.duplicates || []).length, feature: 0, target: 0 }, removedDups = new Set();
+  // B2.11: what the union step took out of the target - twice there, the same - shown as Duplicate, with Keep
+  for (const d of (union && union.removedDups) || (unionConflicts && unionRemoved) || []) removedDups.add(require('./src/mergeDuplicates').flat(d));
   if (c.mergeRemoveDuplicates) {
     for (const k of ['feature', 'target']) {
       const d = require('./src/mergeDuplicates').dedupe(starts[k]);
@@ -478,7 +487,7 @@ async function prepareSession(targetUri, incomingUri, ancestorUri, so, progress,
     checks: result.checks,
     language,
     code: language || gitMerge ? { conflicts: gitMerge ? gitMerge.conflicts : [], reviewed: new Map() } : null,
-    git: !!gitMerge, gitLabels: gitMerge ? gitMerge.labels : null,
+    git: !!gitMerge, gitLabels: gitMerge ? gitMerge.labels : null, conflictText: copadoText || null, unionKind, dupRemovedAt: unionRemovedAt || (union && union.removedAt) || null, dupRemovedInfo: unionRemovedInfo || (union && union.removedInfo) || null,
     plain,
     // your resolution against both branches - and their common ancestor, when known - worked out as you type
     normTargetText: result.targetText, normIncomingText: result.incomingText, ancestorText: ancestorDoc ? ancestorDoc.getText() : null,
@@ -714,7 +723,7 @@ function openMergePanel(startText, so) {
     file: path.basename(s.targetUri.fsPath),
     labels: { target: s.labels.target, merged: s.labels.merged || 'Your resolution' },
     theirs, short, typeName: s.typeName,
-    target: s.normTargetText, incoming: s.normIncomingText || '', text: startText, language: s.language || null, code: s.code || null, plain: !!s.plain, git: !!s.git, gitLabels: s.gitLabels || null,
+    target: s.normTargetText, incoming: s.normIncomingText || '', text: startText, language: s.language || null, code: s.code || null, plain: !!s.plain, git: !!s.git, gitLabels: s.gitLabels || null, unionKind: s.unionKind || null, dupRemovedAt: s.dupRemovedAt || null, dupRemovedInfo: s.dupRemovedInfo || null,
     // code in one pane or two: cmr.merge.codeView - the switch in the editor's \u22ef writes it
     codeView: vscode.workspace.getConfiguration('cmr').get('merge.codeView', 'threePanes'),
     setCodeView: v => vscode.workspace.getConfiguration('cmr').update('merge.codeView', v, vscode.ConfigurationTarget.Global).then(() => {}, () => {}),
@@ -726,13 +735,17 @@ function openMergePanel(startText, so) {
     hideIdentical: vscode.workspace.getConfiguration('cmr').get('merge.hideIdentical', false),
     onPref: p => vscode.workspace.getConfiguration('cmr').update('merge.hideIdentical', !!p.hideIdentical, vscode.ConfigurationTarget.Global),
     conflictsFor: s.plain ? null : conflictsFor,
-    onText: text => { if (session === s) s.panelText = text; },
+    onText: (text, regions) => { if (session === s) { s.panelText = text; s.regions = regions || null; } },
     save: async (text, close) => {
       if (session !== s) return { ok: false, message: 'This merge has ended.' };
+      // A6: a save never leaves a gap - the conflicts left are the target's, or nothing is saved
+      const settled = await settleUnresolved(s, text);
+      if (!settled) return { ok: false, message: 'Not saved \u2013 the conflicts left are still yours to choose' };
+      text = settled.text;
       s.panelText = text;
-      if (close) { const done = await applyOnce(); return done ? { ok: true, message: 'Saved' } : { ok: false, message: 'Not saved' }; }
+      if (close) { const done = await applyOnce(); return done ? { ok: true, message: 'Saved', text } : { ok: false, message: 'Not saved', text }; }
       const notes = await saveIntoResolution();
-      return { ok: true, warn: notes.length > 0, message: notes.length ? 'Saved as your resolution \u2013 ' + notes.join(', ') : 'Saved as your resolution' };
+      return { ok: true, warn: notes.length > 0, text, message: notes.length ? 'Saved as your resolution \u2013 ' + notes.join(', ') : 'Saved as your resolution' };
     },
     // \u22ef: discard asks first; the report as it always was
     discard: async () => {
@@ -765,6 +778,26 @@ function openMergePanel(startText, so) {
       const c = cfg();
       const out = formatter.format(parsed, formatOptions(c, /\r\n/.test(text) ? '\r\n' : '\n', { removeDuplicates: false, keep: c.keep }));
       return out == null ? { error: 'This file cannot be formatted' } : { text: out };
+    },
+    // \u22ef \u203a Save diagnostics: what this merge is, and its texts with every name replaced - saved for you to review
+    diagnostics: async text => {
+      const A = require('./src/anonymise'), shared = { map: new Map(), n: 0 };
+      const count = t => String(t || '').split('\n').length;
+      const needs = s.code ? require('./src/codeMerge').marks({ text, conflicts: s.code.conflicts, language: s.language, reviewed: s.code.reviewed }).counts : null;
+      const fence = t => '```\n' + A.anonymise(String(t || ''), shared).text.replace(/```/g, '``\u200b`') + '\n```';
+      const body = ['# Release Assistant diagnostics', '',
+        '- Release Assistant ' + require('./package.json').version + ', VS Code ' + vscode.version + ', ' + process.platform,
+        '- ' + (s.plain ? 'a comparison' : s.conflictText ? 'a promotion\u2019s file - Copado\u2019s conflict file' : 'a merge of two files') + ', ' + (s.language || 'metadata') + (s.typeName ? ' (' + s.typeName + ')' : '') +
+          ', layout ' + vscode.workspace.getConfiguration('cmr').get('merge.codeView', 'threePanes'),
+        '- lines: promotion side ' + count(s.normTargetText) + ', feature side ' + count(s.normIncomingText) + ', resolution ' + count(text) + (needs ? '; conflicts ' + needs.conflicts + ', to resolve ' + needs.needs : ''),
+        '', 'Every name is replaced the same way in both - review before sharing.', '',
+        '## Copado\u2019s conflict file', '', s.conflictText ? fence(s.conflictText) : '(none - not a promotion\u2019s file)', '',
+        '## Your resolution now', '', fence(text), ''].join('\n');
+      const dir = await storageDir('diagnostics');
+      const f = vscode.Uri.joinPath(dir, 'diagnostics-' + new Date().toISOString().replace(/[:.]/g, '-') + '.md');
+      await vscode.workspace.fs.writeFile(f, Buffer.from(body, 'utf8'));
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(f), { preview: false, viewColumn: vscode.ViewColumn.Beside });
+      return { ok: true, message: 'Diagnostics saved \u2013 names replaced; review it before sharing' };
     },
     manual: !!so.manual,
     onDirty: d => { if (session === s) s.dirty = !!d; },
@@ -1008,6 +1041,29 @@ async function saveIntoResolution() {
   return notes;
 }
 
+/**
+ * A6 - a save never leaves a gap. A promotion's file with conflicts left: once, which they are, and the choice -
+ * the target's version for each, nothing of the feature's added there, or back to choosing. Returns the text to save,
+ * or null when you went back.
+ */
+async function settleUnresolved(s, text) {
+  if (!s.code || !s.git || s.plain) return { text };
+  const CM = require('./src/codeMerge');
+  const open = CM.marks({ text, conflicts: s.code.conflicts, language: s.language, reviewed: s.code.reviewed, regions: s.panelText === text ? s.regions : null }).rows.filter(r => r.needs);
+  if (!open.length) return { text };
+  const keep = 'Keep the target\u2019s for ' + open.length + ', and save';
+  const where = open.slice(0, 8).map(r => 'line ' + (r.at + 1)).join(', ') + (open.length > 8 ? ', \u2026' : '');
+  const go = await vscode.window.showWarningMessage(open.length + (open.length === 1 ? ' conflict is' : ' conflicts are') + ' not resolved yet', {
+    modal: true, detail: 'A conflict left as it is would save neither version. Keep the target\u2019s version for ' + (open.length === 1 ? 'it' : 'the ' + open.length + ' that remain') +
+      ' \u2013 nothing of the feature\u2019s is added there \u2013 or go back and choose.\n\n' + where }, { title: keep }, { title: 'Go back', isCloseAffordance: true });
+  if (!go || (go.title || go) !== keep) return null;
+  const L = String(text).split(/(?<=\n)/);
+  for (const op of open.map(r => r.actions.find(a => a.choice === 'target').op).sort((a, b) => b.b0 - a.b0)) L.splice(op.b0, op.b1 - op.b0, ...(op.insert ? String(op.insert).split(/(?<=\n)/) : []));
+  // an empty target version is a choice made: remembered, as clicking it would
+  for (const r of open) { const op = r.actions.find(a => a.choice === 'target').op; if (!op.insert && s.code.reviewed instanceof Map) s.code.reviewed.set(r.id, 'target'); }
+  return { text: L.join(''), kept: open.length };
+}
+
 async function applyOnce() {
   const inPanel = !!session.panel;
   const unreviewed = inPanel ? remapConflicts(session.marks, session.mergedStart != null ? session.mergedStart : session.panelText, session.panelText).length
@@ -1021,11 +1077,10 @@ async function applyOnce() {
   if (session.language) {
     // code: a conflict not chosen for yet; then brackets that do not balance
     const c = session.code;
-    const needs = c && !session.plain ? require('./src/codeMerge').marks({ text, conflicts: c.conflicts, language: session.language, reviewed: c.reviewed }).counts.needs : 0;
-    if (needs) {
-      const go = await vscode.window.showWarningMessage(needs + ' conflict' + (needs === 1 ? ' is' : 's are') + ' not resolved yet - ' + (needs === 1 ? 'its' : 'their') + ' lines are not in the file. Save anyway?', { modal: true }, 'Save anyway');
-      if (go !== 'Save anyway') return false;
-    }
+    const needs = c && !session.plain ? require('./src/codeMerge').marks({ text, conflicts: c.conflicts, language: session.language, reviewed: c.reviewed, regions: session.panelText === text ? session.regions : null }).counts.needs : 0;
+    // reached only from the panel, where A6 settled them first: a gap here would be a fault - never saved
+    if (needs) return false;
+
     const problems = require('./src/codeChecks').problems(text, session.language).filter(p => p.severity === 'error');
     if (problems.length) {
       const go = await vscode.window.showWarningMessage(problems[0].message + ' (line ' + problems[0].line + ')' + (problems.length > 1 ? ' \u2013 and ' + (problems.length - 1) + ' more' : '') + '. Apply anyway?', { modal: true }, 'Apply anyway');

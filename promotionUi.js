@@ -231,6 +231,8 @@ function setState(rel, state, note) {
 async function review(rel) {
   const e = entry(rel);
   if (!e) return;
+  // B4.1: neither code nor XML - resolved in Copado, never opened here
+  if (e.kind === 'copado' || !W.isCode(rel) && !/\.xml$/i.test(rel)) { vscode.window.showInformationMessage(path.basename(rel) + ' is resolved in Copado \u2013 it is not merged here.'); return; }
   const s = current.s;
   if (e.revising) { await vscode.window.showTextDocument(vscode.Uri.file(s.file('resolved', rel)), { preview: false }); return; }
   // code too, in the merge editor - unless VS Code's own conflict view is chosen (cmr.merge.codeIn)
@@ -352,14 +354,150 @@ async function reset(rel) {
     changed.fire();
     return;
   }
-  const merged = current.s.read('merged', rel);
-  if (merged == null) return;
+  // D6: worked out again from Copado's file, by the current rules - never a stored result of older ones
+  const conflicted = current.s.read('conflicted', rel);
+  if (conflicted == null) return;
+  const r = await W.autoResolve(rel, conflicted, autoOn());
+  const merged = r.merged != null ? r.merged : conflicted;
+  current.s.write('merged', rel, merged);
   current.s.write('resolved', rel, merged);
-  const auto = P.hasMarkers(merged) ? 'code' : (e.kind === 'xml' && e.conflicts) || !autoOn() ? 'review' : 'auto';
   const st = current.s.load();
-  st.files[rel].suggestion = auto === 'review' && !(e.kind === 'xml' && e.conflicts);
+  Object.assign(st.files[rel], { kind: r.kind || e.kind, conflicts: r.conflicts || 0, suggestion: !!r.suggestion, rules: r.rules, note: r.note });
   current.s.save(st);
-  setState(rel, auto, auto === 'auto' ? 'reset to the automatic result' : st.files[rel].suggestion ? 'reset to the suggested merge - review it and accept' : 'reset - to resolve');
+  setState(rel, r.state, 'reset to Copado\u2019s file' + (r.note ? ' \u2013 ' + r.note : ''));
+}
+
+/** The promotion's state for a bug report - each file's state and note, the rules' version - every name replaced; saved for you to review. */
+async function pageDiagnostics() {
+  if (!current) return;
+  const A = require('./src/anonymise'), shared = { map: new Map(), n: 0 }, anon = t => A.anonymise(String(t || ''), shared).text;
+  const st = current.s.load() || {};
+  const rows = Object.entries(st.files || {}).map(([rel, e]) => '| ' + anon(path.basename(rel)) + ' | ' + (e.kind || '') + ' | ' + (e.state || '') + (e.revising ? ' (revising)' : '') + ' | ' + (e.conflicts || 0) + ' | ' + (e.rules || '\u2014') + ' | ' + anon(e.note || '') + ' |');
+  const body = ['# Release Assistant \u2013 promotion diagnostics', '', '- Release Assistant ' + require('./package.json').version + ', VS Code ' + vscode.version + ', ' + process.platform + ', rules ' + W.RULES,
+    '- ' + plural(rows.length, 'file') + '; every name replaced \u2013 review before sharing', '', '| File | Kind | State | Conflicts | Rules | Note |', '|---|---|---|---|---|---|'].concat(rows).join('\n') + '\n';
+  const dir = path.join(h.projectRoot() || current.s.dir, '.copado', 'diagnostics');
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, 'promotion-' + new Date().toISOString().replace(/[:.]/g, '-') + '.md');
+  fs.writeFileSync(f, body);
+  await vscode.window.showTextDocument(vscode.Uri.file(f), { preview: false });
+}
+const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+
+/* ------------------------------------------------------------ before the upload: everything to know, in one place */
+
+/** What the pre-check checked, as a fingerprint: each file's content and what was borrowed - a change after it makes the result stale. */
+function precheckInputs(s, st, ready) {
+  const parts = [];
+  for (const x of ready) parts.push(x.rel + '=' + P.sha(x.text));
+  for (const [rel, e] of Object.entries(st.files)) {
+    if (e.state === 'uploaded') parts.push(rel + '=' + (e.uploadedSha || ''));
+    else if (e.state === 'copado') parts.push(rel + '=copado:' + (e.attachmentId || '') + ':' + (e.modified || ''));
+  }
+  for (const b of (st.borrow && st.borrow.items) || []) parts.push('borrowed:' + b.type + ':' + b.name);
+  return P.sha(parts.sort().join('\n'));
+}
+
+const typeOfXml = text => (/<([A-Za-z][\w]*)[\s>]/.exec(String(text || '').replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, '')) || [])[1] || null;
+
+/**
+ * The checklist before an upload: what is not finished, what the upload takes away, what Copado must resolve, what
+ * the promotion still needs in the target, and whether the pre-check still stands for what goes up.
+ */
+function uploadChecks(s, st, ready, held) {
+  const UM = require('./src/unionMerge');
+  const unresolved = Object.entries(st.files).filter(([, e]) => ['review', 'code', 'error'].includes(e.state))
+    .map(([rel, e]) => ({ rel, why: e.state === 'error' ? (e.note || 'could not be read') : e.suggestion ? 'a suggestion not accepted yet' : e.conflicts ? plural(e.conflicts, 'conflict') + ' to choose' : 'not resolved yet' }));
+  const accessLost = [];
+  for (const x of ready) {
+    if (!/\.xml$/i.test(x.rel)) continue;
+    const lost = UM.accessLost(s.read('promotion', x.rel), x.text, typeOfXml(x.text));
+    if (lost.length) accessLost.push({ rel: x.rel, lines: lost.slice(0, 8), more: Math.max(0, lost.length - 8) });
+  }
+  const copadoOnly = Object.entries(st.files).filter(([, e]) => e.state === 'copadoOnly').map(([rel]) => rel);
+  const duplicates = ready.filter(x => x.warn).map(x => ({ rel: x.rel, why: x.warn }));
+  const otherStories = Object.entries(st.files).filter(([, e]) => e.otherStories && e.otherStories.length).map(([rel, e]) => ({ rel, story: e.story, others: e.otherStories }));
+  const pc = st.precheck;
+  const recommit = Borrow.recommitList((st.borrow && st.borrow.items) || [], pc && pc.result && !pc.result.success ? pc.missing || [] : []);
+  const precheck = !pc ? { state: 'none' } : { state: pc.state, at: pc.finishedAt || pc.at, stale: pc.state !== 'running' && !!pc.inputs && pc.inputs !== precheckInputs(s, st, ready) };
+  return { unresolved, accessLost, copadoOnly, duplicates, held, otherStories, recommit, precheck };
+}
+
+/** The checklist in plain lines, for VS Code's own confirmation and the review report. */
+function checkLines(k) {
+  const out = [];
+  if (k.unresolved.length) out.push('\u2717 ' + plural(k.unresolved.length, 'file') + ' not resolved yet - they stay as conflicts in Copado: ' + k.unresolved.map(x => path.basename(x.rel) + ' (' + x.why + ')').join(', '));
+  for (const a of k.accessLost) out.push('\u26a0 ' + path.basename(a.rel) + ' grants less than the target has now: ' + a.lines.join('; ') + (a.more ? ' (+' + a.more + ' more)' : ''));
+  if (k.copadoOnly.length) out.push('\u2192 ' + plural(k.copadoOnly.length, 'file') + ' to resolve in Copado itself: ' + k.copadoOnly.map(r => path.basename(r)).join(', '));
+  for (const o of k.otherStories) out.push('\u26a0 ' + path.basename(o.rel) + ' is in conflict for ' + [o.story].concat(o.others).join(' and ') + ' - only ' + o.story + '\u2019s conflict file is resolved here; check the others in Copado');
+  if (k.recommit.length) out.push('\u2192 ' + plural(k.recommit.length, 'component') + ' the promotion still needs in the target - commit them to a story: ' + k.recommit.map(x => x.type + ' ' + x.name).join(', '));
+  out.push(k.precheck.state === 'none' ? '\u2022 No pre-check yet - nothing has validated these resolutions' : k.precheck.stale ? '\u26a0 The pre-check (' + k.precheck.state + ') ran before your latest changes - run it again to be sure'
+    : k.precheck.state === 'passed' ? '\u2713 The pre-check passed with these resolutions' : '\u26a0 The last pre-check ' + k.precheck.state + ' - see the Pre-check tab');
+  return out;
+}
+
+/** The list of components to recommit: copied as text, or written as a package.xml and opened. */
+async function recommitItems() {
+  const st = current.s.load();
+  const pc = st.precheck;
+  return Borrow.recommitList((st.borrow && st.borrow.items) || [], pc && pc.result && !pc.result.success ? pc.missing || [] : []);
+}
+async function copyMissing() {
+  if (!current) return;
+  const items = await recommitItems();
+  if (!items.length) { vscode.window.showInformationMessage('Nothing to recommit - no component was found missing or added to the pre-check.'); return; }
+  await vscode.env.clipboard.writeText(items.map(x => x.type + '\t' + x.name + '\t' + x.why + (x.needs.length ? ' - used by ' + x.needs.join(', ') : '')).join('\n') + '\n');
+  vscode.window.setStatusBarMessage('Copied ' + plural(items.length, 'component') + ' to recommit', 4000);
+}
+async function exportMissing() {
+  if (!current) return;
+  const items = await recommitItems();
+  if (!items.length) { vscode.window.showInformationMessage('Nothing to recommit - no component was found missing or added to the pre-check.'); return; }
+  const st = current.s.load();
+  const dir = path.join(current.s.dir, 'recommit');
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, 'package.xml');
+  fs.writeFileSync(f, '<!-- ' + st.name + ': components the promotion still needs in ' + (st.to || 'the target') + ' - commit them to a story in Copado (Commit Changes, or a selective commit), then refresh. -->\n' +
+    Borrow.manifestFor(items, (await h.apiVersion()) || '62.0').replace(/^<\?xml[^>]*>\n/, ''));
+  await vscode.window.showTextDocument(vscode.Uri.file(f), { preview: false });
+  vscode.window.showInformationMessage(plural(items.length, 'component') + ' to commit to a story, in one package.xml. Commit them all at once, then refresh the promotion.');
+}
+
+/** A review of the promotion to share: each file and how it was resolved, what the upload changes, the pre-check, what to recommit. */
+async function reviewReport() {
+  if (!current) return;
+  const st = current.s.load();
+  const { ready, held } = W.readyFiles(current.s, st, libs);
+  const k = uploadChecks(current.s, st, ready, held);
+  const cell = t => String(t == null ? '' : t).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  const STATE = { auto: 'resolved automatically', resolved: 'resolved here', review: 'to review', code: 'to resolve', error: 'could not be read', uploaded: 'uploaded', copado: 'resolved in Copado', copadoOnly: 'to resolve in Copado' };
+  const pc = st.precheck;
+  const lines = ['# ' + st.name + ' \u2013 conflict review', '',
+    '- ' + (st.from || '?') + ' \u2192 ' + (st.to || '?') + (st.status ? ', status ' + st.status : ''),
+    '- Written ' + new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC by Copado Release Assistant ' + require('./package.json').version, '',
+    '## Before uploading', ''].concat(checkLines(k).map(l => '- ' + l), ['',
+    '## Files', '', '| File | Story | State | What happened |', '|---|---|---|---|'],
+    Object.entries(st.files).sort((a, b) => a[0].localeCompare(b[0])).map(([rel, e]) => '| ' + cell(rel) + ' | ' + cell(e.story) + ' | ' + cell((STATE[e.state] || e.state) + (e.revising ? ' (editing again)' : '')) + ' | ' + cell(e.note) + (e.changes && e.changes.length ? '<br>' + e.changes.slice(0, 5).map(cell).join('<br>') : '') + ' |'));
+  if (k.accessLost.length) lines.push('', '## Access the upload removes', '', ...k.accessLost.flatMap(a => ['- **' + path.basename(a.rel) + '**', ...a.lines.map(l => '  - ' + l)]));
+  lines.push('', '## Pre-check', '');
+  if (!pc) lines.push('Not run.');
+  else {
+    lines.push('- ' + pc.state + (pc.finishedAt ? ' at ' + pc.finishedAt.replace('T', ' ').slice(0, 16) + ' UTC' : '') + (pc.target && pc.target.environment ? ' against ' + pc.target.environment : '') + (k.precheck.stale ? ' \u2013 **stale: files changed after it ran**' : ''));
+    lines.push('- Checked: ' + pc.used.map(u => path.basename(u.rel) + ' (' + u.from + ')').join(', '));
+    if (pc.leftOut.length) lines.push('- Left out: ' + pc.leftOut.map(u => path.basename(u.rel) + ' (' + u.reason + ')').join(', '));
+    if (pc.branches && pc.branches.length) lines.push('- The rest from: ' + pc.branches.join(', '));
+    if (pc.result && !pc.result.success) {
+      const g = Borrow.byCause(pc.result.failures);
+      for (const c of g.causes) lines.push('', '### ' + c.type + ' ' + c.name + (c.outdated ? ' is older in the target' : ' is missing in the target') + ' \u2013 ' + plural(c.failures.length, 'error'), '', ...c.failures.map(f => '- ' + f.type + ' ' + f.fullName + ': ' + f.problem));
+      if (g.other.length) lines.push('', '### Other errors', '', ...g.other.map(f => '- ' + f.type + ' ' + f.fullName + (f.line ? ' (line ' + f.line + ')' : '') + ': ' + f.problem));
+      for (const t of pc.result.tests || []) lines.push('- Test ' + t.name + (t.method ? '.' + t.method : '') + ': ' + t.message);
+    }
+  }
+  if (k.recommit.length) lines.push('', '## To commit to a story', '', '| Type | Component | Why | Used by |', '|---|---|---|---|', ...k.recommit.map(x => '| ' + cell(x.type) + ' | ' + cell(x.name) + ' | ' + cell(x.why) + ' | ' + cell(x.needs.join(', ')) + ' |'));
+  const dir = path.join(h.projectRoot() || current.s.dir, '.copado', 'reports');
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, st.name.replace(/[^\w.-]/g, '_') + '-review-' + new Date().toISOString().replace(/[:.]/g, '-') + '.md');
+  fs.writeFileSync(f, lines.join('\n') + '\n');
+  await vscode.window.showTextDocument(vscode.Uri.file(f), { preview: false });
 }
 
 async function copy(rel) {
@@ -389,7 +527,12 @@ async function uploadAll(opts) {
   const last = open === ready.length && !revised;
   const rc = current.info && current.info.recreate;
   const offerRecreate = revised > 0 && rc && !rc.missing && !rc.value;
-  const detail = ready.map(x => (x.entry.revising ? '\u21bb replace ' : x.entry.state === 'auto' ? '\u2713 auto   ' : '\u2713 yours  ') + x.rel).join('\n') +
+  // B3.4: duplicate entries said first - Copado may reject some when it deploys
+  const warned = ready.filter(x => x.warn);
+  const checks = checkLines(uploadChecks(current.s, st, ready, held));
+  const detail = (checks.length ? 'Before you upload:\n' + checks.join('\n') + '\n\n' : '') +
+    (warned.length ? '\u26a0 ' + warned.length + ' with duplicate entries \u2013 uploaded as they are; Copado\u2019s deployment may reject some:\n' + warned.map(x => '   ' + x.rel + ' \u2013 ' + x.warn).join('\n') + '\n\n' : '') +
+    ready.map(x => (x.entry.revising ? '\u21bb replace ' : x.entry.state === 'auto' ? '\u2713 auto   ' : '\u2713 yours  ') + x.rel).join('\n') +
     (held.length ? '\n\nHeld back:\n' + held.map(x => '\u2717 ' + x.rel + ' - ' + x.reason).join('\n') : '') +
     '\n\nEach conflict attachment is renamed "RESOLVED \u2026" with the resolved content, as Copado\u2019s editor does, then read back.' +
     (revised ? '\n\n' + revised + ' replace' + (revised === 1 ? 's a resolution' : ' resolutions') + ' already in Copado - only if Copado still holds the one you started from.' : '') +
@@ -414,11 +557,13 @@ async function uploadAll(opts) {
   for (const f of r.uploaded) h.output.appendLine('copado: uploaded ' + f.path + ' to ' + st.name + ' as "' + f.name + '" (' + f.bytes + ' bytes, read back and identical)');
   for (const f of r.failed) h.output.appendLine('copado: NOT uploaded ' + f.rel + ' - ' + f.reason);
   if (r.batch.statusChange) h.output.appendLine('copado: ' + st.name + ' status "' + r.batch.statusChange.from + '" \u2192 "' + r.batch.statusChange.to + '" (read back)');
+  if (r.statusError) h.output.appendLine('copado: the files are uploaded, but the status was not changed - ' + r.statusError);
   const left = Object.values(current.s.load().files).filter(e => !['uploaded', 'copado'].includes(e.state)).length;
   const msg = r.uploaded.length + ' uploaded to ' + st.name + (r.failed.length ? ', ' + r.failed.length + ' failed (see the output)' : '') +
-    (r.batch.statusChange ? '. Status: ' + r.batch.statusChange.to + '. Continue the promotion in Copado.' : left ? '. ' + left + ' still to resolve.' : '.');
+    (r.batch.statusChange ? '. Status: ' + r.batch.statusChange.to + '. Continue the promotion in Copado.' : left ? '. ' + left + ' still to resolve.' : '.') +
+    (r.statusError ? ' The status could not be set to Conflicts Resolved (' + r.statusError + ') \u2013 the uploads are saved; set it in Copado.' : '');
   if (pick === 'Upload and tick Re-create branch' && r.uploaded.length) await setRecreate(true, 'the resolutions changed after a validation');
-  const next = await (r.failed.length ? vscode.window.showWarningMessage : vscode.window.showInformationMessage)(msg, 'Open in Copado');
+  const next = await (r.failed.length || r.statusError ? vscode.window.showWarningMessage : vscode.window.showInformationMessage)(msg, 'Open in Copado');
   if (next) await openInCopado();
 }
 
@@ -426,18 +571,26 @@ async function undoUpload() {
   if (!current) { vscode.window.showInformationMessage('Open the promotion first.'); return; }
   const b = W.lastBatch(current.s);
   if (!b) { vscode.window.showInformationMessage('There is no upload to undo for ' + current.promotion.name + '.'); return; }
-  const ok = await vscode.window.showWarningMessage('Undo the upload of ' + b.files.length + ' file' + (b.files.length === 1 ? '' : 's') + ' to ' + b.promotion.name + '?', { modal: true,
-    detail: b.files.map(f => f.path).join('\n') + '\n\nEach attachment is renamed back with its conflicted content' + (b.statusChange ? '; the status goes back to "' + b.statusChange.from + '" if it is still "' + b.statusChange.to + '"' : '') + '.' }, 'Undo');
+  const todo = b.files.filter(f => !f.restored);
+  const ok = await vscode.window.showWarningMessage('Undo the upload of ' + todo.length + ' file' + (todo.length === 1 ? '' : 's') + ' to ' + b.promotion.name + '?', { modal: true,
+    detail: todo.map(f => f.path).join('\n') + (todo.length < b.files.length ? '\n\n' + (b.files.length - todo.length) + ' of this upload ' + (b.files.length - todo.length === 1 ? 'is' : 'are') + ' already back as ' + (b.files.length - todo.length === 1 ? 'it was' : 'they were') + '.' : '') +
+      '\n\nEach attachment is renamed back with its conflicted content' + (b.statusChange && !b.statusRestored ? '; the status goes back to "' + b.statusChange.from + '" if it is still "' + b.statusChange.to + '"' : '') + '.' }, 'Undo');
   if (ok !== 'Undo') return;
   const c = Object.assign({}, h.rc(), { copadoOrg: b.copadoOrg || h.rc().copadoOrg });
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Putting ' + (b.files.length === 1 ? 'the file' : 'the ' + b.files.length + ' files') + ' back as ' + (b.files.length === 1 ? 'it was' : 'they were') + ' in Copado' },
-    async () => W.undoBatch(await api(c), current.s, b));
+  let r;
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Putting ' + (todo.length === 1 ? 'the file' : 'the ' + todo.length + ' files') + ' back as ' + (todo.length === 1 ? 'it was' : 'they were') + ' in Copado' },
+    async () => { r = await W.undoBatch(await api(c), current.s, b); });
   const st3 = current.s.load();
-  W.logEvent(st3, 'undo', 'Undid the upload of ' + b.files.length + ' file' + (b.files.length === 1 ? '' : 's'), b.statusChange ? 'status back to ' + b.statusChange.from : '');
+  W.logEvent(st3, 'undo', 'Undid the upload of ' + plural(r.restored.length, 'file') + (r.failed.length ? ', ' + r.failed.length + ' not undone' : ''), b.statusChange && !r.statusError ? 'status back to ' + b.statusChange.from : '');
   current.s.save(st3);
   changed.fire();
-  h.output.appendLine('copado: undid the upload of ' + b.files.length + ' file(s) to ' + b.promotion.name);
-  vscode.window.showInformationMessage('Undone: ' + b.files.length + ' file' + (b.files.length === 1 ? ' is a conflict' : 's are conflicts') + ' again in Copado, still resolved here.');
+  h.output.appendLine('copado: undid the upload of ' + r.restored.length + ' file(s) to ' + b.promotion.name);
+  for (const f of r.failed) h.output.appendLine('copado: NOT undone ' + f.rel + ' - ' + f.reason);
+  if (r.statusError) h.output.appendLine('copado: the status was not put back - ' + r.statusError);
+  if (r.failed.length || r.statusError) {
+    vscode.window.showWarningMessage('Undone: ' + r.restored.length + ' of ' + todo.length + '.' + (r.failed.length ? ' ' + plural(r.failed.length, 'file') + ' could not be put back (' + r.failed.map(f => path.basename(f.rel)).join(', ') + ') \u2013 Undo upload again tries just ' + (r.failed.length === 1 ? 'it' : 'those') + '.' : '') +
+      (r.statusError ? ' The status was not put back: ' + r.statusError + '.' : ''));
+  } else vscode.window.showInformationMessage('Undone: ' + r.restored.length + ' file' + (r.restored.length === 1 ? ' is a conflict' : 's are conflicts') + ' again in Copado, still resolved here.');
 }
 
 /* ------------------------------------------------------------ the pre-check */
@@ -455,6 +608,7 @@ let activeRun = null;
 
 // ---- borrowing for the pre-check: what the target lacks, from the source org, read-only - for the pre-check alone ----
 const Borrow = require('./src/borrow');
+// rounds of adding missing components: the first pre-check is round 1, each addition starts the next - at most ROUNDS in all
 const ROUNDS = 5;
 const borrowDir = () => path.join(current.s.dir, 'borrowed');
 const pkgDir = () => { try { const j = JSON.parse(fs.readFileSync(path.join(h.projectRoot(), 'sfdx-project.json'), 'utf8')); const d = (j.packageDirectories || []).find(x => x.default) || (j.packageDirectories || [])[0]; return (d && d.path) || 'force-app'; } catch (e) { return 'force-app'; } };
@@ -476,15 +630,16 @@ async function borrow(items) {
   h.requireTrust('Borrowing runs the Salesforce CLI');
   const st = current.s.load();
   const bw = st.borrow || { items: [], round: 1, org: null, prev: [] };
-  if (bw.round >= ROUNDS) { vscode.window.showWarningMessage('Already ' + ROUNDS + ' rounds of borrowing - what is still missing is probably more than a few components: commit them to the story, or promote the story that has them.'); return; }
+  if (bw.round >= ROUNDS) { vscode.window.showWarningMessage('Already ' + ROUNDS + ' rounds of the pre-check with added components - what is still missing is probably more than a few components. Export the list of missing components, commit them to the story, or promote the story that has them.', 'Export the list').then(x => { if (x) exportMissing(); }); return; }
   const org = await sourceOrg(c);
   if (!org) { vscode.window.showWarningMessage('Not borrowed: no Salesforce login chosen for ' + (st.from || 'the source org') + '.'); return; }
   const all = bw.items.concat(items.filter(i => !bw.items.some(b => b.type === i.type && b.name.toLowerCase() === i.name.toLowerCase())).map(i => ({ type: i.type, name: i.name })));
   // a scratch project of its own, never the open one: the source org's versions, retrieved, read-only
   const dir = borrowDir(), root = pkgDir();
+  const version = (await h.apiVersion()) || '62.0';
   fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(path.join(dir, 'manifest'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: root, default: true }], sourceApiVersion: '62.0' }, null, 2));
-  fs.writeFileSync(path.join(dir, 'manifest', 'package.xml'), Borrow.manifestFor(all, '62.0'));
+  fs.writeFileSync(path.join(dir, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: root, default: true }], sourceApiVersion: version }, null, 2));
+  fs.writeFileSync(path.join(dir, 'manifest', 'package.xml'), Borrow.manifestFor(all, version));
   try {
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Borrowing ' + all.length + ' component' + (all.length === 1 ? '' : 's') + ' from ' + (st.from || org) }, () =>
       h.sfcli.retrieve(c.sfPath, { manifest: path.join('manifest', 'package.xml'), org, cwd: dir }));
@@ -549,7 +704,9 @@ async function precheck() {
   }
   if (!used.length) { vscode.window.showInformationMessage('Resolve some files first - the pre-check checks your resolved files.'); return; }
   const run = activeRun = { id: Date.now().toString(36), at: new Date().toISOString(), state: 'running', promotion: st.name, steps: { gather: 'running', files: '', check: '', result: '' },
-    phase: null, log: [], used: used.map(u => ({ rel: u.rel, from: u.from })), leftOut, target: null, files: null, result: null, message: null, finishedAt: null };
+    phase: null, log: [], used: used.map(u => ({ rel: u.rel, from: u.from })), leftOut, target: null, files: null, result: null, message: null, finishedAt: null,
+    // what it checks: a file changed after it - or a component added or removed - makes its result stale
+    inputs: precheckInputs(current.s, st, ready) };
   const say = (text, kind) => { run.log.push({ at: new Date().toISOString(), text, kind: kind || 'info' }); if (run.log.length > 80) run.log.splice(0, run.log.length - 80); };
   const save = () => { const s2 = current && current.s.load(); if (!s2 || s2.id !== st.id) return; s2.precheck = run; current.s.save(s2); changed.fire(); };
   const finish = (state, message) => {
@@ -574,6 +731,8 @@ async function precheck() {
     else if (ev.step === 'files' && ev.state === 'done') {
       run.steps.files = 'done';
       run.files = { fromBranches: ev.fromBranches, resolved: ev.resolved, leftOut: ev.leftOut, missing: ev.missing, branches: ev.branches };
+      // the branches that were there: the promotion branch is read only once Copado has made it
+      if (ev.branches && ev.branches.length) run.branches = ev.branches;
       say('Prepared: ' + ev.message);
     } else if (ev.step === 'check' && ev.state === 'running') {
       run.steps.gather = run.steps.gather || 'done'; run.steps.files = run.steps.files === 'running' || !run.steps.files ? 'done' : run.steps.files; run.steps.check = 'running';
@@ -584,6 +743,8 @@ async function precheck() {
       run.steps.check = 'done';
       run.steps.result = ev.success ? 'done' : 'failed';
       run.result = { success: ev.success, failures: ev.failures.map(f => Object.assign({}, f, { resolution: conflictOf(f) })), tests: ev.tests, coverage: ev.coverage, coverageRule: ev.coverageRule, cliError: ev.cliError };
+      // each error a missing component causes says which: the page shows the cause once, with the errors under it
+      for (const g of Borrow.byCause(run.result.failures).causes) for (const f of g.failures) f.cause = { type: g.type, name: g.name, outdated: !!g.outdated };
       // what the target lacks, read from the errors - less what is borrowed already; and what went since the last round
       const bw = (current.s.load() || {}).borrow || null;
       const isBorrowed = x => !!(bw && bw.items.some(b => b.type === x.type && b.name.toLowerCase() === x.name.toLowerCase()));
@@ -619,16 +780,18 @@ async function precheck() {
         const e = st.files[u.rel];
         u.file = current.s.write('incopado', u.rel, Buffer.from(await a.download('Attachment', e.attachmentId)).toString('utf8'));
       }
-      // the rest of the promotion: the stories' branches - for a back-promotion, the source environment's
-      stories = [...new Set(Object.values(st.files).map(e => e.story).filter(Boolean))];
+      // the rest of the promotion: every story promoted in it - not only those with conflicts - for a back-promotion, the source environment's.
+      // Never the promotion branch: while the promotion is in conflict it can still hold the target's version of what a story changed
+      const known = await L.promotionStories(a, st.id).catch(() => []);
+      stories = W.precheckStories(known, st.files);
       const pattern = vscode.workspace.getConfiguration('cmr').get('repo.featureBranch', 'feature/{story}');
       if (info.back && info.sourceBranch) branches = [info.sourceBranch];
       else {
-        const known = await L.promotionStories(a, st.id).catch(() => []);
         for (const name of stories) {
           const rec = known.find(k => k.name === name);
           const fb = rec ? await L.featureBranch(a, rec, pattern).catch(() => null) : null;
-          branches.push(fb ? fb.branch : pattern.split('{story}').join(name));
+          const b = fb ? fb.branch : pattern.split('{story}').join(name);
+          if (!branches.includes(b)) branches.push(b);
         }
       }
       try { localOrgs = await h.orgList(c, h.projectRoot()); } catch (e) { /* asked below */ }
@@ -825,8 +988,9 @@ async function snapshot() {
       out.current = { promotion: Object.assign({}, current.promotion, { status: current.promotion.status }), state: st, info: current.info || null, precheck: st.precheck || null, borrow: st.borrow || null, borrowList: current.borrowList || null,
         jobs: current.jobs ? { at: current.jobs.at, watching: current.jobs.watching, error: current.jobs.error, objects: current.jobs.objects, errors: current.jobs.errors, mapped: current.jobs.mapped || null,
           jobs: current.jobs.snap ? current.jobs.snap.jobs.map(slim) : [], running: current.jobs.snap ? current.jobs.snap.running : false, failed: current.jobs.snap ? current.jobs.snap.failed : false, finished: current.jobs.snap ? current.jobs.snap.finished : false } : null,
-        plan: { ready: ready.map(x => ({ rel: x.rel, how: x.entry.revising ? 'replaces the one in Copado' : x.entry.state === 'auto' ? 'auto' : 'yours', revising: !!x.entry.revising })), held,
-          last: open === ready.length && ready.length > 0 && !ready.some(x => x.entry.revising), revised: ready.filter(x => x.entry.revising).length },
+        plan: { ready: ready.map(x => ({ rel: x.rel, how: x.entry.revising ? 'replaces the one in Copado' : x.entry.state === 'auto' ? 'auto' : 'yours', revising: !!x.entry.revising, warn: x.warn || null })), held,
+          last: open === ready.length && ready.length > 0 && !ready.some(x => x.entry.revising), revised: ready.filter(x => x.entry.revising).length,
+          checks: uploadChecks(current.s, st, ready, held) },
         // resolutions in Copado that a deployment would trip on: not well-formed, or named by Copado's latest errors
         health: W.uploadedHealth(current.s, st, libs),
         flagged: (current.jobs && current.jobs.errors || []).filter(e => e.resolution).reduce((m, e) => { (m[e.resolution] = m[e.resolution] || []).push(e.problem); return m; }, {}),
@@ -885,8 +1049,15 @@ async function actOnce(name, p) {
     case 'recreate': return setRecreate(!!p.value);
     case 'upload': return uploadAll({ confirmed: true, status: !!p.status, recreate: !!p.recreate });
     case 'jobErrors': return jobErrors();
+    case 'copyMissing': return copyMissing();
+    case 'exportMissing': return exportMissing();
+    case 'reviewReport': return reviewReport();
     case 'readiness': return current && h.readinessReport({ promotion: Object.assign({}, current.promotion) });
     case 'openInCopado': return openInCopado();
+    // the page's own menu: Settings, a diagnostics file, Clean working files (D3)
+    case 'openSettings': return vscode.commands.executeCommand('cmr.openSettings');
+    case 'cleanStorage': return vscode.commands.executeCommand('cmr.storage.clean');
+    case 'pageDiagnostics': return pageDiagnostics();
     case 'close': return close();
     case 'home': stopWatch(); current = null; changed.fire(); return;
     case 'stopWatch': stopWatch(); return;
@@ -894,10 +1065,7 @@ async function actOnce(name, p) {
   }
 }
 
-/** Opens a promotion from elsewhere on the page (the pipeline, a story's journey). */
-async function openById(id) { return openRef(id); }
-
 /** The working folders in use: the promotion open on the page. */
 function openDirs() { return current && current.s && current.s.dir ? [current.s.dir] : []; }
 
-module.exports = { openDirs, activate, promotionRef, snapshot, act, openById, onChange: f => changed.event(f), fire: () => changed.fire(), componentsView };
+module.exports = { openDirs, activate, promotionRef, snapshot, act, onChange: f => changed.event(f), fire: () => changed.fire(), componentsView };

@@ -237,29 +237,6 @@ module.exports = function register(ok, section, h) {
     assert.strictEqual(L.isBackPromotion({ backFlag: false, fromId: 'E0PRD', toId: 'E0UAT' }, null), false, 'Copado\u2019s flag wins');
     assert.deepStrictEqual([L.isBlocking('Merge Conflict'), L.isBlocking('Conflicts Resolved'), L.isBlocking('Validation Failed'), L.isBlocking('In Progress')], [true, false, true, false]);
   });
-  ok('a story\u2019s journey: each stage with its promotion, where it is now, what comes next', async () => {
-    const L = require('../src/lifecycle');
-    const api = require('./fixtures/life-org').lifeOrg();
-    const j = await L.storyJourney(api, 'US-0000101');
-    assert.deepStrictEqual(j.stages.map(s => [s.env, s.state, s.promotion && s.promotion.name]),
-      [['dev1', 'done', null], ['int', 'done', 'P0001'], ['qa', 'current', 'P0002'], ['uat', 'next', 'P0003'], ['prod', 'ahead', null]]);
-    assert.strictEqual(j.stages[3].promotion.blocking, true, 'the promotion into the next stage is in conflict');
-    assert.deepStrictEqual([j.next.env, j.next.branch, j.hotfix], ['uat', 'uat', false]);
-    await assert.rejects(L.storyJourney(api, 'US-0009999'), /No user story US-0009999/);
-    await assert.rejects(L.storyJourney(api, "US-1' OR Name LIKE '%"), /A user story such as/);
-  });
-
-  ok('a hotfix - a story based on the production branch - goes straight to production, then back down', async () => {
-    const L = require('../src/lifecycle');
-    const api = require('./fixtures/life-org').lifeOrg();
-    const j = await L.storyJourney(api, 'US-0000104');
-    assert.strictEqual(j.hotfix, true);
-    assert.deepStrictEqual(j.stages.map(s => [s.env, s.state]), [['hotfix', 'done'], ['prod', 'current']], 'its own lane, not the pipeline\u2019s');
-    assert.strictEqual(j.next, null);
-    assert.deepStrictEqual(j.backPromotions.map(p => p.name), ['P0005']);
-    assert.deepStrictEqual(j.backTo, ['dev1', 'dev2', 'int', 'qa', 'uat'], 'back-promoted to the environments before production - not to the hotfix lane it came from');
-    assert.strictEqual(L.isHotfix({ baseBranch: 'int' }, j.pipeline), false);
-  });
 
   ok('what each story changed - from its commit file, its commits\u2019 attachments or its metadata records - and the likely conflicts between them', async () => {
     const L = require('../src/lifecycle');
@@ -418,7 +395,7 @@ module.exports = function register(ok, section, h) {
         createTreeView: () => ({ dispose() {} }), createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, clear() {}, dispose() {} }),
         withProgress: async (o, fn) => { log.progress.push({ title: o.title, location: o.location }); return fn({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) }); },
         showInformationMessage: async (m) => { log.info.push(m); return answer('info', m); },
-        showWarningMessage: async (m, o) => { log.warn.push(m); if (o && o.detail) (log.details = log.details || []).push(o.detail); return answer('warn', m); },
+        showWarningMessage: async (m, o, ...items) => { log.warn.push(m); if (o && o.detail) (log.details = log.details || []).push(o.detail); return answer('warn', m, items.length && typeof items[0] === 'object' ? items : undefined); },
         showErrorMessage: async (m) => { log.error.push(m); return answer('error', m); },
         showInputBox: async o => { log.inputs.push(o); return answer('input', (o.title || '') + ' ' + (o.prompt || '')); },
         showQuickPick: async (items, o) => { log.picks.push({ items, o }); return answer('pick', (o && (o.title || o.placeHolder)) || '', items); },
@@ -468,7 +445,7 @@ module.exports = function register(ok, section, h) {
       const api = require('./fixtures/life-org').lifeOrg({ uri: g.base + '/owner/repo' });
       const vs = fakeCode(root, { 'cmr.sf.path': h.fakeSf(tools), 'cmr.copado.org': 'copado', 'cmr.repo.provider': 'github', 'cmr.org.confirm': false,
         'cmr.copado.environmentOrgs': { uat: 'qa' }, 'cmr.validate.revealOutput': false });
-      const [release] = loadWith(vs, ['../release', '../promotionUi', '../lifecycleUi', '../releasePage']);
+      const [release] = loadWith(vs, ['../release', '../promotionUi', '../releasePage']);
       const out = [];
       const secrets = new Map(), state = new Map();
       const storageDir = async sub => { const d = path.join(root, '.copado', sub || ''); fs.mkdirSync(d, { recursive: true }); return vs.Uri.file(d); };
@@ -523,11 +500,6 @@ module.exports = function register(ok, section, h) {
       fs.unlinkSync(path.join(root, 'copado-policy.json'));
       await assert.rejects(hp.validatePromotionBranch({ id: 'P4', name: 'P0004', to: 'int', toId: 'E0INT', from: 'dev2', fromId: 'E0D2' }), /promotion\/P0004 is not in the repository yet - Copado creates it when the promotion merges/);
       // a story from its feature branch, named by Copado's record, against the next stage
-      vs.answers.pick.push({ re: /which test classes/, v: items => items });
-      vs.answers.input.push({ re: /other test classes/, v: '' });
-      await hp.validateFromBranch('US-0000101');
-      assert.ok(/US-0000101 - its branch is feature\/US-0000101, from the story\u2019s copado__Feature_Branch__c/.test(out.join('\n')));
-      assert.deepStrictEqual([hist().length, hist()[2].source, hist()[2].environment], [3, 'feature branch', 'uat']);
     } finally {
       g.server.close(); sfcli.resetRest();
       rmTree(root); rmTree(tools);
@@ -558,50 +530,6 @@ module.exports = function register(ok, section, h) {
     };
     return page;
   }
-
-  /** The lifecycle side, real, over the pipeline org - its snapshots are what the page draws. */
-  async function lifeSide(extra) {
-    const vs = fakeCode(os.tmpdir(), {});
-    const [life] = loadWith(vs, ['../lifecycleUi']);
-    const api = require('./fixtures/life-org').lifeOrg();
-    const calls = [];
-    life.activate({ subscriptions: { push() {} }, workspaceState: { get: () => null, update: async () => {} } }, Object.assign({
-      rc: () => ({ copadoOrg: 'copado' }), requireTrust() {}, deps: { resolveProject: () => ({ root: os.tmpdir() }) }, copadoApi: () => api, apiVersion: async () => '62.0',
-      validateFromBranch: async n => calls.push(['validate', n])
-    }, extra || {}));
-    return { life, calls, api, vs };
-  }
-
-  ok('the page\u2019s story journey - and opening a promotion from it', async () => {
-    const { life, calls, vs } = await lifeSide();
-    const page = runPage();
-    const base = { copadoOrg: 'copado', recent: [], current: null, validation: null };
-    await life.act('story.open', { ref: 'US-0000101' });
-    assert.ok(vs.log.progress.some(p => p.title === 'Looking up where US-0000101 is' && p.location === 15), 'a notification at the bottom while the journey is read');
-    page.state(Object.assign({}, base, { life: life.snapshot() }));
-    page.click({ nav: 'Stories' });
-    const t = page.text();
-    assert.ok(/dev1 passed .*int passed .*P0001 .*qa here now .*P0002 .*uat next .*P0003 Merge Conflict .*prod later/.test(t), t);
-    assert.ok(t.includes('Next: uat') && t.includes('Validate from the branch'));
-    page.click({ l: 'story.validate' });
-    await life.act(page.posted.pop().name, {});
-    assert.deepStrictEqual(calls.pop(), ['validate', 'US-0000101']);
-    page.click({ l: 'promotion.open', id: 'P3' });
-    assert.deepStrictEqual(page.posted.pop(), { type: 'act', scope: 'life', name: 'promotion.open', payload: { id: 'P3' } });
-    page.message({ type: 'nav', nav: 'Promotions' });
-    assert.ok(page.html.includes('class="nav on" data-nav="Promotions"'), 'the page switches to the promotion');
-    // the hotfix
-    await life.act('story.open', { ref: 'US-0000104' });
-    page.click({ nav: 'Stories' });
-    page.state(Object.assign({}, base, { life: life.snapshot() }));
-    assert.ok(/US-0000104 .*hotfix/.test(page.text()) && /back-promoted to .*dev1/.test(page.text()));
-    // a story that is not there
-    await life.act('story.open', { ref: 'US-0009999' });
-    page.state(Object.assign({}, base, { life: life.snapshot() }));
-    assert.ok(page.text().includes('No user story US-0009999'));
-    assert.ok(page.posted.every(m => !/^(pipeline|release|drift|forecast)/.test(m.name || '')), 'nothing of the removed views is ever asked for');
-    assert.ok(!/data-nav="(Pipeline|Releases)"/.test(page.html) && /data-nav="Promotions"/.test(page.html) && /data-nav="Stories"/.test(page.html), 'two tabs: Promotions and Stories');
-  });
 
   ok('the page\u2019s promotion without conflicts: validate the promotion branch as the stage\u2019s login, then follow Copado\u2019s deployment', () => {
     const page = runPage();
@@ -732,7 +660,7 @@ module.exports = function register(ok, section, h) {
       fs.writeFileSync(path.join(root, 'sfdx-project.json'), '{"packageDirectories":[{"path":"force-app","default":true}],"sourceApiVersion":"62.0"}');
       const api = require('./fixtures/life-org').lifeOrg();
       const vs = fakeCode(root, { 'cmr.copado.org': 'copado' });
-      const [release] = loadWith(vs, ['../release', '../promotionUi', '../lifecycleUi', '../releasePage']);
+      const [release] = loadWith(vs, ['../release', '../promotionUi', '../releasePage']);
       release.activate({ subscriptions: { push() {} }, secrets: { get: async () => undefined, store: async () => {}, delete: async () => {} },
         workspaceState: { get: (k, d) => d, update: async () => {} }, extensionUri: vs.Uri.file(root) }, {
         output: { appendLine() {}, show() {}, clear() {} }, resolveProject: () => ({ root }), startSession: async () => {}, copadoApi: () => api,
@@ -988,14 +916,14 @@ module.exports = function register(ok, section, h) {
     page.state({ copadoOrg: 'copado', recent: [], current: cur, validation: null });
   });
 
-  ok('from an open promotion, back to the start to open another: the back arrow, or Promotions again', () => {
+  ok('from an open promotion, back to the start to open another: the breadcrumb, or Promotions again', () => {
     const page = runPage();
     const now = new Date().toISOString();
     const cur = { promotion: { id: 'P7', name: 'P0007', status: 'Merge Conflict', from: 'qa', to: 'uat' },
       state: { name: 'P0007', from: 'qa', to: 'uat', syncedAt: now, events: [], files: { 'force-app/main/default/classes/A.cls': { state: 'resolved', kind: 'code' } } },
       plan: { ready: [{ rel: 'force-app/main/default/classes/A.cls', how: 'yours' }], held: [], last: false, revised: 0 }, canUndo: false, health: [], flagged: {}, info: null, jobs: null };
     page.state({ copadoOrg: 'copado', recent: [{ name: 'P0003', status: 'Merge Conflict', from: 'qa', to: 'uat', total: 0, syncedAt: now }], current: cur, validation: null });
-    assert.ok(/class="crumbback" data-a="home"/.test(page.html), 'a back arrow beside the promotion\u2019s name');
+    assert.ok(/<div class="crumbs"><button class="link" data-a="home">Promotions<\/button>/.test(page.html) && !/crumbback/.test(page.html), 'a breadcrumb - Promotions \u203a the promotion - no arrow among the tabs');
     page.click({ a: 'home' });
     assert.deepStrictEqual(page.posted.pop(), { type: 'act', name: 'home', payload: {} });
     page.click({ a: 'uploadAsk' });
@@ -1037,7 +965,7 @@ module.exports = function register(ok, section, h) {
     assert.strictEqual(phase('Elapsed Time: 12s'), null, 'anything else is not shown');
     const root = path.join(__dirname, '..');
     const titles = [];
-    for (const f of ['release.js', 'promotionUi.js', 'lifecycleUi.js', 'extension.js']) {
+    for (const f of ['release.js', 'promotionUi.js', 'extension.js']) {
       const src = fs.readFileSync(path.join(root, f), 'utf8');
       for (const m of src.matchAll(/withProgress\(\{[^}]*?title: ([^}]+?)(?:, cancellable[^}]*)?\}/g)) titles.push(f + ': ' + m[1]);
       for (const m of src.matchAll(/progress\.report\(\{ message: ('[^']*')/g)) titles.push(f + ': ' + m[1]);
@@ -1081,7 +1009,7 @@ module.exports = function register(ok, section, h) {
       state: { name: 'P0001', from: 'a', to: 'b', syncedAt: now, events: [], files: { [xml]: { state: 'review', suggestion: true, kind: 'xml', blocks: 1, note: 'a suggested merge - review it and accept' } } },
       plan: { ready: [], held: [], last: false, revised: 0 }, canUndo: false, health: [], flagged: {}, info: null, jobs: null, precheck: null } });
     const t = page.text();
-    assert.ok(/To review \u00b7 a suggested merge/.test(t) && /Accept the suggestion/.test(t) && /A suggested merge of both branches\. Accept it, or open Review in merge, change what you need and save\./.test(t), t);
+    assert.ok(/Suggested/.test(t) && /Resolve in editor/.test(t) && /Resolve in editor to check it and save \u2013 or, under \u22ef, accept it without opening\./.test(t), t);
     page.click({ a: 'accept' });
     assert.deepStrictEqual(page.posted.pop(), { type: 'act', name: 'accept', payload: { rel: xml } });
     page.state({ copadoOrg: 'copado', recent: [], current: null, validation: null, autoResolve: false });
@@ -1107,7 +1035,7 @@ module.exports = function register(ok, section, h) {
     try {
       fs.writeFileSync(path.join(root, 'sfdx-project.json'), '{"packageDirectories":[{"path":"force-app","default":true}],"sourceApiVersion":"62.0"}');
       const vs = fakeCode(root, { 'cmr.sf.path': h.fakeSf(tools), 'cmr.copado.org': 'copado', 'cmr.repo.provider': 'github', 'cmr.repo.url': g.base + '/owner/repo', 'cmr.org.confirm': false, 'cmr.copado.environmentOrgs': { int: 'qa' } });
-      const [release, ui] = loadWith(vs, ['../release', '../promotionUi', '../lifecycleUi', '../releasePage']);
+      const [release, ui] = loadWith(vs, ['../release', '../promotionUi', '../releasePage']);
       let shown = 0;
       const secrets = new Map([['cmr.repoToken:' + new URL(g.base).host, 'gh-token']]);
       release.activate({ subscriptions: { push() {} }, secrets: { get: async k => secrets.get(k), store: async () => {}, delete: async () => {} },
@@ -1351,10 +1279,13 @@ module.exports = function register(ok, section, h) {
       page.state({ copadoOrg: 'copado', recent: [], current: snap.current, validation: null });
       const txt = page.text();
       assert.ok(!/Choose what to keep|Keep the target as it is|Change by change/.test(txt) && !/data-a="keep"|pickOpen/.test(page.html), 'none of the three options');
-      assert.ok(/Review in merge starts from what you saved/.test(txt) && /Target branch HEAD Feature branch origin\/feature\/US-0000103/.test(txt), txt);
+      assert.ok(/Review in editor starts from what you saved/.test(txt) && /Target branch HEAD Feature branch origin\/feature\/US-0000103/.test(txt), txt);
       snap.current.state.files[REL] = { state: 'review', suggestion: true, kind: 'xml', blocks: 1, labels: { ours: 'HEAD', theirs: 'origin/feature/US-0000103' } };
       page.state({ copadoOrg: 'copado', recent: [], current: snap.current, validation: null });
-      assert.ok(/Accept the suggestion/.test(page.text()) && /Review in merge/.test(page.text()) && /change what you need and save\./.test(page.text()));
+      // one primary action - Resolve in editor; accepting without opening is under its menu
+      assert.ok(/Resolve in editor/.test(page.text()) && /accept it without opening/.test(page.text()), page.text());
+      page.click({ a: 'fileMenu' });
+      assert.ok(/Accept without opening/.test(page.text()) && /Compare sides/.test(page.text()) && /Reset to Copado\u2019s file/.test(page.text()), 'the rest under the menu');
     } finally { await ui.act('stopWatch', {}); rmTree(root); }
   });
 
@@ -1396,7 +1327,7 @@ module.exports = function register(ok, section, h) {
       onDidDispose: () => ({ dispose() {} }), reveal() {}, iconPath: null });
     const [page] = loadWith(vs, ['../releasePage']);
     const ui = { onChange() {}, snapshot: async () => ({}), act: async n => { if (n === 'slow') await gate; }, openById: async () => {} };
-    page.activate({ subscriptions: { push() {} }, extensionUri: vs.Uri.file(os.tmpdir()), workspaceState: { get: () => null, update: async () => {} } }, ui, null, (id, fn) => { vs.registered[id] = fn; });
+    page.activate({ subscriptions: { push() {} }, extensionUri: vs.Uri.file(os.tmpdir()), workspaceState: { get: () => null, update: async () => {} } }, ui, (id, fn) => { vs.registered[id] = fn; });
     await vs.registered['cmr.page.open']();
     await vs.onMsg({ type: 'tool', id: 'workbench.action.files.delete' });
     await vs.onMsg({ type: 'tool', id: 'cmr.validate.run' });
@@ -1443,7 +1374,7 @@ module.exports = function register(ok, section, h) {
 
   ok('results say "Validated successfully" or "Validation failed" - never "it would deploy" - in the page, notifications and logs', () => {
     const root = path.join(__dirname, '..');
-    const said = ['media/page.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'extension.js'].map(f => [f, fs.readFileSync(path.join(root, f), 'utf8')]);
+    const said = ['media/page.js', 'release.js', 'promotionUi.js', 'extension.js'].map(f => [f, fs.readFileSync(path.join(root, f), 'utf8')]);
     const strings = ([f, src]) => [...src.matchAll(/'((?:[^'\\\n]|\\.)*)'/g)].map(m => [f, m[1]]);
     const left = said.flatMap(strings).filter(([, t]) => /would (not )?deploy/i.test(t));
     assert.deepStrictEqual(left, [], 'no "would deploy" left in what you read');
@@ -2854,7 +2785,7 @@ module.exports = function register(ok, section, h) {
   const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
   const psConflict = '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n' + fp('Invoice__c.Region__c', 'false') + fp('Invoice__c.Legacy_Total__c', 'true') + '    <label>Sales Ops</label>\n=======\n' + fp('Invoice__c.Region__c', 'true') + fp('Invoice__c.Tax_Rate__c', 'true') + '    <label>Sales Operations</label>\n>>>>>>> feature/US-0012345\n</PermissionSet>\n';
 
-  ok('a permission set from Copado\u2019s conflict file: in each block the target\u2019s entries as they are, the feature\u2019s added beside their kind or applied - a block git cut through an entry is not resolved this way', () => {
+  ok('a permission set from Copado\u2019s conflict file: in each block the target\u2019s entries as they are, the feature\u2019s added beside their kind or applied - a block git cut through an entry joined the same way, the whole file at once', () => {
     const U = require('../src/unionMerge');
     const r = U.resolve(psConflict, 'PermissionSet');
     assert.ok(r.ok);
@@ -2863,7 +2794,9 @@ module.exports = function register(ok, section, h) {
       'the feature\u2019s change applied, the target\u2019s entry kept, the feature\u2019s added with its kind, one label - the feature\u2019s');
     assert.ok(!/^(<{7}|={7}|>{7})/m.test(r.text), 'no markers');
     const cut = '<PermissionSet>\n<<<<<<< HEAD\n    <fieldPermissions>\n        <editable>false</editable>\n=======\n    <fieldPermissions>\n        <editable>true</editable>\n>>>>>>> feature\n        <field>A.b__c</field>\n    </fieldPermissions>\n</PermissionSet>\n';
-    assert.deepStrictEqual(U.resolve(cut, 'PermissionSet'), { ok: false, reason: 'git\u2019s conflict at line 2 is not whole entries' });
+    // git cut through the entry: the two sides joined whole - the feature's editable (more access) applied, the entry once
+    const rc = U.resolve(cut, 'PermissionSet');
+    assert.ok(rc.ok && rc.narrowed === 0 && !/^(<{7}|={7}|>{7})/m.test(rc.text) && /<editable>true<\/editable>/.test(rc.text) && (rc.text.match(/<field>A\.b__c<\/field>/g) || []).length === 1, JSON.stringify(rc));
   });
 
   ok('a promotion\u2019s metadata opens on Copado\u2019s conflict file: no merge of ours - a page\u2019s blocks conflicts to choose, beside the target; a permission set\u2019s resolved as the target and the feature; no branch read', async () => {
@@ -2898,17 +2831,16 @@ module.exports = function register(ok, section, h) {
       assert.strictEqual(i2.text, require('../src/unionMerge').resolve(psConflict, 'PermissionSet').text);
       assert.ok(!i2.marks.git && i2.marks.pieces.some(x => x.kind !== 'same'), 'the feature\u2019s changes marked, each undoable');
       assert.ok(!(i2.marks.rows || []).some(x => x.kind === 'conflict'), 'nothing to resolve');
-      // a permission set git cut through an entry: its blocks conflicts, said
+      // a permission set git cut through an entry: joined the same way - nothing to choose
       // (a value inside one entry is whole: the feature's applied in it - a cut leaves an entry open on a side)
       const cut = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n    <fieldPermissions>\n        <editable>false</editable>\n=======\n    <fieldPermissions>\n        <editable>true</editable>\n>>>>>>> feature\n        <field>A.b__c</field>\n    </fieldPermissions>\n</PermissionSet>\n';
       const [CT, CF] = sides(cut);
       const before = mv.webviews.length;
       await mv.deps().startSession(mv.vs.Uri.file(put('ct.xml', CT)), mv.vs.Uri.file(put('cf.xml', CF)), null, { applyToUri: mv.vs.Uri.file(put('c.xml', cut)), applyOnSave: true, openAfterApply: false, copado: true, conflictText: cut, startFrom: null });
-      assert.ok(mv.vs.log.info.some(m => /not whole entries/.test(m)), 'said: ' + JSON.stringify(mv.vs.log.info.concat(mv.vs.log.error)));
       assert.strictEqual(mv.webviews.length, before + 1, 'opened: ' + JSON.stringify(mv.vs.log.error));
       const w3 = mv.webviews[mv.webviews.length - 1];
       await w3.send({ type: 'ready' });
-      assert.deepStrictEqual([w3.last('init').marks.git, w3.last('init').marks.counts.needs], [true, 1]);
+      assert.ok(!w3.last('init').marks.git && !(w3.last('init').marks.rows || []).some(x => x.kind === 'conflict'), 'joined: nothing to choose');
     } finally { rmTree(root); }
   });
 
@@ -2948,12 +2880,349 @@ module.exports = function register(ok, section, h) {
     } finally { rmTree(dir); }
   });
 
+  ok('a promotion\u2019s file lined up from its conflicts - the same as comparing every line, whatever was chosen or edited, and fast on 30,000 lines', () => {
+    const CM = require('../src/codeMerge'), MP = require('../src/mergePanel');
+    const f = 'public class A {\n    void a() {\n<<<<<<< HEAD\n        old();\n=======\n        nw();\n        more();\n>>>>>>> f\n    }\n    void b() {\n        x();\n    }\n<<<<<<< HEAD\n    // gone\n=======\n>>>>>>> f\n    void c() {\n    }\n}\n';
+    const sides = t => [t.replace(/<<<<<<< HEAD\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), t.replace(/<<<<<<< HEAD\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1')];
+    const [T, F] = sides(f), g = CM.fromConflictFile(f);
+    const choose = (t, c) => { const k = CM.marks({ text: t, conflicts: g.conflicts, language: 'apex' }); return applyOps(t, k.rows.map((r, i) => c[i] ? r.actions.find(a => a.choice === c[i]).op : null).filter(Boolean)); };
+    const o = { target: T, incoming: F, code: { conflicts: g.conflicts } };
+    for (const t of [g.text, choose(g.text, ['target', 'target']), choose(g.text, ['feature', 'feature']), choose(g.text, ['both', null]), g.text.replace('        x();\n', '        x();\n        mine();\n')]) {
+      const rows = CM.marks({ text: t, conflicts: g.conflicts, language: 'apex' }).rows;
+      assert.deepStrictEqual(MP.fromConflicts(o, t, rows).segs, MP.threeWay(T, t, F), JSON.stringify(t).slice(0, 80));
+    }
+    // 30,000 lines: from the conflicts, not by comparing them all
+    const fp = i => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>Obj__c.F' + i + '__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+    let body = ''; for (let i = 0; i < 6000; i++) body += fp(i);
+    const big = '<PermissionSet>\n<<<<<<< HEAD\n    <label>A</label>\n=======\n    <label>B</label>\n>>>>>>> f\n' + body + '<<<<<<< HEAD\n    <description>x</description>\n=======\n>>>>>>> f\n</PermissionSet>\n';
+    const [BT, BF] = sides(big), bg = CM.fromConflictFile(big);
+    const t0 = Date.now();
+    const m = MP.marksFor({ git: true, codeView: 'threePanes', target: BT, incoming: BF, code: { conflicts: bg.conflicts, reviewed: new Map() } }, bg.text, 'order');
+    assert.ok(Date.now() - t0 < 1500 && m.segs.length === 2, (Date.now() - t0) + ' ms, ' + m.segs.length + ' places');
+  });
+
+  ok('npm run tidy -- --check: what earlier versions removed, if a clone still has it, named - and CI fails on it; nothing deleted', () => {
+    const { execFileSync } = require('child_process');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra tidy '));
+    try {
+      execFileSync('git', ['archive', '--format=tar', '-o', path.join(dir, 'a.tar'), 'HEAD'], { cwd: path.join(__dirname, '..') });
+      execFileSync('tar', ['-xf', 'a.tar'], { cwd: dir });
+      fs.copyFileSync(path.join(__dirname, '..', 'scripts', 'tidy.js'), path.join(dir, 'scripts', 'tidy.js'));
+      const run = () => { try { return { code: 0, out: execFileSync(process.execPath, ['scripts/tidy.js', '--check'], { cwd: dir, stdio: 'pipe' }).toString() }; } catch (e) { return { code: e.status, out: String(e.stderr) }; } };
+      assert.deepStrictEqual(run(), { code: 0, out: 'nothing left over\n' });
+      fs.writeFileSync(path.join(dir, 'src', 'liveMarks.js'), 'module.exports = {};\n');
+      const r = run();
+      assert.ok(r.code === 1 && /src\/liveMarks\.js/.test(r.out) && /npm run tidy/.test(r.out), JSON.stringify(r));
+      assert.ok(fs.existsSync(path.join(dir, 'src', 'liveMarks.js')), 'nothing deleted');
+      for (const wf of ['test.yml', 'release.yml']) assert.ok(/npm run tidy -- --check/.test(fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', wf), 'utf8')), wf);
+    } finally { rmTree(dir); }
+  });
+
+  ok('the anonymiser: a file\u2019s shape kept - every line, the markers where they are, element names, the language\u2019s words - every other name replaced the same way everywhere, long numbers too', () => {
+    const { anonymise } = require('../src/anonymise');
+    const cls = '/** Acme Billing helper - US-0012345 */\npublic class AcmeBillingService {\n    public static List<AcmeInvoiceOption> load(Id acmeId) {\n<<<<<<< HEAD\n        return [SELECT Id FROM Acme_Invoice__c WHERE Ticket__c = \'12223645\'];\n=======\n        return null;\n>>>>>>> origin/feature/US-0012345\n    }\n}\n';
+    const a = anonymise(cls);
+    assert.ok(!/Acme|Billing|Invoice|Ticket|12223645|0012345/i.test(a.text), a.text);
+    assert.deepStrictEqual(a.text.split('\n').map(l => /^(<{7}|={7}|>{7})/.test(l)), cls.split('\n').map(l => /^(<{7}|={7}|>{7})/.test(l)), 'the markers where they were');
+    assert.ok(/public class X\d+ \{/.test(a.text) && /List<X\d+>/.test(a.text) && /__c WHERE/.test(a.text) && /^<<<<<<< HEAD$/m.test(a.text) && /^>>>>>>> origin\/feature\/anonymised$/m.test(a.text));
+    const xml = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n    <fieldPermissions>\n        <field>Acme_Invoice__c.Region__c</field>\n    </fieldPermissions>\n</PermissionSet>\n';
+    const ax = anonymise(xml).text;
+    assert.ok(/<fieldPermissions>/.test(ax) && /<field>X\d+__c\.X\d+__c<\/field>/.test(ax) && !/Acme|Region/.test(ax), ax);
+    assert.strictEqual(anonymise(cls).text, a.text, 'the same file, the same names');
+  });
+
+  // every case in test/corpus - shapes of real conflict files, anonymised (npm run corpus -- add) - against the engine
+  for (const name of fs.existsSync(path.join(__dirname, 'corpus')) ? fs.readdirSync(path.join(__dirname, 'corpus')).sort() : []) {
+    ok('the corpus: ' + name + ' - every conflict found, each version recognised once accepted, the panes lined up exactly as by comparing every line', () => {
+      const CM = require('../src/codeMerge'), MP = require('../src/mergePanel'), U = require('../src/unionMerge');
+      const text = fs.readFileSync(path.join(__dirname, 'corpus', name), 'utf8');
+      const sides = t => [t.replace(/<<<<<<< [^\n]*\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), t.replace(/<<<<<<< [^\n]*\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1')];
+      const [T, F] = sides(text), g = CM.fromConflictFile(text);
+      assert.ok(!/^(<{7}|={7}|>{7})/m.test(g.text), 'no markers left');
+      const lang = /\.(cls|trigger)$/.test(name) ? 'apex' : /\.js$/.test(name) ? 'javascript' : null;
+      const look = t => CM.marks({ text: t, conflicts: g.conflicts, language: lang, reviewed: new Map() });
+      const k0 = look(g.text);
+      assert.deepStrictEqual([k0.rows.length, k0.counts.needs], [g.conflicts.length, g.conflicts.length], 'every conflict found, every one to choose');
+      // each version, accepted one conflict at a time: recognised as that one - and lined up as by comparing every line
+      for (const choice of ['target', 'feature', 'both']) {
+        let t = g.text;
+        for (let i = 0; i < g.conflicts.length; i++) { const r = look(t).rows[i]; t = applyOps(t, [r.actions.find(x => x.choice === choice).op]); }
+        const rows = look(t).rows;
+        assert.ok(rows.every(r => r.chosen === choice || r.q === r.p || r.b0 === r.b1 || (choice === 'both' && (r.chosen === 'target' || r.chosen === 'feature'))), choice + ': ' + rows.map(r => r.chosen).join());
+        // lined up from the conflicts - each one's place exactly its two versions, none overlapping, none out of order
+        // (comparing every line can pair a repeated line differently: a valid diff, but not the block as Copado made it)
+        const fast = MP.fromConflicts({ target: T, incoming: F, code: { conflicts: g.conflicts } }, t, rows);
+        assert.ok(fast, choice + ': lined up from the conflicts');
+        for (const c of g.conflicts) {
+          const nT = c.target.split(/(?<=\n)/).filter(Boolean).length, nF = c.feature.split(/(?<=\n)/).filter(Boolean).length;
+          if (c.target !== c.feature) assert.ok(fast.segs.some(x => x.l1 - x.l0 === nT && x.f1 - x.f0 === nF), choice + ': a place for ' + c.id);
+        }
+        fast.segs.forEach((x, i) => { const y = fast.segs[i + 1]; if (y) assert.ok(x.l1 <= y.l0 && x.r1 <= y.r0 && x.f1 <= y.f0, choice + ': in order'); });
+      }
+      const type = (/<([A-Za-z]\w*)[\s>]/.exec(text.replace(/<\?[\s\S]*?\?>/, '')) || [])[1];
+      if (type && require('../src/mergeStart').ADDITIVE.has(type)) { const u = U.resolve(text, type); assert.ok(u.ok ? !/^(<{7}|={7}|>{7})/m.test(u.text) : /not whole entries/.test(u.reason), JSON.stringify(u).slice(0, 120)); }
+    });
+  }
+
+  ok('Save diagnostics: what the merge is, and Copado\u2019s conflict file and your resolution with every name replaced alike - saved in the working folder, opened for you to review', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra diag '));
+    try {
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const conflict = 'public class AcmeBilling {\n<<<<<<< HEAD\n    Integer acmeTotal = 1;\n=======\n    Integer acmeTotal = 2;\n>>>>>>> origin/feature/US-0012345\n}\n';
+      const T = 'public class AcmeBilling {\n    Integer acmeTotal = 1;\n}\n', F = T.replace('= 1', '= 2');
+      const mv = await realMergeView(root, {});
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.cls', T)), mv.vs.Uri.file(put('f.cls', F)), null, { applyToUri: mv.vs.Uri.file(put('r.cls', conflict)), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', copado: true, conflictText: conflict, startFrom: null });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      await w.send({ type: 'diagnostics', text: w.last('init').text });
+      const dir = path.join(root, '.copado', 'diagnostics'), files = fs.readdirSync(dir);
+      assert.strictEqual(files.length, 1);
+      const d = fs.readFileSync(path.join(dir, files[0]), 'utf8');
+      assert.ok(/a promotion\u2019s file - Copado\u2019s conflict file, apex/.test(d) && /conflicts 1, to resolve 1/.test(d), d.slice(0, 400));
+      assert.ok(!/Acme|acmeTotal|0012345/i.test(d), 'no name left: ' + d);
+      const cls = /public class (X\d+) \{/.exec(d);
+      assert.ok(cls && (d.match(new RegExp('public class ' + cls[1] + ' \\{', 'g')) || []).length === 2, 'the same name in both texts');
+      assert.ok(/^<<<<<<< HEAD$/m.test(d) && /^>>>>>>> origin\/feature\/anonymised$/m.test(d), 'the markers kept');
+      assert.ok(mv.vs.log.opened.some(u => /diagnostics-/.test(String(u && ((u.uri && u.uri.fsPath) || u.fsPath || u)))), 'opened for you to review');
+    } finally { rmTree(root); }
+  });
+
+  ok('a promotion\u2019s file of 60,000 lines with conflicts of 13,000 and 18,000: each large text goes to the page once - every update after it a few kilobytes - and accepting still works', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra huge '));
+    try {
+      const fp = i => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>Obj__c.F' + i + '__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+      const run = (a, b) => { let t = ''; for (let i = a; i < b; i++) t += fp(i); return t; };
+      // git set most of the file against a few lines - twice, the second cut through an entry
+      // a layout - its conflicts are yours (a permission set's would join)
+      const conflict = '<?xml version="1.0" encoding="UTF-8"?>\n<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n' + run(0, 2680) + '=======\n    <label>A</label>\n>>>>>>> origin/feature/US-0012345\n' +
+        run(2680, 4000) + '<<<<<<< HEAD\n    <fieldPermissions>\n' + run(4000, 7750) + '=======\n    <fieldPermissions>\n        <editable>false</editable>\n>>>>>>> origin/feature/US-0012345\n        <field>Obj__c.Z__c</field>\n    </fieldPermissions>\n</Layout>\n';
+      const sides = t => [t.replace(/<<<<<<< [^\n]*\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/g, '$1'), t.replace(/<<<<<<< [^\n]*\n[\s\S]*?=======\n([\s\S]*?)>>>>>>> [^\n]*\n/g, '$1')];
+      const [T, F] = sides(conflict), put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const mv = await realMergeView(root, {});
+      const r = put('r.xml', conflict);
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.xml', T)), mv.vs.Uri.file(put('f.xml', F)), null, { applyToUri: mv.vs.Uri.file(r), applyOnSave: true, openAfterApply: false, copado: true, conflictText: conflict, startFrom: null });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const init = w.last('init'), size = x => JSON.stringify(x).length;
+      assert.ok(T.split('\n').length > 38000 && init.marks.counts.needs === 2, 'two conflicts to resolve: ' + JSON.stringify(init.marks.counts));
+      assert.deepStrictEqual(Object.keys(init.versions).length, 2, 'each conflict\u2019s versions, once');
+      assert.ok(init.marks.rows.every(x => x.actions.every(a => a.op.insert == null && a.op.expect == null) && x.ghosts.every(g => !g.lines)), 'the rows name their versions - they do not carry them');
+      // an edit: a few kilobytes back, not megabytes
+      await w.send({ type: 'text', seq: 3, text: init.text + '\n' });
+      const upd = w.last('marks');
+      assert.ok(size(upd) < 50000 && upd.marks.left === undefined && upd.marks.feat === undefined, size(upd) + ' bytes for one edit');
+      // the feature's version accepted, as the page builds it from the table: saved
+      const row = init.marks.rows[0], v = init.versions[row.id];
+      const L = init.text.split(/(?<=\n)/); L.splice(row.actions[1].op.b0, row.actions[1].op.b1 - row.actions[1].op.b0, v.feature);
+      await w.send({ type: 'text', seq: 4, text: L.join('') });
+      assert.deepStrictEqual(w.last('marks').marks.rows.map(x => x.chosen), ['feature', 'none']);
+    } finally { rmTree(root); }
+  });
+
+  ok('a permission set git cut through: joined whole - the target\u2019s kept, the feature\u2019s added after its kind, the same once, more access applied; less access a conflict, for each kind of setting; a muting permission set the other way; a label\u2019s value applied', () => {
+    const U = require('../src/unionMerge');
+    const fp = (f, e, r) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n        <readable>' + r + '</readable>\n    </fieldPermissions>\n';
+    const ca = (c, on) => '    <classAccesses>\n        <apexClass>' + c + '</apexClass>\n        <enabled>' + on + '</enabled>\n    </classAccesses>\n';
+    const tab = (t, v) => '    <tabSettings>\n        <tab>' + t + '</tab>\n        <visibility>' + v + '</visibility>\n    </tabSettings>\n';
+    const doc = (root, b) => '<?xml version="1.0" encoding="UTF-8"?>\n<' + root + ' xmlns="http://soap.sforce.com/2006/04/metadata">\n' + b + '</' + root + '>\n';
+    const cut = '    <fieldPermissions>\n        <editable>true</editable>\n';
+    const conflict = (root, ours, theirs) => doc(root, '<<<<<<< HEAD\n' + ours + cut + '=======\n' + theirs + cut + '>>>>>>> origin/feature/US-0012345\n        <field>A__c.Cut__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n');
+    const r = U.resolve(conflict('PermissionSet',
+      fp('A__c.Only_target__c', 'true', 'true') + fp('A__c.Same__c', 'true', 'true') + fp('A__c.Wider__c', 'false', 'true') + fp('A__c.Narrower__c', 'true', 'true') + ca('Svc', 'true') + tab('Tab_A', 'Visible') + '    <label>Old</label>\n',
+      fp('A__c.Same__c', 'true', 'true') + fp('A__c.Wider__c', 'true', 'true') + fp('A__c.Narrower__c', 'false', 'true') + fp('A__c.Only_feature__c', 'true', 'true') + ca('Svc', 'false') + tab('Tab_A', 'None') + '    <label>New</label>\n'), 'PermissionSet');
+    assert.ok(r.ok && r.narrowed === 3, JSON.stringify(r).slice(0, 300));
+    const blocks = r.text.split(/^<{7}[^\n]*\n/m).slice(1).map(b => b.split(/^={7}\n/m)[0]);
+    assert.deepStrictEqual(blocks.map(b => (/<(field|apexClass|tab)>([^<]+)</.exec(b) || [])[2]), ['A__c.Narrower__c', 'Svc', 'Tab_A'], 'less access - editable, enabled, a tab\u2019s visibility - each a conflict, the target\u2019s entry against the feature\u2019s');
+    const resolved = r.text.replace(/^<{7}[^\n]*\n[\s\S]*?^>{7}[^\n]*\n/gm, '');
+    const fields = [...resolved.matchAll(/<field>([^<]+)<\/field>/g)].map(m => m[1]);
+    assert.deepStrictEqual(fields, ['A__c.Only_target__c', 'A__c.Same__c', 'A__c.Wider__c', 'A__c.Cut__c', 'A__c.Only_feature__c'], 'the target\u2019s kept, the same once, the feature\u2019s added after its kind');
+    assert.ok(/<field>A__c\.Wider__c<\/field>/.test(resolved) && /<editable>true<\/editable>\n        <field>A__c\.Wider__c/.test(resolved), 'more access: applied');
+    assert.ok(/<label>New<\/label>/.test(resolved) && !/<label>Old<\/label>/.test(resolved), 'a label: the feature\u2019s');
+    // a muting permission set mutes with true: turning one on takes access away - that is the conflict there
+    const m = U.resolve(conflict('MutingPermissionSet', ca('Svc', 'false') + ca('Other', 'true'), ca('Svc', 'true') + ca('Other', 'false')), 'MutingPermissionSet');
+    assert.ok(m.ok && m.narrowed === 1 && /<apexClass>Svc<\/apexClass>[\s\S]*?^={7}/m.test(m.text), 'muting: true is less access');
+    // labels grant nothing - but a value the two branches hold differently is yours to choose (B2.10, 5.1)
+    const lb = U.resolve(doc('CustomLabels', '<<<<<<< HEAD\n    <labels>\n        <fullName>A</fullName>\n        <value>Old</value>\n=======\n    <labels>\n        <fullName>A</fullName>\n        <value>New</value>\n>>>>>>> f\n    </labels>\n'), 'CustomLabels');
+    assert.ok(lb.ok && lb.narrowed === 1 && lb.values === 1 && /<value>Old<\/value>[^=]*\n={7}\n[\s\S]*<value>New<\/value>/.test(lb.text), lb.text);
+    // a side that is not valid XML: not joined - said
+    assert.deepStrictEqual(U.resolve(doc('PermissionSet', '<<<<<<< HEAD\n    <label>A</label>\n</PermissionSet>\n=======\n    <label>B</label>\n>>>>>>> f\n'), 'PermissionSet').ok, false);
+  });
+
+  ok('a permission set that grants less opens with only those choices - no Accept both, one entry twice would be a duplicate; one that does not join has no Accept feature, said; the promotion page never takes either for you', async () => {
+    const W = require('../src/promotionWork'), MP = require('../src/mergePanel'), CM = require('../src/codeMerge');
+    const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n        <readable>true</readable>\n    </fieldPermissions>\n';
+    const narrow = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n<<<<<<< HEAD\n' + fp('A__c.X__c', 'true') + '    <fieldPermissions>\n=======\n' + fp('A__c.X__c', 'false') + fp('A__c.New__c', 'true') + '    <fieldPermissions>\n>>>>>>> f\n        <editable>true</editable>\n        <field>A__c.Cut__c</field>\n        <readable>true</readable>\n    </fieldPermissions>\n</PermissionSet>\n';
+    for (const on of [false, true]) {
+      const r = await W.autoResolve('force-app/main/default/permissionsets/P.permissionset-meta.xml', narrow, on);
+      assert.deepStrictEqual([r.state, r.suggestion, r.conflicts], ['review', false, 1], 'less access: never taken for you - auto ' + on);
+      assert.ok(/1 access change to choose/.test(r.note), r.note);
+    }
+    // the editor: only that choice - target or feature, never both
+    const u = require('../src/unionMerge').resolve(narrow, 'PermissionSet'), g = CM.fromConflictFile(u.text);
+    const o = { git: true, unionKind: 'narrowed', codeView: 'threePanes', typeName: 'PermissionSet', target: '', incoming: '', code: { conflicts: g.conflicts, reviewed: new Map() } };
+    const m = MP.forPage(MP.marksFor(o, g.text, 'order'), true, o);
+    assert.deepStrictEqual([m.counts.needs, m.rows[0].actions.map(a => a.choice)], [1, ['target', 'feature']]);
+    // did not join: every choice but the feature's
+    const f = MP.forPage(MP.marksFor(Object.assign({}, o, { unionKind: 'fallback' }), g.text, 'order'), true, Object.assign({}, o, { unionKind: 'fallback' }));
+    assert.deepStrictEqual(f.rows[0].actions.map(a => a.choice), ['target', 'both']);
+  });
+
+  ok('large files compared in little memory: 4 lines against 18,000 at once, and the same as lineDiff on small ones', () => {
+    const MP = require('../src/mergePanel'), { lineDiff } = require('../src/mergeAlign');
+    const big = []; for (let i = 0; i < 18000; i++) big.push('    <x>' + (i % 7) + '</x>\n');
+    const anchor = n => '<a' + n + '/>\n';
+    const A = [anchor(1)].concat(['    <x>1</x>\n', '    <y/>\n', '    <x>3</x>\n', '    <z/>\n'], [anchor(2)]), B = [anchor(1)].concat(big, [anchor(2)]);
+    const t0 = Date.now(), p = MP.linesApart(A.concat(new Array(4000).fill('    <pad/>\n')), B.concat(new Array(4000).fill('    <pad/>\n')));
+    assert.ok(Date.now() - t0 < 3000 && p.length > 0, (Date.now() - t0) + ' ms');
+    const small1 = ['a\n', 'b\n', 'c\n', 'd\n'], small2 = ['a\n', 'x\n', 'c\n', 'd\n', 'e\n'];
+    assert.deepStrictEqual(MP.linesApart(small1, small2), lineDiff(small1, small2, 0));
+  });
+
+  section('4.0: the rule book');
+
+  ok('A6 - a save never leaves a gap: conflicts left, the target\u2019s kept for them, or nothing saved', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cra a6 '));
+    try {
+      const conflict = 'public class A {\n<<<<<<< HEAD\n    Integer a = 1;\n=======\n    Integer a = 2;\n>>>>>>> f\n    void b() {}\n<<<<<<< HEAD\n    Integer c = 3;\n=======\n    Integer c = 4;\n>>>>>>> f\n}\n';
+      const T = 'public class A {\n    Integer a = 1;\n    void b() {}\n    Integer c = 3;\n}\n', F = T.replace('= 1', '= 2').replace('= 3', '= 4');
+      const put = (n, t) => { const f = path.join(root, n); fs.writeFileSync(f, t); return f; };
+      const mv = await realMergeView(root, {});
+      await mv.deps().startSession(mv.vs.Uri.file(put('t.cls', T)), mv.vs.Uri.file(put('f.cls', F)), null, { applyToUri: mv.vs.Uri.file(put('r.cls', conflict)), applyOnSave: true, openAfterApply: false, theirs: 'the feature branch', copado: true, conflictText: conflict, startFrom: null });
+      const w = mv.webviews[mv.webviews.length - 1];
+      await w.send({ type: 'ready' });
+      const text = w.last('init').text;
+      // go back: nothing saved
+      mv.vs.answers.warn.push({ re: /2 conflicts are not resolved yet/, v: items => items.find(i => i && i.title === 'Go back') });
+      await w.send({ type: 'save', text, close: false });
+      assert.deepStrictEqual([w.last('saved').ok, /still yours/.test(w.last('saved').message)], [false, true], JSON.stringify([w.last('saved'), mv.vs.log.warn.slice(-2)]));
+      // keep the target's: both conflicts the target's, nothing of the feature's
+      mv.vs.answers.warn.push({ re: /2 conflicts are not resolved yet/, v: items => items.find(i => i && /Keep the target\u2019s for 2/.test(i.title)) });
+      await w.send({ type: 'save', text, close: false });
+      const saved = w.last('saved');
+      assert.ok(saved.ok && saved.text.includes('Integer a = 1;') && saved.text.includes('Integer c = 3;') && !/= 2;|= 4;/.test(saved.text), JSON.stringify(saved));
+    } finally { rmTree(root); }
+  });
+
+  ok('A7 - a file with a conflict unresolved is never uploaded; an empty version chosen is not a gap', () => {
+    const W = require('../src/promotionWork');
+    // as git writes them: two blocks with a line of the file between
+    const conflicted = 'public class A {\n<<<<<<< HEAD\n    one();\n=======\n    two();\n>>>>>>> f\n    keep();\n<<<<<<< HEAD\n    gone();\n=======\n>>>>>>> f\n}\n';
+    assert.strictEqual(W.gapsIn('A.cls', conflicted, 'public class A {\n    keep();\n}\n'), 1, 'the first: both versions have lines, nothing there - a gap; the second: its feature version empty - a choice');
+    assert.strictEqual(W.gapsIn('A.cls', conflicted, 'public class A {\n    two();\n    keep();\n}\n'), 0);
+  });
+
+  ok('B2 - GlobalValueSetTranslation and StandardValueSetTranslation joined as translations are', () => {
+    const MS = require('../src/mergeStart'), U = require('../src/unionMerge');
+    for (const t of ['GlobalValueSetTranslation', 'StandardValueSetTranslation']) assert.ok(MS.ADDITIVE.has(t), t);
+    const vt = (m, x) => '    <valueTranslation>\n        <masterLabel>' + m + '</masterLabel>\n        <translation>' + x + '</translation>\n    </valueTranslation>\n';
+    const r = U.resolve('<GlobalValueSetTranslation xmlns="x">\n<<<<<<< HEAD\n' + vt('A', 'a') + '=======\n' + vt('A', 'aa') + vt('B', 'b') + '>>>>>>> f\n</GlobalValueSetTranslation>\n', 'GlobalValueSetTranslation');
+    // the new translation added; the one the branches translate differently, yours to choose (B2.10)
+    assert.ok(r.ok && r.narrowed === 1 && r.values === 1 && /<translation>a<\/translation>[\s\S]*={7}[\s\S]*<translation>aa</.test(r.text) && /<masterLabel>B</.test(r.text), r.text);
+  });
+
+  ok('B2.8 - a profile\u2019s security settings: all of a kind against all of it - one conflict, target or feature; unchanged, none', () => {
+    const U = require('../src/unionMerge');
+    const ip = (a, b) => '    <loginIpRanges>\n        <endAddress>' + b + '</endAddress>\n        <startAddress>' + a + '</startAddress>\n    </loginIpRanges>\n';
+    const doc = b => '<Profile xmlns="x">\n    <userLicense>Salesforce</userLicense>\n' + b + '</Profile>\n';
+    const r = U.resolve(doc('<<<<<<< HEAD\n' + ip('10.0.0.0', '10.0.0.255') + '=======\n' + ip('10.0.0.0', '10.0.255.255') + ip('192.168.0.0', '192.168.0.255') + '>>>>>>> f\n'), 'Profile');
+    assert.strictEqual(r.narrowed, 1);
+    const [mine, theirs] = r.text.split(/^={7}\n/m);
+    assert.ok(/10\.0\.0\.255/.test(mine) && !/192\.168/.test(mine.split(/^<{7}[^\n]*\n/m)[1]) && /10\.0\.255\.255/.test(theirs) && /192\.168/.test(theirs), r.text);
+  });
+
+  ok('B2.11, B2.12, B2.15 - the target\u2019s own duplicates: the same, the second out, said; different, the copy granting more kept, said, swappable; nothing to choose - resolved automatically when that is on', async () => {
+    const U = require('../src/unionMerge'), W = require('../src/promotionWork');
+    const fp = (f, e) => '    <fieldPermissions>\n        <editable>' + e + '</editable>\n        <field>' + f + '</field>\n    </fieldPermissions>\n';
+    const c = '<PermissionSet xmlns="x">\n<<<<<<< HEAD\n' + fp('A', 'true') + fp('B', 'false') + fp('A', 'true') + fp('B', 'true') + '=======\n' + fp('A', 'true') + fp('C', 'true') + '>>>>>>> f\n</PermissionSet>\n';
+    const r = U.resolve(c, 'PermissionSet');
+    assert.deepStrictEqual([r.narrowed, r.removedDups.length, (r.text.match(/<field>A</g) || []).length, (r.text.match(/<field>B</g) || []).length], [0, 2, 1, 1]);
+    assert.ok(/<editable>true<\/editable>\n        <field>B<\/field>/.test(r.text), 'B: the copy granting more - editable true - kept');
+    assert.deepStrictEqual(r.removedInfo.map(x => x && x.label), [null, 'editable: false'], 'what the other sets, for its button');
+    assert.ok(!/^<{7}/m.test(r.text), 'nothing to choose');
+    // a tie keeps the first
+    const tie = U.resolve('<PermissionSet xmlns="x">\n<<<<<<< HEAD\n' + fp('B', 'true') + '    <fieldPermissions>\n        <editable>false</editable>\n        <readable>true</readable>\n        <field>B</field>\n    </fieldPermissions>\n=======\n' + fp('C', 'true') + '>>>>>>> f\n</PermissionSet>\n', 'PermissionSet');
+    assert.ok(/<editable>true<\/editable>\n        <field>B<\/field>/.test(tie.text), 'one grant each: the first');
+    assert.deepStrictEqual([(await W.autoResolve('force-app/main/default/permissionsets/P.permissionset-meta.xml', c, true)).state, (await W.autoResolve('force-app/main/default/permissionsets/P.permissionset-meta.xml', c, false)).state], ['auto', 'review'], 'B2.15');
+  });
+
+
+  ok('B3.1 - every other metadata\u2019s conflict: target or feature, never both', () => {
+    const MP = require('../src/mergePanel'), CM = require('../src/codeMerge');
+    const g = CM.fromConflictFile('<Flow xmlns="x">\n<<<<<<< HEAD\n    <label>A</label>\n=======\n    <label>B</label>\n>>>>>>> f\n</Flow>\n');
+    const o = { git: true, codeView: 'onePane', typeName: 'Flow', target: '', incoming: '', code: { conflicts: g.conflicts, reviewed: new Map() } };
+    assert.deepStrictEqual(MP.forPage(MP.marksFor(o, g.text, 'order'), true, o).rows[0].actions.map(a => a.choice), ['target', 'feature']);
+    const code = { git: true, language: 'apex', codeView: 'onePane', target: '', incoming: '', code: { conflicts: g.conflicts, reviewed: new Map() } };
+    assert.deepStrictEqual(MP.forPage(MP.marksFor(code, g.text, 'order'), true, code).rows[0].actions.map(a => a.choice), ['target', 'feature', 'both'], 'code keeps both');
+  });
+
+  ok('B3.2 - a flow\u2019s conflict only moving the canvas: the feature\u2019s, marked; every other one yours; never automatic unless that is all', async () => {
+    const FP = require('../src/flowPositions'), CM = require('../src/codeMerge'), W = require('../src/promotionWork');
+    const pos = (x, y) => '        <locationX>' + x + '</locationX>\n        <locationY>' + y + '</locationY>\n';
+    const f = '<Flow xmlns="x">\n    <decisions>\n        <name>D</name>\n<<<<<<< HEAD\n' + pos(10, 20) + '=======\n' + pos(440, 288) + '>>>>>>> f\n        <rules/>\n<<<<<<< HEAD\n        <label>Old</label>\n=======\n        <label>New</label>\n>>>>>>> f\n    </decisions>\n</Flow>\n';
+    const g = FP.apply(CM.fromConflictFile(f));
+    assert.ok(g.moved === 1 && g.text.includes('<locationX>440</locationX>'));
+    const rows = CM.marks({ text: g.text, conflicts: g.conflicts }).rows;
+    assert.deepStrictEqual(rows.map(r => [r.positions || false, r.chosen]), [[true, 'feature'], [false, 'none']]);
+    const r = await W.autoResolve('force-app/main/default/flows/F.flow-meta.xml', f, true);
+    assert.deepStrictEqual([r.state, r.conflicts], ['review', 1]);
+    const only = f.replace(/<<<<<<< HEAD\n        <label>Old[\s\S]*?>>>>>>> f\n/, '        <label>Old</label>\n');
+    assert.strictEqual((await W.autoResolve('force-app/main/default/flows/F.flow-meta.xml', only, true)).state, 'auto', 'positions only, auto on: resolved');
+  });
+
+  ok('B3.4 - duplicate entries do not hold a file back: uploaded as they are, said before uploading; what is not valid XML still is', () => {
+    const W = require('../src/promotionWork');
+    const fp = f => '    <fieldPermissions>\n        <editable>true</editable>\n        <field>' + f + '</field>\n    </fieldPermissions>\n';
+    const twice = '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">\n' + fp('A__c.B__c') + fp('A__c.B__c') + '</PermissionSet>\n';
+    const store = (resolved) => ({ read: k => k === 'resolved' ? resolved : k === 'promotion' ? twice : null });
+    const libs = { X: require('../src/xmlParser'), duplicates: require('../src/duplicates'), rules: require('../src/rules') };
+    const g = W.gates(store(twice), 'force-app/main/default/permissionsets/P.permissionset-meta.xml', { kind: 'xml', state: 'resolved' }, libs);
+    assert.deepStrictEqual([g.ok, g.warn], [true, '1 duplicate entry'], JSON.stringify(g));
+    assert.strictEqual(W.gates(store('<PermissionSet>\n  <a>\n</PermissionSet>\n'), 'force-app/main/default/permissionsets/P.permissionset-meta.xml', { kind: 'xml', state: 'resolved' }, libs).ok, false, 'not valid XML: still held back');
+    // the page's dialog says it
+    const page = runPage();
+    page.state({ copadoOrg: 'copado', recent: [], validation: null, current: { promotion: { id: 'P1', name: 'P0001', status: 'Merge Conflict' }, state: { name: 'P0001', from: 'qa', to: 'uat', syncedAt: new Date().toISOString(), events: [], files: { 'force-app/main/default/permissionsets/P.permissionset-meta.xml': { state: 'resolved', kind: 'xml' } } },
+      plan: { ready: [{ rel: 'force-app/main/default/permissionsets/P.permissionset-meta.xml', how: 'yours', warn: '1 duplicate entry' }], held: [], last: false, revised: 0 }, canUndo: false, health: [], flagged: {}, info: null, jobs: null } });
+    assert.ok(/Duplicates/.test(page.text()), 'the row says so');
+    page.click({ a: 'uploadAsk' });
+    assert.ok(/Duplicate entries are uploaded as they are/.test(page.text()) && /1 duplicate entry/.test(page.text()), page.text().slice(0, 400));
+  });
+
+  ok('B4.1 - neither code nor XML: resolved in Copado - never merged here, never uploaded from here', async () => {
+    const W = require('../src/promotionWork');
+    for (const rel of ['staticresources/Logo.resource', 'x/data.json', 'x/notes.txt']) {
+      const r = await W.autoResolve(rel, '<<<<<<< HEAD\na\n=======\nb\n>>>>>>> f\n', true);
+      assert.deepStrictEqual([r.kind, r.state], ['copado', 'copadoOnly'], rel);
+      assert.strictEqual(W.gates({ read: () => 'b\n' }, rel, r, {}).ok, false, 'never uploaded: ' + rel);
+    }
+    assert.ok(W.isCode('a/A.cls') && W.isCode('lwc/c/c.html') && !W.isCode('a/b.resource'));
+  });
+
+  ok('the CLI\u2019s session: since May 2026 sf org display hides the token - it comes from sf org auth show-access-token; a redacted placeholder is never sent', async () => {
+    const http = require('http'), sfcli = require('../src/sfcli');
+    const seen = [];
+    const server = http.createServer((q, r) => { seen.push(q.headers.authorization); r.writeHead(204); r.end(); });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra token '));
+    try {
+      const sf = h.fakeSf(dir);
+      process.env.FAKE_SF_INSTANCE = 'http://127.0.0.1:' + server.address().port;
+      // the CLI of today: the token from the explicit command
+      process.env.FAKE_SF_REDACT = '1'; sfcli.resetRest();
+      await sfcli.restPatch(sf, 'copado', '/services/data/v62.0/sobjects/Attachment/00P1', { Name: 'x' }, dir);
+      // a CLI from before: the token from org display, as it was
+      delete process.env.FAKE_SF_REDACT; sfcli.resetRest();
+      await sfcli.restPatch(sf, 'copado', '/services/data/v62.0/sobjects/Attachment/00P1', { Name: 'x' }, dir);
+      assert.deepStrictEqual(seen, ['Bearer 00Dfake!session.copado', 'Bearer 00D000000000001!fake']);
+      assert.ok(!seen.some(x => /REDACTED/.test(x)), 'never the placeholder');
+    } finally { delete process.env.FAKE_SF_REDACT; delete process.env.FAKE_SF_INSTANCE; require('../src/sfcli').resetRest(); server.close(); rmTree(dir); }
+  });
+
   section('3.0: what is shipped');
 
   ok('the package: every command registered and contributed, every setting read, the Command Palette short, nothing removed left behind', () => {
     const root = path.join(__dirname, '..');
     const p = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-    const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'manualUi.js'].concat(fs.readdirSync(path.join(root, 'src')).map(f => 'src/' + f));
+    const files = ['extension.js', 'release.js', 'promotionUi.js', 'releasePage.js', 'manualUi.js'].concat(fs.readdirSync(path.join(root, 'src')).map(f => 'src/' + f));
     const code = files.map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
     const declared = p.contributes.commands.map(c => c.command);
     const registered = [...code.matchAll(/cmd\('(cmr\.[\w.]+)'/g)].map(m => m[1]);
@@ -2979,7 +3248,7 @@ module.exports = function register(ok, section, h) {
     for (const k of ['cmr.http.proxy', 'cmr.http.caFile', 'cmr.repo.promotionBranch', 'cmr.guard.environments', 'cmr.copado.watchSeconds']) assert.ok(k in settings, k);
     assert.ok(p.capabilities.untrustedWorkspaces.restrictedConfigurations.includes('cmr.http.proxy'), 'a proxy is not taken from a folder you have not trusted');
     assert.deepStrictEqual(p.activationEvents, ['onLanguage:xml', 'onLanguage:json', 'onStartupFinished']);
-    assert.ok(/^3\.\d+\.\d+$/.test(p.version));
+    assert.ok(/^\d+\.\d+\.\d+$/.test(p.version), 'major.minor.patch: ' + p.version);
     // what ships carries no one's real records: promotion and story numbers are only the extension's own examples
     const ignore = fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8');
     const shipped = (function walk(d) { return fs.readdirSync(d, { withFileTypes: true }).flatMap(e => {
@@ -2994,6 +3263,322 @@ module.exports = function register(ok, section, h) {
     assert.deepStrictEqual(real, [], 'a real-looking promotion or story number in what ships');
     const css = fs.readFileSync(path.join(root, 'media', 'page.css'), 'utf8');
     assert.deepStrictEqual(css.match(/#[0-9a-fA-F]{3,8}\b/g), ['#fff'], 'only theme colours on the page');
+  });
+
+  section('5.0: safer uploads, the checklist, what to recommit, errors by cause');
+
+  /** A Copado org for the 5.0 tests: conflict files on a promotion, patches that can be made to fail. */
+  function copado5(o) {
+    const atts = {};
+    const add = (id, name, body) => { atts[id] = { Id: id, Name: name, Body: Buffer.from(body), LastModifiedDate: '2026-11-20T10:00:' + String(Object.keys(atts).length).padStart(2, '0') + '.000+0000' }; };
+    const fail = new Set((o && o.failPatch) || []);
+    const promo = { Id: 'P5', copado__Status__c: 'Merge Conflict' };
+    const api = { atts, add, fail, promo,
+      describe: async () => [{ name: 'copado__Status__c', picklist: ['Merge Conflict', 'Conflicts Resolved'] }],
+      query: async q => { let m;
+        if ((m = /FROM Attachment WHERE Id = '(\w+)'/.exec(q))) return atts[m[1]] ? [{ Id: m[1], Name: atts[m[1]].Name, LastModifiedDate: atts[m[1]].LastModifiedDate, BodyLength: atts[m[1]].Body.length }] : [];
+        // newest first, as ORDER BY LastModifiedDate DESC: the one added last
+        if (/FROM Attachment WHERE ParentId/.test(q)) { if (/LIMIT \d+/.test(q)) throw new Error('a promotion\u2019s attachments are never cut off: ' + q); return Object.values(atts).reverse().map(a => ({ Id: a.Id, Name: a.Name, LastModifiedDate: a.LastModifiedDate, BodyLength: a.Body.length })); }
+        if (/FROM copado__Promotion__c/.test(q)) return [Object.assign({}, promo)];
+        return []; },
+      download: async (k, id) => atts[id].Body,
+      patch: async (sobject, id, fields) => {
+        if (fail.has(sobject + ':' + id) || fail.has(sobject)) throw new Error('Copado said no to ' + id);
+        if (sobject === 'Attachment') { if (fields.Name) atts[id].Name = fields.Name; if (fields.Body) atts[id].Body = Buffer.from(fields.Body, 'base64'); atts[id].LastModifiedDate = '2026-11-20T11:00:00.000+0000'; }
+        else promo.copado__Status__c = fields.copado__Status__c;
+      } };
+    return api;
+  }
+  const cls5 = n => 'force-app/main/default/classes/' + n + '.cls';
+  const block5 = (a, b) => 'class X {\n<<<<<<< HEAD\n  ' + a + '\n=======\n  ' + b + '\n>>>>>>> f\n}\n';
+
+  ok('5.0 - every conflict file of a large promotion is fetched, never the first 500; one file in conflict for two stories says so', async () => {
+    const W = require('../src/promotionWork');
+    const api = copado5();
+    for (let i = 0; i < 520; i++) api.add('A' + i, 'US-0000001 ' + cls5('C' + i), block5('a();', 'b();'));
+    api.add('B1', 'US-0000002 ' + cls5('C1'), block5('a();', 'c();'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra 5 big '));
+    try {
+      const s = W.store(dir);
+      const r = await W.sync(api, s, { id: 'P5', name: 'P0005' }, { autoResolve: false });
+      assert.strictEqual(Object.keys(r.state.files).length, 520, 'all 520 files');
+      const e = r.state.files[cls5('C1')];
+      assert.deepStrictEqual([e.story, e.otherStories], ['US-0000002', ['US-0000001']], 'the newest conflict file is kept - and the other story named');
+      assert.ok(!r.state.files[cls5('C2')].otherStories);
+    } finally { rmTree(dir); }
+  });
+
+  ok('5.0 - the pre-check reads every story of the promotion, not only those with a conflict', () => {
+    const W = require('../src/promotionWork');
+    assert.deepStrictEqual(W.precheckStories([{ name: 'US-0000101' }, { name: 'US-0000102' }], { a: { story: 'US-0000102' }, b: { story: 'US-0000109' }, c: {} }), ['US-0000101', 'US-0000102', 'US-0000109']);
+    assert.deepStrictEqual(W.precheckStories(null, { a: { story: 'US-0000102' } }), ['US-0000102'], 'Copado unreadable: the conflict files\u2019 stories still');
+  });
+
+  ok('5.0 - an upload is saved file by file: a status that cannot be set, or a file Copado refuses, never loses what was uploaded', async () => {
+    const W = require('../src/promotionWork');
+    const api = copado5({ failPatch: ['copado__Promotion__c'] });
+    api.add('A1', 'US-0000001 ' + cls5('One'), block5('a();', 'b();'));
+    api.add('A2', 'US-0000001 ' + cls5('Two'), block5('a();', 'b();'));
+    api.add('A3', 'US-0000001 ' + cls5('Three'), block5('a();', 'b();'));
+    api.fail.add('Attachment:A3');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra 5 up '));
+    try {
+      const s = W.store(dir);
+      await W.sync(api, s, { id: 'P5', name: 'P0005' }, { autoResolve: false });
+      const st = s.load();
+      const list = ['One', 'Two', 'Three'].map(n => ({ rel: cls5(n), entry: st.files[cls5(n)], text: 'class X {\n  b();\n}\n' }));
+      // the last file of the promotion goes up only in the second batch: the first asks for the status once A3 is refused
+      const r = await W.uploadAll(api, s, list, { status: true });
+      assert.deepStrictEqual([r.uploaded.map(f => f.path.split('/').pop()).sort(), r.failed.map(f => f.rel.split('/').pop())], [['One.cls', 'Two.cls'], ['Three.cls']]);
+      assert.deepStrictEqual(['One', 'Two', 'Three'].map(n => s.load().files[cls5(n)].state), ['uploaded', 'uploaded', 'code'], 'what went up is recorded');
+      assert.strictEqual(W.lastBatch(s).files.length, 2, 'and can be undone');
+      // the last file accepted now: the status change fails - the upload stands, said as a warning
+      api.fail.delete('Attachment:A3');
+      const r2 = await W.uploadAll(api, s, [list[2]], { status: true });
+      assert.deepStrictEqual([r2.uploaded.length, /Copado said no/.test(r2.statusError || ''), s.load().files[cls5('Three')].state], [1, true, 'uploaded']);
+      assert.strictEqual(api.promo.copado__Status__c, 'Merge Conflict');
+    } finally { rmTree(dir); }
+  });
+
+  ok('5.0 - undo puts back what it can: a file Copado refuses stays in the batch, and Undo again tries just that one', async () => {
+    const W = require('../src/promotionWork');
+    const api = copado5();
+    api.add('A1', 'US-0000001 ' + cls5('One'), block5('a();', 'b();'));
+    api.add('A2', 'US-0000001 ' + cls5('Two'), block5('a();', 'b();'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra 5 undo '));
+    try {
+      const s = W.store(dir);
+      await W.sync(api, s, { id: 'P5', name: 'P0005' }, { autoResolve: false });
+      const st = s.load();
+      await W.uploadAll(api, s, ['One', 'Two'].map(n => ({ rel: cls5(n), entry: st.files[cls5(n)], text: 'class X {\n  b();\n}\n' })), {});
+      api.fail.add('Attachment:A2');
+      const u1 = await W.undoBatch(api, s, W.lastBatch(s));
+      assert.deepStrictEqual([u1.restored.map(r => r.split('/').pop()), u1.failed.map(f => f.rel.split('/').pop())], [['One.cls'], ['Two.cls']]);
+      assert.deepStrictEqual([s.load().files[cls5('One')].state, s.load().files[cls5('Two')].state], ['resolved', 'uploaded'], 'each file says where it stands');
+      assert.ok(/^US-/.test(api.atts.A1.Name) && /^RESOLVED /.test(api.atts.A2.Name));
+      const left = W.lastBatch(s);
+      assert.ok(left && !left.undone, 'the batch is not undone while a file of it is still up');
+      api.fail.clear();
+      const u2 = await W.undoBatch(api, s, left);
+      assert.deepStrictEqual([u2.restored.map(r => r.split('/').pop()), u2.failed], [['Two.cls'], []], 'only the one left');
+      assert.ok(/^US-/.test(api.atts.A2.Name) && !W.lastBatch(s), 'now undone');
+    } finally { rmTree(dir); }
+  });
+
+  ok('5.0 - a save survives Windows holding the file for a moment: the rename is retried, then the content written in place', () => {
+    const H = require('../src/history');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cra 5 save '));
+    const real = fs.renameSync;
+    try {
+      let tries = 0;
+      fs.renameSync = () => { tries++; const e = new Error('EPERM: operation not permitted, rename'); e.code = 'EPERM'; throw e; };
+      const f = path.join(dir, 'x.json');
+      H.writeAtomic(f, '{"a":1}');
+      assert.deepStrictEqual([fs.readFileSync(f, 'utf8'), tries > 1, fs.readdirSync(dir)], ['{"a":1}', true, ['x.json']], 'written, no temporary file left');
+      fs.renameSync = () => { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; };
+      assert.throws(() => H.writeAtomic(f, 'x'), /ENOSPC/, 'other errors are not hidden');
+      assert.deepStrictEqual(fs.readdirSync(dir), ['x.json']);
+    } finally { fs.renameSync = real; rmTree(dir); }
+  });
+
+  ok('5.0 - what is missing, from more of Salesforce\u2019s messages: picklist values, record types, labels, custom permissions, metadata records, older classes', () => {
+    const B = require('../src/borrow');
+    const got = B.missingFrom([
+      { type: 'RecordType', fullName: 'Invoice__c.Export', problem: 'Picklist value: Export in picklist: Region__c not found' },
+      { type: 'Layout', fullName: 'Invoice__c-Main', problem: 'Invalid record type: Invoice__c.Export' },
+      { type: 'ApexPage', fullName: 'InvoicePdf', problem: '$Label.Invoice_Header does not exist' },
+      { type: 'LightningComponentBundle', fullName: 'invoiceCard', problem: 'Invalid reference c.Invoice_Title of type label in file invoiceCard.js' },
+      { type: 'PermissionSet', fullName: 'Ops', problem: 'Permission Approve_Refunds depends on custom permission(s): Refund_Admin' },
+      { type: 'ApexClass', fullName: 'TaxService', problem: 'Invalid type: Schema.Tax_Rate__mdt' },
+      { type: 'ApexClass', fullName: 'InvoiceController', problem: 'Method does not exist or incorrect signature: void total(Id) from the type InvoiceService' },
+      { type: 'ApexClass', fullName: 'Y', problem: 'Method does not exist or incorrect signature: void foo() from the type System' }]);
+    assert.deepStrictEqual(got.map(m => m.type + ' ' + m.name + (m.outdated ? ' (older)' : '')), ['CustomField Invoice__c.Region__c', 'RecordType Invoice__c.Export', 'CustomLabel Invoice_Header', 'CustomLabel Invoice_Title',
+      'CustomPermission Refund_Admin', 'CustomObject Tax_Rate__mdt', 'ApexClass InvoiceService (older)']);
+    // the errors grouped by what causes them; and the list to recommit, each once
+    const g = B.byCause([{ fullName: 'A', problem: 'Invalid type: TaxCalculator' }, { fullName: 'B', problem: 'Invalid type: TaxCalculator' }, { fullName: 'C', problem: 'Some other problem' }]);
+    assert.deepStrictEqual([g.causes.map(c => c.name + ' ' + c.failures.length), g.other.map(f => f.fullName)], [['TaxCalculator 2'], ['C']]);
+    assert.deepStrictEqual(B.recommitList([{ type: 'ApexClass', name: 'TaxCalculator' }], [{ type: 'ApexClass', name: 'taxcalculator', needs: [] }, { type: 'CustomField', name: 'A__c.B__c', needs: ['layout X'] }]).map(x => x.name + ': ' + x.why),
+      ['TaxCalculator: added to the pre-check from the source org', 'A__c.B__c: missing in the target']);
+  });
+
+  ok('5.0 - access changes in plain words: a conflict says what each version sets; a resolution granting less than the target is named before the upload', () => {
+    const UM = require('../src/unionMerge');
+    const fp = (f, e) => '<fieldPermissions><editable>' + e + '</editable><field>' + f + '</field><readable>true</readable></fieldPermissions>';
+    assert.strictEqual(UM.explainChange(fp('Account.Revenue__c', true), fp('Account.Revenue__c', false), 'PermissionSet'), 'Account.Revenue__c: Edit access true \u2192 false \u2013 the feature removes access');
+    assert.strictEqual(UM.explainChange(fp('Account.Revenue__c', false), fp('Account.Revenue__c', true), 'PermissionSet'), 'Account.Revenue__c: Edit access false \u2192 true \u2013 the feature grants more access');
+    assert.strictEqual(UM.explainChange('', fp('Account.New__c', true), 'PermissionSet'), 'Account.New__c: only the feature has it \u2013 Accept feature adds it');
+    assert.strictEqual(UM.explainChange('class A {}', 'class B {}', null), null, 'code is not explained as settings');
+    const ps = mid => '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">' + mid + '<label>S</label></PermissionSet>';
+    assert.deepStrictEqual(UM.accessLost(ps(fp('Account.A__c', true) + fp('Account.B__c', true)), ps(fp('Account.A__c', false) + fp('Account.B__c', true)), 'PermissionSet'), ['Account.A__c: Edit access true \u2192 false \u2013 removes access']);
+    assert.deepStrictEqual(UM.accessLost('<Layout/>', '<Layout/>', 'Layout'), []);
+    // the merge editor's rows carry the same words
+    const CM = require('../src/codeMerge');
+    const conflict = ps('\n<<<<<<< HEAD\n' + fp('Account.A__c', true) + '\n=======\n' + fp('Account.A__c', false) + '\n>>>>>>> f\n');
+    const g = CM.fromConflictFile(conflict);
+    assert.strictEqual(CM.marks({ text: g.text, conflicts: g.conflicts, language: null, typeName: 'PermissionSet' }).rows[0].about, 'Account.A__c: Edit access true \u2192 false \u2013 the feature removes access');
+  });
+
+  ok('5.0 - the page: the upload checklist says what is unfinished, what access goes, a stale pre-check, what to recommit; errors grouped by their cause', () => {
+    const page = runPage();
+    const now = new Date().toISOString();
+    const rel = 'force-app/main/default/permissionsets/Sales.permissionset-meta.xml', open = 'force-app/main/default/classes/B.cls';
+    const checks = { unresolved: [{ rel: open, why: '2 conflicts to choose' }], accessLost: [{ rel, lines: ['Account.A__c: Edit access true \u2192 false \u2013 removes access'], more: 0 }], copadoOnly: [], duplicates: [], held: [],
+      otherStories: [{ rel, story: 'US-0000002', others: ['US-0000001'] }], recommit: [{ type: 'ApexClass', name: 'TaxCalculator', why: 'missing in the target', needs: [] }], precheck: { state: 'passed', stale: true } };
+    const failures = [{ type: 'ApexClass', fullName: 'InvoiceService', problem: 'Invalid type: TaxCalculator', cause: { type: 'ApexClass', name: 'TaxCalculator' } },
+      { type: 'ApexClass', fullName: 'InvoiceBatch', problem: 'Invalid type: TaxCalculator', cause: { type: 'ApexClass', name: 'TaxCalculator' } }, { type: 'Flow', fullName: 'F', problem: 'Something else' }];
+    const cur = { promotion: { id: 'P1', name: 'P0001', status: 'Merge Conflict', from: 'dev', to: 'uat' },
+      state: { name: 'P0001', from: 'dev', to: 'uat', syncedAt: now, events: [], files: { [rel]: { state: 'resolved', kind: 'xml', story: 'US-0000002', otherStories: ['US-0000001'] },
+        [open]: { state: 'code', kind: 'code', conflicts: 2, changes: ['Account.A__c: Edit access true \u2192 false \u2013 the feature removes access'] } } },
+      plan: { ready: [{ rel, how: 'yours' }], held: [], last: false, revised: 0, checks }, canUndo: false, health: [], flagged: {}, info: null, jobs: null,
+      precheck: { id: 'r', at: now, finishedAt: now, state: 'failed', steps: {}, log: [], used: [{ rel, from: 'your resolution' }], leftOut: [], target: null, files: null, branches: ['promotion/P0001', 'feature/US-0000002'],
+        result: { success: false, failures, tests: [], coverage: [] }, missing: [{ type: 'ApexClass', name: 'TaxCalculator', needs: [] }] } };
+    page.state({ copadoOrg: 'copado', recent: [], current: cur, validation: null });
+    page.click({ a: 'uploadAsk' });
+    let t = page.text();
+    for (const w of ['Before you upload', 'ran before your latest changes', '1 file not resolved yet', 'B.cls (2 conflicts to choose)', 'grants less than uat has now', 'Account.A__c: Edit access true \u2192 false', 'in conflict for US-0000002 and US-0000001', '1 component still needed in uat', 'What goes up'])
+      assert.ok(t.includes(w), w + ' | ' + t.slice(0, 600));
+    page.click({ a: 'exportMissing' });
+    assert.strictEqual(page.posted.pop().name, 'exportMissing');
+    assert.ok(!/class="modal"/.test(page.html), 'leaving the checklist for the package.xml closes it');
+    page.click({ tab: 'Pre-check' });
+    t = page.text();
+    assert.ok(/Apex class TaxCalculator is missing in uat \u2013 2 errors/.test(t) && /Commit it to a story in this promotion/.test(t) && /To commit to a story \u2013 1 component/.test(t) && /Something else/.test(t), t);
+    assert.strictEqual((t.match(/Invalid type: TaxCalculator/g) || []).length, 2, 'each error once, under its cause');
+    assert.ok(/taken from the first that has it/.test(t), 'where a component on two branches comes from');
+    page.click({ a: 'copyMissing' });
+    assert.strictEqual(page.posted.pop().name, 'copyMissing');
+    // a file with choices left: each in plain words
+    page.click({ sel: open, go: 'Files' });
+    t = page.text();
+    assert.ok(/What you are choosing between/.test(t) && /Account\.A__c: Edit access true \u2192 false \u2013 the feature removes access/.test(t), t.slice(0, 800));
+    page.click({ sel: rel, go: 'Files' });
+    assert.ok(/Also in conflict for US-0000001/.test(page.text()));
+    page.click({ a: 'pageMenu' });
+    assert.ok(/Save review to share/.test(page.text()));
+  });
+
+  // 5.1 - shapes taken from a real org's layouts, flows, Lightning pages, picklists and labels, names made up
+  const NS51 = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
+  const conflict51 = (head, t, f, tail) => head + '<<<<<<< HEAD\n' + t + '=======\n' + f + '>>>>>>> origin/feature/US-0012345\n' + tail;
+
+  ok('C9 - 5.1: a metadata conflict says where it is - the element around git\u2019s block - and what each version sets, in Setup\u2019s words', () => {
+    const CM = require('../src/codeMerge');
+    const lay = conflict51('<Layout ' + NS51 + '>\n    <layoutSections>\n        <label>Case Information</label>\n        <layoutColumns>\n            <layoutItems>\n',
+      '                <behavior>Required</behavior>\n', '                <behavior>Readonly</behavior>\n', '                <field>Dispute_Amount__c</field>\n            </layoutItems>\n        </layoutColumns>\n    </layoutSections>\n</Layout>\n');
+    const c = CM.fromConflictFile(lay).conflicts[0];
+    assert.strictEqual(c.about, 'Section Case Information \u203a field Dispute_Amount__c: Behavior Required \u2192 Readonly');
+    assert.deepStrictEqual(c.sides, { target: 'Behavior Required', feature: 'Behavior Readonly' });
+    // a Lightning page property: its name is outside the block; the value's tag says nothing
+    const fx = conflict51('<FlexiPage ' + NS51 + '>\n    <flexiPageRegions>\n        <itemInstances>\n            <componentInstance>\n                <componentInstanceProperties>\n                    <name>hideChatterActions</name>\n',
+      '                    <value>true</value>\n', '                    <value>false</value>\n', '                </componentInstanceProperties>\n                <componentName>force:highlightsPanel</componentName>\n                <identifier>force_highlightsPanel</identifier>\n            </componentInstance>\n        </itemInstances>\n        <name>header</name>\n        <type>Region</type>\n    </flexiPageRegions>\n</FlexiPage>\n');
+    assert.strictEqual(CM.fromConflictFile(fx).conflicts[0].about, 'Component force_highlightsPanel \u203a property hideChatterActions: true \u2192 false');
+    // a flow's decision rule: named by the decision and the rule; entities decoded
+    const fl = conflict51('<Flow ' + NS51 + '>\n    <decisions>\n        <name>Check_Stage</name>\n        <rules>\n            <name>Closed_Won</name>\n            <conditions>\n                <rightValue>\n',
+      '                    <stringValue>Won &amp; Closed</stringValue>\n', '                    <stringValue>Won &amp; Renewed</stringValue>\n', '                </rightValue>\n            </conditions>\n        </rules>\n    </decisions>\n</Flow>\n');
+    assert.strictEqual(CM.fromConflictFile(fl).conflicts[0].about, 'Decision Check_Stage \u203a rule Closed_Won: Won & Closed \u2192 Won & Renewed');
+    // a long value: each version from where they differ, short - never the whole text twice
+    const long = 'Clears the routing tier and the current approver after the quote is reopened, then sets the approval status to Recalled';
+    const fd = conflict51('<Flow ' + NS51 + '>\n', '    <description>' + long + ' (fix A)</description>\n', '    <description>' + long + ' (fix B)</description>\n', '</Flow>\n');
+    const about = CM.fromConflictFile(fd).conflicts[0].about;
+    assert.ok(about.length < 120 && /fix A\) \u2192 .*fix B\)$/.test(about), about);
+    // lines inside a formula: the formula named, each version's first line
+    const vr = conflict51('<ValidationRule ' + NS51 + '>\n    <errorConditionFormula>AND(\nISBLANK(BillingCity),\n', 'NOT($Permission.Bypass)\n', 'NOT(ISPICKVAL(Type, &quot;Prospect&quot;))\n', ')</errorConditionFormula>\n</ValidationRule>\n');
+    assert.strictEqual(CM.fromConflictFile(vr).conflicts[0].about, 'Error condition formula: both stories changed it \u2013 NOT($Permission.Bypass) \u2192 NOT(ISPICKVAL(Type, "Prospect"))');
+    // code is never explained as settings
+    assert.strictEqual(CM.fromConflictFile('class A {\n<<<<<<< HEAD\n  Integer x = 1;\n=======\n  Integer x = 2;\n>>>>>>> f\n}\n').conflicts[0].about, undefined);
+  });
+
+  ok('B3.6 - 5.1: two stories each add their own entry at the same place - said so, and Accept both keeps the two, whole and valid', () => {
+    const CM = require('../src/codeMerge'), MP = require('../src/mergePanel'), X = require('../src/xmlParser');
+    const val = n => '                <fullName>' + n + '</fullName>\n                <default>false</default>\n                <label>' + n + '</label>\n';
+    // git lined up the two new values' wrapper tags: the block holds only their insides
+    const f = conflict51('<CustomField ' + NS51 + '>\n    <fullName>Status__c</fullName>\n    <valueSet>\n        <valueSetDefinition>\n            <value>\n' + val('Open') + '            </value>\n            <value>\n',
+      val('On Hold'), val('Escalated'), '            </value>\n        </valueSetDefinition>\n    </valueSet>\n</CustomField>\n');
+    const g = CM.fromConflictFile(f), c = g.conflicts[0];
+    assert.strictEqual(c.about, 'Both stories add here \u2013 the target adds value On Hold, the feature adds value Escalated. Accept both keeps the two');
+    const o = { git: true, codeView: 'threePanes', typeName: 'CustomField', target: '', incoming: '', code: { conflicts: g.conflicts, reviewed: new Map() } };
+    const row = MP.forPage(MP.marksFor(Object.assign({}, o, { codeView: 'onePane' }), g.text, 'order'), true, o).rows[0];
+    assert.deepStrictEqual(row.actions.map(a => a.choice), ['target', 'feature', 'both']);
+    // both: the two values whole - the file parses, each value once, in order
+    const L = g.text.split(/(?<=\n)/); L.splice(c.at, 0, c.both);
+    const out = L.join(''), d = X.parse(out);
+    assert.ok(d.root && !(d.errors || []).length, 'valid XML');
+    assert.deepStrictEqual((out.match(/<fullName>[^<]+<\/fullName>/g) || []).slice(1), ['<fullName>Open</fullName>', '<fullName>On Hold</fullName>', '<fullName>Escalated</fullName>']);
+    // chosen, it is known as both
+    assert.strictEqual(CM.marks({ text: out, conflicts: g.conflicts, typeName: 'CustomField' }).rows[0].chosen, 'both');
+    assert.ok(MP.versionsOf(o)[c.id].both === c.both, 'the page gets what both puts in');
+    // the same entry changed - not two entries: no both (B3.1)
+    const same = conflict51('<CustomField ' + NS51 + '>\n    <valueSet>\n        <valueSetDefinition>\n            <value>\n                <fullName>Open</fullName>\n', '                <label>Open</label>\n', '                <label>Opened</label>\n', '            </value>\n        </valueSetDefinition>\n    </valueSet>\n</CustomField>\n');
+    const gs = CM.fromConflictFile(same);
+    assert.strictEqual(gs.conflicts[0].both, undefined);
+    const os = { git: true, codeView: 'onePane', typeName: 'CustomField', target: '', incoming: '', code: { conflicts: gs.conflicts, reviewed: new Map() } };
+    assert.deepStrictEqual(MP.forPage(MP.marksFor(os, gs.text, 'order'), true, os).rows[0].actions.map(a => a.choice), ['target', 'feature']);
+    assert.strictEqual(gs.conflicts[0].about, 'Value Open: Label Open \u2192 Opened');
+  });
+
+  ok('B2.10 - 5.1: a label both stories changed, each its own way, is yours to choose - never the feature\u2019s silently; a change only one made is joined', async () => {
+    const U = require('../src/unionMerge'), W = require('../src/promotionWork'), CM = require('../src/codeMerge');
+    const lab = (n, v) => '    <labels>\n        <fullName>' + n + '</fullName>\n        <language>en_US</language>\n        <protected>false</protected>\n        <shortDescription>' + n + '</shortDescription>\n        <value>' + v + '</value>\n    </labels>\n';
+    const doc = mid => '<?xml version="1.0" encoding="UTF-8"?>\n<CustomLabels ' + NS51 + '>\n' + mid + '</CustomLabels>\n';
+    const f = doc(lab('Help_Email', 'help@example.com').replace(/        <value>[^\n]+\n    <\/labels>\n$/, '') + '<<<<<<< HEAD\n        <value>support@example.com</value>\n=======\n        <value>crm-help@example.com</value>\n>>>>>>> origin/feature/US-0012345\n    </labels>\n' + lab('Other', 'Other'));
+    const u = U.resolve(f, 'CustomLabels');
+    assert.deepStrictEqual([u.ok, u.narrowed, u.values], [true, 1, 1]);
+    for (const on of [false, true]) {
+      const r = await W.autoResolve('force-app/main/default/labels/CustomLabels.labels-meta.xml', f, on);
+      assert.deepStrictEqual([r.state, r.conflicts, r.suggestion], ['review', 1, false], 'never taken for you - auto ' + on);
+      assert.strictEqual(r.note, '1 label or translation with a different value in the target and the feature - choose one; the rest joined');
+      assert.deepStrictEqual(r.changes, ['Label Help_Email: Value support@example.com \u2192 crm-help@example.com']);
+    }
+    const g = CM.fromConflictFile(u.text);
+    assert.ok(g.conflicts.length === 1 && /support@/.test(g.conflicts[0].target) && /crm-help@/.test(g.conflicts[0].feature));
+    // with the common ancestor (diff3), a value only the feature changed is the feature's - nothing to choose
+    const d3 = doc('<<<<<<< HEAD\n' + lab('Help_Email', 'help@example.com') + '||||||| base\n' + lab('Help_Email', 'help@example.com') + '=======\n' + lab('Help_Email', 'crm-help@example.com') + lab('New_One', 'New') + '>>>>>>> f\n');
+    const j = U.resolve(d3, 'CustomLabels');
+    assert.ok(j.ok && j.narrowed === 0 && /crm-help@/.test(j.text) && /New_One/.test(j.text), 'one story\u2019s change: joined');
+    // a label only the feature adds: added, as before
+    const add = doc(lab('A', 'a') + '<<<<<<< HEAD\n=======\n' + lab('B', 'b') + '>>>>>>> f\n');
+    const a = U.resolve(add, 'CustomLabels');
+    assert.ok(a.ok && a.narrowed === 0 && /<fullName>B<\/fullName>/.test(a.text));
+    assert.strictEqual(W.RULES >= 5, true, 'results by older rules are worked out again');
+  });
+
+  ok('C10 - 5.1: a code conflict\u2019s row names what it is about - methods added, a module\u2019s constant, a tag\u2019s attribute - never a statement taken for a property', () => {
+    const CM = require('../src/codeMerge');
+    const label = (text, language) => { const g = CM.fromConflictFile(text); return CM.marks({ text: g.text, conflicts: g.conflicts, language }).rows.map(r => r.label); };
+    const cls = 'public class QuoteService {\n    public static void run() {\n    }\n<<<<<<< HEAD\n    public static Boolean isReady(Quote q) {\n        return q != null;\n    }\n=======\n    public static Integer count(List<Quote> qs) {\n        return qs == null ? 0 : qs.size();\n    }\n>>>>>>> f\n    public static void after() {\n    }\n}\n';
+    assert.deepStrictEqual(label(cls, 'apex'), ['methods isReady(), count()']);
+    const js = 'import { LightningElement } from "lwc";\nconst OPTIONS = [\n  { label: "First", value: "first" },\n<<<<<<< HEAD\n  { label: "Even", value: "even" }\n=======\n  { label: "Middle", value: "middle" }\n>>>>>>> f\n];\nexport default class Ramp extends LightningElement {\n  x = 1;\n}\n';
+    assert.deepStrictEqual(label(js, 'javascript'), ['constant OPTIONS']);
+    const html = '<template>\n    <lightning-input\n        type="date"\n<<<<<<< HEAD\n        label="Ramp start date"\n=======\n        label="Start"\n>>>>>>> f\n    ></lightning-input>\n</template>\n';
+    assert.deepStrictEqual(label(html, 'html'), ['<lightning-input> label']);
+  });
+  ok('C11 - 5.1.1: a block git started inside an element is slid to whole elements - each side of the file the same, byte for byte; a block both changed stays where it is', () => {
+    const CM = require('../src/codeMerge'), { tidy } = require('../src/blockShift'), { blocks } = require('../src/codeChecks');
+    const sidesOf = text => { const L = text.split(/(?<=\n)/), T = [], F = []; let i = 0; for (const b of blocks(text)) { T.push(...L.slice(i, b.b0), ...b.ours); F.push(...L.slice(i, b.b0), ...b.theirs); i = b.b1; } T.push(...L.slice(i)); F.push(...L.slice(i)); return [T.join(''), F.join('')]; };
+    const item = f => '            <layoutItems>\n                <behavior>Edit</behavior>\n                <field>' + f + '</field>\n            </layoutItems>\n';
+    // as Copado's file had it (Contact layout, P202852): the block opens inside mkto_si__Mkto_Lead_Score__c's item
+    const lay = '<Layout xmlns="http://soap.sforce.com/2006/04/metadata">\n    <layoutSections>\n        <label>Marketo</label>\n        <layoutColumns>\n' + item('Lead_Source_History__c') +
+      '            <layoutItems>\n                <behavior>Edit</behavior>\n<<<<<<< HEAD\n=======\n                <field>NWL_Person_Source__c</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n                <field>NWL_Person_Status__c</field>\n            </layoutItems>\n            <layoutItems>\n                <behavior>Edit</behavior>\n>>>>>>> feature/US-0236997\n                <field>mkto_si__Mkto_Lead_Score__c</field>\n            </layoutItems>\n        </layoutColumns>\n    </layoutSections>\n</Layout>\n';
+    const t = tidy(lay);
+    assert.deepStrictEqual(sidesOf(t), sidesOf(lay), 'both sides exactly as they were');
+    assert.strictEqual(blocks(t)[0].theirs.join(''), item('NWL_Person_Source__c') + item('NWL_Person_Status__c'));
+    const g = CM.fromConflictFile(lay), c = g.conflicts[0];
+    assert.strictEqual(c.about, 'Section Marketo: only the feature has fields NWL_Person_Source__c, NWL_Person_Status__c \u2013 Accept feature adds it');
+    const r = CM.marks({ text: g.text, conflicts: g.conflicts, language: null, typeName: 'Layout' }).rows[0];
+    // accepted, the file is the feature's - the existing item whole after the two new ones
+    const L = g.text.split(/(?<=\n)/), f = r.actions.find(a => a.choice === 'feature').op;
+    L.splice(f.b0, f.b1 - f.b0, ...f.insert.split(/(?<=\n)/));
+    assert.strictEqual(L.join(''), sidesOf(lay)[1]);
+    // code: a method added after another - git's block opens at the brace closing the one before
+    const cls = 'public class A {\n    void a() {\n        x();\n    }\n<<<<<<< HEAD\n=======\n    void b() {\n        y();\n    }\n>>>>>>> f\n}\n';
+    const odd = 'public class A {\n    void a() {\n        x();\n<<<<<<< HEAD\n=======\n    }\n    void b() {\n        y();\n>>>>>>> f\n    }\n}\n';
+    assert.strictEqual(tidy(odd), cls);
+    assert.strictEqual(tidy(cls), cls, 'already whole: left as it is');
+    // both changed, or the common ancestor had lines: where git put it
+    const both = '<L>\n    <a>\n<<<<<<< HEAD\n        <b>1</b>\n=======\n        <b>2</b>\n>>>>>>> f\n    </a>\n</L>\n';
+    assert.strictEqual(tidy(both), both);
+    const base = '<L>\n    <a>\n        <x>1</x>\n<<<<<<< HEAD\n||||||| base\n        <y>0</y>\n    </a>\n    <a>\n=======\n>>>>>>> f\n        <x>2</x>\n    </a>\n</L>\n';
+    assert.strictEqual(tidy(base), base);
   });
 };
 

@@ -11,7 +11,7 @@ const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 // files earlier versions had and this one does not (scripts/removed.txt): left over in a clone, not this version's code
 const removed = new Set(fs.readFileSync(path.join(root, 'scripts', 'removed.txt'), 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#')));
 const leftovers = [...removed].filter(f => fs.existsSync(path.join(root, f)));
-const files = ['extension.js', 'release.js', 'promotionUi.js', 'lifecycleUi.js', 'releasePage.js', 'manualUi.js', 'compareUi.js', 'media/page.js', 'media/merge.js']
+const files = ['extension.js', 'release.js', 'promotionUi.js', 'releasePage.js', 'manualUi.js', 'compareUi.js', 'media/page.js', 'media/merge.js']
   .concat(fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith('.js')).map(f => 'src/' + f)).filter(f => fs.existsSync(path.join(root, f)) && !removed.has(f));
 const all = files.map(f => [f, read(f)]);
 // the controls: a function nothing calls; one only exported; a module nothing requires

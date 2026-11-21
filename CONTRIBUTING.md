@@ -53,11 +53,10 @@ The package is the files git tracks, less what `.vscodeignore` leaves out - comm
 
 ```
 extension.js     entry point: diagnostics, formatting, merge sessions in the merge editor
-release.js       package.xml, branch conflicts, validation, user stories
+release.js       package.xml, branch conflicts, validation
 promotionUi.js   promotions on the Release Assistant page
-releasePage.js   the Release Assistant page - Promotions, Stories, Manual, Compare      media/page.js   its script
+releasePage.js   the Release Assistant page - Promotions, Manual, Compare               media/page.js   its script
 manualUi.js      the page's Manual tab: two versions compared side by side, a package from a commit file
-lifecycleUi.js   the page's Stories: a story's journey, validate, package
 compareUi.js     the page's Compare: two branches of the connected repository (src/compareBranches: by type, in a few words)
 media/merge.*    the merge editor's page            media/monaco/   Monaco Editor (MIT)
 src/             the engine - no VS Code dependency, fully unit-tested: codeMerge (Copado's conflict file - its
@@ -65,8 +64,20 @@ src/             the engine - no VS Code dependency, fully unit-tested: codeMerg
                  added), mergePanel (the panel - one, two or three panes), merge and mergeAlign (metadata by element -
                  Branch conflicts, the union types' marks), codeChecks, mergeDuplicates, xmlCompare, mergeStart,
                  registry and keys (what identifies each metadata element), repoHost (the repository: branches, files,
-                 changed files), borrow (what a pre-check lacks, from the source org), retention (old working files),
+                 changed files), borrow (what a pre-check lacks, from the source org), flowPositions (a flow's canvas-only
+                 conflicts), anonymise (the corpus, diagnostics), retention (old working files),
                  the Copado side (copadoClient, promotion, promotionWork), guard (the team policy), ...
-scripts/         packaging and checks - plain Node
+scripts/         packaging and checks - plain Node; corpus.js adds anonymised conflict files to test/corpus/
 test/            smoke.js and smoke3.js, browser.js, integration/, fixtures/
 ```
+
+## Real-shaped test cases
+
+The engine is checked on every release against `test/corpus/` - the shapes of real conflict files, with every name replaced. To add one from a promotion that went wrong: `npm run corpus -- add path/to/conflict-file`. It keeps each line, the conflict markers where they are, element names and the language's own words, and replaces every other name the same way everywhere, long numbers and the branch name too; the file's own name is not kept. **Review what it wrote before committing it.**
+
+In the merge editor, **⋯ › Save diagnostics…** saves what a merge is - versions, layout, counts - with Copado's conflict file and your resolution anonymised the same way, in `.copado/diagnostics/`, and opens it for you to review before sharing.
+
+## Leftover files
+
+Copying a new version over a clone never deletes the files it no longer has. `npm run tidy` removes them (they are listed in `scripts/removed.txt`); CI runs `npm run tidy -- --check` and fails while any are there.
+

@@ -66,7 +66,7 @@ async function promotionConflicts(api, input) {
   }
   const out = [];
   for (const p of promotions) {
-    const atts = await api.query("SELECT Id, Name, BodyLength, CreatedDate, LastModifiedDate FROM Attachment WHERE ParentId = '" + String(p.Id).replace(/[^A-Za-z0-9]/g, '') + "' ORDER BY CreatedDate DESC LIMIT 500");
+    const atts = await api.query("SELECT Id, Name, BodyLength, CreatedDate, LastModifiedDate FROM Attachment WHERE ParentId = '" + String(p.Id).replace(/[^A-Za-z0-9]/g, '') + "' ORDER BY CreatedDate DESC");
     const conflicts = new Map(), resolved = new Map();
     for (const a of atts) {
       const n = parseConflictName(a.Name);
@@ -120,7 +120,7 @@ async function restoreAttachment(api, record) {
 
 /** Conflict files on the promotion that are not resolved yet. */
 async function unresolvedCount(api, promotionId) {
-  const atts = await api.query("SELECT Id, Name FROM Attachment WHERE ParentId = '" + clean(promotionId) + "' LIMIT 500");
+  const atts = await api.query("SELECT Id, Name FROM Attachment WHERE ParentId = '" + clean(promotionId) + "'");
   return atts.filter(a => { const n = parseConflictName(a.Name); return n && !n.resolved; }).length;
 }
 
